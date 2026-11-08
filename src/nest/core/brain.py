@@ -398,7 +398,8 @@ class Brain:
         try:
             messages = welcome.prompt(self._persona(bot, channel), bot.name, event.name)
             completion, call_id, _ = await self._complete(bot, messages, max_tokens=welcome.MAX_TOKENS)
-            said = welcome.line(completion.text)
+            # Cut off by the output limit, the line stops mid-sentence ("……来了就"): the plain one is better.
+            said = "" if completion.cut else welcome.line(completion.text)
             draft = replace(draft, llm_call_id=call_id)
         except (ProviderUnavailable, ProviderError) as exc:
             log.info("%s 写欢迎词失败（%s），用默认的一句", bot.name, exc)

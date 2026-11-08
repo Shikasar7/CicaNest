@@ -120,6 +120,7 @@ class Anthropic:
             latency_ms=(time.monotonic() - started) * 1000,
             prompt_tokens=sum(n for n in prompt if isinstance(n, int)) if prompt[0] is not None else None,
             completion_tokens=usage.get("output_tokens"),
+            cut=data.get("stop_reason") == "max_tokens",
         )
 
     async def aclose(self) -> None:

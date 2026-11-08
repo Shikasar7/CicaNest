@@ -72,6 +72,7 @@ class OpenAIChat:
         try:
             data = response.json()
             text = _content(data["choices"][0]["message"])
+            cut = data["choices"][0].get("finish_reason") == "length"
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ProviderError("模型返回的格式看不懂", retryable=False) from exc
         usage = data.get("usage") or {}
@@ -80,6 +81,7 @@ class OpenAIChat:
             latency_ms=(time.monotonic() - started) * 1000,
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
+            cut=cut,
         )
 
     async def aclose(self) -> None:

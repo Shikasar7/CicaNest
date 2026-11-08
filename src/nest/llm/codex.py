@@ -44,9 +44,10 @@ def _refresh_lock(auth_file: Path) -> asyncio.Lock:
     return _REFRESH_LOCKS.setdefault(auth_file.resolve(), asyncio.Lock())
 
 
-def parse_sse(raw: str) -> tuple[str, dict[str, Any]]:
-    """(text, usage) from a Codex event stream: the completed response if present, else the deltas."""
-    completed, deltas, usage = None, [], {}
+def parse_sse(raw: str) -> tuple[str, dict[str, Any], bool]:
+    """(text, usage, cut) from a Codex event stream: the finished response if present, else the deltas.
+    `cut`: the response ended incomplete (the output limit ran out), so the text stops mid-sentence."""
+    completed, deltas, usage, cut = None, [], {}, False
     for line in raw.splitlines():
         if not line.startswith("data:"):
             continue
@@ -59,11 +60,12 @@ def parse_sse(raw: str) -> tuple[str, dict[str, Any]]:
             continue
         if event.get("type") == "response.output_text.delta":
             deltas.append(str(event.get("delta") or ""))
-        elif event.get("type") == "response.completed":
+        elif event.get("type") in ("response.completed", "response.incomplete"):
             response = event.get("response") or {}
             completed = output_text(response)
             usage = response.get("usage") or {}
-    return (completed if completed else "".join(deltas)), usage
+            cut = event["type"] == "response.incomplete"
+    return (completed if completed else "".join(deltas)), usage, cut
 
 
 def parse_search(raw: str) -> tuple[int, tuple[tuple[str, str], ...]]:
@@ -234,7 +236,7 @@ class Codex:
         seconds = SEARCH_TIMEOUT if search else None
         started = time.monotonic()
         response = await self._post(body, seconds)
-        text, usage = parse_sse(response.text)
+        text, usage, cut = parse_sse(response.text)
         searches, sources = parse_search(response.text) if search else (0, ())
         return Completion(
             text=text,
@@ -243,6 +245,7 @@ class Codex:
             completion_tokens=usage.get("output_tokens"),
             searches=searches,
             sources=sources,
+            cut=cut,
         )
 
     async def draw(self, prompt: str, images: Sequence[str] = ()) -> bytes:

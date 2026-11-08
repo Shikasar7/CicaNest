@@ -106,6 +106,7 @@ class OpenAIResponses:
             latency_ms=(time.monotonic() - started) * 1000,
             prompt_tokens=usage.get("input_tokens"),
             completion_tokens=usage.get("output_tokens"),
+            cut=data.get("status") == "incomplete",
         )
 
     async def aclose(self) -> None:

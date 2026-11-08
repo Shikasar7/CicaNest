@@ -36,6 +36,9 @@ class Completion:
     # answer cites as (title, url).
     searches: int = 0
     sources: tuple[tuple[str, str], ...] = ()
+    # The model hit the output limit and stopped mid-sentence (a thinking model can spend most of a small
+    # limit thinking): the text is only the start of what it meant to say.
+    cut: bool = False
 
 
 class ProviderError(Exception):

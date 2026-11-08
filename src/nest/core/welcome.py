@@ -15,7 +15,7 @@ STALE = 300.0  # a join older than this when it arrives (a replay after reconnec
 ONCE = 600.0  # the same person joining the same group again within this long is welcomed once
 MAX_PER_WINDOW = 3  # a group welcomes at most this many people per ONCE (a wave of joins: the first few)
 MAX_CHARS = 40
-MAX_TOKENS = 120
+MAX_TOKENS = 600  # a thinking model thinks first, inside this limit; one short line still fits after
 
 # The welcome calls the person by their name, or 新朋友 when it is not known; never 新人.
 ASK = (

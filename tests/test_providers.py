@@ -59,6 +59,26 @@ async def test_openai_chat_request_and_parse() -> None:
     assert result.text == "在的" and result.prompt_tokens == 12 and result.completion_tokens == 2
 
 
+async def test_a_reply_cut_off_by_the_output_limit_says_so() -> None:
+    def chat(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "来了就"}, "finish_reason": "length"}]}
+        )
+
+    def claude(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"content": [{"type": "text", "text": "来了就"}], "stop_reason": "max_tokens"}
+        )
+
+    cut = await OpenAIChat(name="x", base_url="http://x", model="m", transport=mock(chat)).complete(
+        PROMPT, max_tokens=10
+    )
+    also = await Anthropic(name="c", base_url="http://x", model="m", transport=mock(claude)).complete(
+        PROMPT, max_tokens=10
+    )
+    assert cut.cut and also.cut and cut.text == also.text == "来了就"
+
+
 @pytest.mark.parametrize(("status", "retryable"), [(502, True), (429, True), (401, False), (400, False)])
 async def test_errors_are_mapped_and_never_leak_the_key(status: int, retryable: bool) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -119,12 +139,17 @@ def test_codex_sse_prefers_completed_response_and_falls_back_to_deltas() -> None
         'data: {"type":"response.completed","response":{"output_text":"完整","usage":{"input_tokens":5}}}\n'
         "data: [DONE]\n"
     )
-    assert parse_sse(completed) == ("完整", {"input_tokens": 5})
+    assert parse_sse(completed) == ("完整", {"input_tokens": 5}, False)
     deltas = (
         'data: {"type":"response.output_text.delta","delta":"你"}\n'
         'data: {"type":"response.output_text.delta","delta":"好"}\n'
     )
-    assert parse_sse(deltas) == ("你好", {})
+    assert parse_sse(deltas) == ("你好", {}, False)
+    incomplete = (
+        'data: {"type":"response.output_text.delta","delta":"来了"}\n'
+        'data: {"type":"response.incomplete","response":{"status":"incomplete","output":[]}}\n'
+    )
+    assert parse_sse(incomplete) == ("来了", {}, True)
 
 
 async def test_codex_refreshes_an_expired_token_and_writes_it_back(tmp_path: Path) -> None:

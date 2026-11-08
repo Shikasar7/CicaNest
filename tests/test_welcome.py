@@ -15,7 +15,7 @@ from nest.adapters.onebot11.normalize import normalize
 from nest.core import welcome
 from nest.core.events import JOINED, ChannelRef, MemberJoined
 from nest.core.speech import KEY_REFS, SpeechKeeper
-from nest.llm.base import ProviderError
+from nest.llm.base import Completion, ProviderError
 from nest.secrets import SecretStore
 from nest.storage.slang import GroupFeatureStore
 from tests.test_bot_settings_api import World as ApiWorld
@@ -87,6 +87,13 @@ async def test_someone_without_a_known_name_is_a_new_friend_never_a_newcomer(kit
     assert decision["reply"] == "欢迎新朋友！"
     [(_, ask)] = kit.w.providers["10001"].requests
     assert "一位新朋友" in ask.content and "称呼ta“新朋友”" in ask.content
+
+
+async def test_a_line_cut_off_by_the_output_limit_is_not_said_half(kit: Kit) -> None:
+    kit.w.providers["10001"].queue(Completion(text="阿星，来了就", latency_ms=1.0, cut=True))
+    await kit.join(name="阿星")
+    [decision] = await kit.welcomes(1)
+    assert decision["reply"] == "欢迎阿星！" and "默认的一句" in decision["reason"]
 
 
 async def test_without_a_voice_the_welcome_is_text(kit: Kit) -> None:
