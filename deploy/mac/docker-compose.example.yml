@@ -1,0 +1,59 @@
+# QQ for nest on a Mac (or any Docker host): one NapCat container per bot account (headless Linux QQ with
+# OneBot 11); nest itself runs natively (uv) next to them. See README.md in this folder.
+#
+#   cp docker-compose.example.yml docker-compose.yml     # docker-compose.yml is git-ignored: it is yours
+#   echo 'NAPCAT_WEBUI_TOKEN=<a long password>' >> .env  # this folder's .env, also git-ignored
+#   docker compose up -d
+#
+# Accounts added later on the console's Bot page need no entry here: nest creates their containers itself.
+#
+# Data lives outside the code checkout, in NEST_QQ_DIR (default ../../../qq, relative to this folder): QQ
+# logins and caches must never be swept up by git, and a fresh checkout must not lose them.
+#
+#   qq/napcat/<bot>/qq       the account's QQ profile (login, message databases, pictures)
+#   qq/napcat/<bot>/config   NapCat's settings: onebot11.json (the OneBot servers and their token), webui.json
+#
+# Every port is published on 127.0.0.1 only: nest reaches them on this machine, nothing else on the network
+# can. To scan a login QR code from another device use the console's 系统 page, or an SSH tunnel to the
+# account's NapCat page; never publish it to the network.
+#
+# Inside each container the ports are the same (OneBot HTTP 3040, WebSocket 3041, WebUI 6099, listening on
+# 0.0.0.0 inside, set in config/onebot11.json and webui.json); only the published ones differ.
+#
+# QQ treats a new MAC address or host name as a new device and wants the QR code scanned again. Docker gives
+# a container a random MAC on every start and a new host name on every re-create, so each container pins
+# both. Pick them once (any locally administered MAC, 02:xx:xx:xx:xx:xx) and never change them after the
+# first scan.
+
+x-napcat: &napcat
+  image: mlikiowa/napcat-docker:latest
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+# ACCOUNT, the account's QQ number, lets NapCat log back in with the saved login after a restart; without it
+# every restart asks for a new QR scan. NAPCAT_QUICK_PASSWORD_MD5 is its 回退密码 (the MD5 of its QQ
+# password), used when the saved login stops working: nest writes NAPCAT_PASSWORD_MD5_<QQ number> into .env
+# and recreates the service (系统 page, 「回退密码」); empty means none.
+x-napcat-env: &napcat-env
+  WEBUI_TOKEN: ${NAPCAT_WEBUI_TOKEN:?put NAPCAT_WEBUI_TOKEN=<a long password> in deploy/mac/.env}
+  NAPCAT_UID: ${NAPCAT_UID:-501}
+  NAPCAT_GID: ${NAPCAT_GID:-20}
+  TZ: ${TZ:-Asia/Shanghai} # same as the host, so log times match nest's
+
+services:
+  napcat-example: # one service per bot account: copy this block, change the name, number, ports and folders
+    <<: *napcat
+    container_name: napcat-example
+    hostname: napcat-example
+    mac_address: "02:42:ac:11:00:10"
+    environment: { <<: *napcat-env, ACCOUNT: "123456789", NAPCAT_QUICK_PASSWORD_MD5: "${NAPCAT_PASSWORD_MD5_123456789:-}" }
+    ports:
+      - "127.0.0.1:6099:6099" # WebUI: the login QR code and settings
+      - "127.0.0.1:3040:3040" # OneBot HTTP
+      - "127.0.0.1:3041:3041" # OneBot WebSocket
+    volumes:
+      - ${NEST_QQ_DIR:-../../../qq}/napcat/example/qq:/app/.config/QQ
+      - ${NEST_QQ_DIR:-../../../qq}/napcat/example/config:/app/napcat/config
+      - ${NEST_QQ_DIR:-../../../qq}/napcat/example/plugins:/app/napcat/plugins

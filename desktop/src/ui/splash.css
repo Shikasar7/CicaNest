@@ -1,0 +1,535 @@
+/* Splash: one card, a header with the mark and the bots, the steps, and a footer for messages. */
+
+body {
+  display: grid;
+  place-items: center;
+}
+
+.card {
+  position: relative;
+  width: calc(100vw - 56px);
+  height: calc(100vh - 56px);
+  display: flex;
+  flex-direction: column;
+  padding: 26px 28px 24px;
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow:
+    inset 0 0 0 1px var(--edge),
+    var(--shadow);
+  -webkit-app-region: drag;
+  opacity: 0;
+  transform: translateY(10px) scale(0.985);
+}
+
+.card.is-in {
+  animation: card-in 380ms var(--ease-out) forwards;
+}
+
+.card.is-out {
+  animation: card-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes card-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+}
+
+/* ---- header ------------------------------------------------------------------------------ */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+
+.mark rect {
+  stroke: transparent;
+  stroke-width: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mark rect {
+    stroke: rgba(231, 235, 238, 0.1);
+  }
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wordmark {
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  line-height: 20px;
+}
+
+.subtitle {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The bots: dim rings until their account connects, then a filled disc with a short soft pop. */
+.glyphs {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.glyph {
+  --tint: color-mix(in srgb, var(--hue) 9%, transparent);
+  --rim: color-mix(in srgb, var(--hue) 30%, transparent);
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-family: 'KaiTi', 'STKaiti', serif;
+  font-size: 16px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--hue) 62%, var(--bg));
+  background: var(--tint);
+  box-shadow: inset 0 0 0 1px var(--rim);
+  transition:
+    background-color 320ms ease,
+    color 320ms ease,
+    box-shadow 320ms ease,
+    opacity 320ms ease;
+}
+
+.is-in .glyph {
+  animation: glyph-appear 420ms var(--ease-out) both;
+  animation-delay: calc(140ms + var(--i, 0) * 60ms);
+}
+
+.glyph > span {
+  transform: translateY(0.5px);
+}
+
+.is-in .glyphs.is-waiting .glyph:not(.is-on) {
+  animation:
+    glyph-appear 420ms var(--ease-out) both,
+    breathe 1.9s ease-in-out infinite;
+  animation-delay:
+    calc(140ms + var(--i, 0) * 60ms),
+    calc(var(--i, 0) * 220ms);
+}
+
+.glyph.is-on {
+  color: #fff;
+  background: var(--hue);
+  box-shadow:
+    inset 0 0 0 1px transparent,
+    0 3px 10px -3px color-mix(in srgb, var(--hue) 70%, transparent);
+}
+
+.is-in .glyph.is-on {
+  animation: glyph-on 520ms var(--ease-spring) both;
+}
+
+.glyph.is-on::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: glyph-ring 760ms ease-out both;
+}
+
+.is-in .glyph.is-gone {
+  animation: glyph-gone 220ms ease both;
+}
+
+@keyframes glyph-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes glyph-on {
+  0% {
+    transform: scale(0.82);
+  }
+  55% {
+    transform: scale(1.07);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes glyph-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--hue) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 9px color-mix(in srgb, var(--hue) 0%, transparent);
+  }
+}
+
+@keyframes glyph-gone {
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+/* ---- steps ------------------------------------------------------------------------------- */
+
+.steps {
+  list-style: none;
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  height: 28px;
+  color: var(--faint);
+  transition: color 240ms ease;
+}
+
+.is-in .step {
+  animation: rise 420ms var(--ease-out) both;
+  animation-delay: calc(90ms + var(--i, 0) * 50ms);
+}
+
+.step.is-running,
+.step.is-done,
+.step.is-warn,
+.step.is-failed {
+  color: var(--text);
+}
+
+.step.is-skipped {
+  color: var(--muted);
+}
+
+.label {
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.step.is-warn .detail {
+  color: var(--warn-text);
+}
+
+.step.is-failed .detail {
+  color: var(--bad-text);
+}
+
+.detail.is-fresh {
+  animation: fade-in 260ms ease both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The status dot: a ring (waiting), a pulsing dot (running), then a badge (done, warn, failed). */
+.dot {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+}
+
+.dot::before,
+.dot::after {
+  content: '';
+  grid-area: 1 / 1;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  transition:
+    transform 220ms var(--ease-out),
+    opacity 180ms ease,
+    background-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.dot::before {
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+}
+
+.dot::after {
+  opacity: 0;
+}
+
+.is-running .dot::before {
+  background: var(--text);
+  box-shadow: none;
+}
+
+.is-running .dot::after {
+  background: var(--text);
+  animation: halo 1.5s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+}
+
+@keyframes halo {
+  from {
+    opacity: 0.32;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.7);
+  }
+}
+
+.is-skipped .dot::before {
+  width: 8px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--faint);
+  box-shadow: none;
+}
+
+.is-done .dot::before,
+.is-warn .dot::before,
+.is-failed .dot::before {
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+.badge {
+  grid-area: 1 / 1;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.4);
+  transition:
+    transform 300ms var(--ease-spring),
+    opacity 160ms ease;
+}
+
+.badge svg {
+  width: 10px;
+  height: 10px;
+  overflow: visible;
+}
+
+.badge path {
+  fill: none;
+  stroke: var(--bg);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.badge.ok {
+  background: var(--text);
+}
+
+.badge.ok path {
+  stroke-dasharray: 12;
+  stroke-dashoffset: 12;
+  transition: stroke-dashoffset 260ms ease-out 110ms;
+}
+
+.badge.warn {
+  background: var(--warn);
+}
+
+.badge.bad {
+  background: var(--bad);
+}
+
+.badge.warn path,
+.badge.bad path {
+  stroke: #fff;
+}
+
+.is-done .badge.ok,
+.is-warn .badge.warn,
+.is-failed .badge.bad {
+  opacity: 1;
+  transform: none;
+}
+
+.is-done .badge.ok path {
+  stroke-dashoffset: 0;
+}
+
+/* ---- footer ------------------------------------------------------------------------------ */
+
+.foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.message {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  user-select: text;
+  -webkit-app-region: no-drag;
+  cursor: text;
+}
+
+.message:empty {
+  display: none;
+}
+
+.message.tone-warn {
+  color: var(--warn-text);
+}
+
+.message.tone-error {
+  color: var(--bad-text);
+}
+
+.message.is-fresh {
+  animation: rise 320ms var(--ease-out) both;
+}
+
+.link {
+  -webkit-app-region: no-drag;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: text-decoration-color 150ms ease;
+}
+
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+.link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text) 45%, transparent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.footnote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.tag {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  color: var(--warn-text);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
+.tag[hidden] {
+  display: none;
+}
+
+.actions {
+  margin-left: auto;
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.actions .btn {
+  animation: rise 300ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}

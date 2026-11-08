@@ -1,0 +1,57 @@
+[project]
+name = "nest"
+version = "0.5.0"
+description = "Self-hosted multi-platform AI bot runtime (QQ first)."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Shikasar7", email = "34180672+Shikasar7@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.162.0",
+    "feedparser>=6.0.14",
+    "httpx>=0.28.1",
+    "pillow>=13.0.0",
+    "psutil>=7.2.2",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.1",
+    "python-dotenv>=1.2.4",
+    "selectolax>=1.0.2",
+    "uvicorn[standard]>=0.54.0",
+    "websockets>=17.3",
+]
+
+[project.scripts]
+nest = "nest.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+# Chinese UI strings legitimately contain full-width punctuation.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Eval scripts hold long Chinese prompts and report lines.

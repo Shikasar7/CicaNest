@@ -1,0 +1,277 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+        'Noto Sans SC', sans-serif;
+    /* The bots' marks: one brush-style character each (鲸 / 马 / 龙). */
+    --font-glyph: 'KaiTi', 'STKaiti', 'Kaiti SC', 'Noto Serif SC', serif;
+    --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+    --color-ok: var(--ok);
+    --color-warn: var(--warn);
+    --color-surface: var(--surface);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Cool, quiet chrome; the colour in the interface belongs to the bots. */
+:root {
+    --background: #f2f4f5;
+    --surface: #f8f9fa;
+    --foreground: #17202a;
+    --card: #ffffff;
+    --card-foreground: #17202a;
+    --popover: #ffffff;
+    --popover-foreground: #17202a;
+    --primary: #17202a;
+    --primary-foreground: #f7f9fa;
+    --secondary: #e9edef;
+    --secondary-foreground: #17202a;
+    --muted: #eceff1;
+    --muted-foreground: #5e6b76;
+    --accent: #e6eaed;
+    --accent-foreground: #17202a;
+    --destructive: #d43f32;
+    --ok: #23935f;
+    --warn: #c98a12;
+    --border: #e1e6ea;
+    --input: #d3dae0;
+    --ring: #8ea2b2;
+    --bot-whale: #2f7fd0;
+    --bot-pony: #e2557f;
+    --bot-dragon: #1e9c82;
+    --bot-4: #8a63d2;
+    --bot-5: #d9822b;
+    --bot-6: #4e7fa6;
+    --chart-1: var(--bot-whale);
+    --chart-2: var(--bot-pony);
+    --chart-3: var(--bot-dragon);
+    --chart-4: var(--bot-4);
+    --chart-5: var(--bot-5);
+    --radius: 0.625rem;
+    --shadow-lift: 0 1px 2px rgb(23 32 42 / 0.05), 0 12px 32px -18px rgb(23 32 42 / 0.22);
+    --sidebar: #eceff1;
+    --sidebar-foreground: #17202a;
+    --sidebar-primary: #17202a;
+    --sidebar-primary-foreground: #f7f9fa;
+    --sidebar-accent: #ffffff;
+    --sidebar-accent-foreground: #17202a;
+    --sidebar-border: #e1e6ea;
+    --sidebar-ring: #8ea2b2;
+}
+
+.dark {
+    --background: #121619;
+    --surface: #161b1f;
+    --foreground: #e8edf1;
+    --card: #1a2025;
+    --card-foreground: #e8edf1;
+    --popover: #1e252b;
+    --popover-foreground: #e8edf1;
+    --primary: #e8edf1;
+    --primary-foreground: #121619;
+    --secondary: #242c33;
+    --secondary-foreground: #e8edf1;
+    --muted: #20272d;
+    --muted-foreground: #93a1ad;
+    --accent: #262f36;
+    --accent-foreground: #e8edf1;
+    --destructive: #f0675a;
+    --ok: #46c489;
+    --warn: #e8b04a;
+    --border: #262e35;
+    --input: #323c45;
+    --ring: #5b7083;
+    --bot-whale: #6aaef2;
+    --bot-pony: #f27fa0;
+    --bot-dragon: #4cc7a8;
+    --bot-4: #ad8cf0;
+    --bot-5: #eba35c;
+    --bot-6: #7ba7c9;
+    --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 36px -20px rgb(0 0 0 / 0.65);
+    --sidebar: #161b1f;
+    --sidebar-foreground: #e8edf1;
+    --sidebar-primary: #e8edf1;
+    --sidebar-primary-foreground: #121619;
+    --sidebar-accent: #222a30;
+    --sidebar-accent-foreground: #e8edf1;
+    --sidebar-border: #262e35;
+    --sidebar-ring: #5b7083;
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    html {
+        @apply font-sans;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+    }
+    body {
+        @apply bg-background text-foreground;
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    ::selection {
+        background: color-mix(in oklch, var(--bot-whale) 28%, transparent);
+    }
+    /* Thin scrollbars that only show their thumb. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+    }
+    :focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+    }
+}
+
+/* -- desktop app (Electron, Mica behind the window) ----------------------------------------------- */
+
+html[data-desktop],
+html[data-desktop] body {
+    background: transparent;
+}
+html[data-desktop] {
+    --sidebar: color-mix(in srgb, #eceff1 55%, transparent);
+    --surface: color-mix(in srgb, #f8f9fa 82%, transparent);
+}
+html[data-desktop].dark {
+    --sidebar: color-mix(in srgb, #121619 45%, transparent);
+    --surface: color-mix(in srgb, #161b1f 80%, transparent);
+}
+.drag-region {
+    -webkit-app-region: drag;
+    app-region: drag;
+}
+.drag-region :is(a, button, input, select, textarea, [role='button'], .no-drag) {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+}
+
+/* -- motion --------------------------------------------------------------------------------------- */
+
+@keyframes page-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+}
+.page-enter {
+    animation: page-in 280ms var(--ease-out-soft) both;
+}
+
+/* A new line in a feed: opens its own space, then fades in. */
+@keyframes feed-in {
+    from {
+        opacity: 0;
+        grid-template-rows: 0fr;
+        transform: translateY(-4px);
+    }
+}
+.feed-in {
+    display: grid;
+    grid-template-rows: 1fr;
+    animation: feed-in 420ms var(--ease-out-soft) both;
+}
+.feed-in > * {
+    min-height: 0;
+}
+
+/* An online bot breathes: a slow halo in its own colour. */
+@keyframes breathe {
+    0%,
+    100% {
+        opacity: 0.55;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0;
+        transform: scale(1.32);
+    }
+}
+.glyph-halo::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: color-mix(in oklch, var(--hue) 45%, transparent);
+    animation: breathe 3.6s ease-in-out infinite;
+    z-index: -1;
+}
+
+/* A wrong password: the form shakes its head once. */
+@keyframes nudge {
+    20%,
+    60% {
+        transform: translateX(-5px);
+    }
+    40%,
+    80% {
+        transform: translateX(5px);
+    }
+}
+.nudge {
+    animation: nudge 360ms var(--ease-out-soft);
+}
+
+@keyframes dot-pulse {
+    50% {
+        opacity: 0.35;
+    }
+}
+.dot-pulse {
+    animation: dot-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

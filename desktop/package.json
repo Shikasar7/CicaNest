@@ -1,0 +1,17 @@
+{
+  "name": "nest-desktop",
+  "productName": "nest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "nest 桌面外壳：一键启动后台、托盘常驻、控制台窗口",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node scripts/check.js",
+    "icons": "python scripts/make_icons.py",
+    "shortcuts": "electron scripts/install-shortcuts.js"
+  },
+  "devDependencies": {
+    "electron": "45.0.0"
+  }
+}

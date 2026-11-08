@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Every Monday at 05:00, restart the QQ container (restart-qq.sh). Install:
+     cp deploy/mac/com.nest.qq-restart.plist ~/Library/LaunchAgents/
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nest.qq-restart.plist -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.nest.qq-restart</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>/path/to/nest/deploy/mac/restart-qq.sh</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>1</integer>
+		<key>Hour</key>
+		<integer>5</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>StandardErrorPath</key>
+	<string>/path/to/nest/data/logs/qq-restart.log</string>
+	<key>StandardOutPath</key>
+	<string>/path/to/nest/data/logs/qq-restart.log</string>
+</dict>
+</plist>

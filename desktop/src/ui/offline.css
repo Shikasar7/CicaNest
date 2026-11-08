@@ -1,0 +1,65 @@
+/* Shown in the console window when http://127.0.0.1:<port>/ does not answer. Transparent over Mica. */
+
+body {
+  display: grid;
+  place-items: center;
+  /* A tint over Mica; also keeps the text readable where Mica is unavailable. */
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 40px;
+  -webkit-app-region: drag;
+}
+
+.panel {
+  width: min(420px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: panel-in 420ms var(--ease-out) both;
+}
+
+.panel .mark {
+  margin-bottom: 20px;
+}
+
+h1 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.actions {
+  margin-top: 22px;
+  display: flex;
+  gap: 8px;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .mark rect {
+    stroke: rgba(231, 235, 238, 0.1);
+    stroke-width: 1;
+  }
+}

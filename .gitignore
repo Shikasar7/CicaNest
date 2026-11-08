@@ -1,0 +1,36 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Runtime data: database, logs, runtime.json (contains the per-process token)
+data/
+
+# QQ logins and caches: they belong outside the checkout (NEST_QQ_DIR); never commit them
+deploy/mac/snowluma/
+deploy/mac/napcat/data/
+
+# Old console builds kept beside the deployed one on the Mac
+web/dist.prev/
+web/dist.bak/
+
+# Secrets (python-dotenv rewrites .env through a temp file next to it)
+.env
+/.tmp_*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Desktop shell (Electron)
+desktop/node_modules/
+desktop/out/
+desktop/dist/
+
+
+# The Mac's real QQ containers (accounts, MAC addresses): copied from docker-compose.example.yml, never committed
+deploy/mac/docker-compose.yml
