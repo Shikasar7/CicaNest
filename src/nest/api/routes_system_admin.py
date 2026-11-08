@@ -46,8 +46,8 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 PATH_LIMIT = 500
 NOT_SET_SNOWLUMA = "还没有设置 SnowLuma 文件夹，请先在「系统」页填写"
 NOT_SET_QQ = "还没有设置 QQ 程序的位置，请先在「系统」页填写"
-DEFAULT_MODE = "program" if os.name == "nt" else "docker"
-DEFAULT_CONTAINER = "snowluma"
+DEFAULT_MODE = "docker"  # NapCat containers; "program" (a SnowLuma folder on Windows) is set on the 系统 page
+DEFAULT_CONTAINER = ""  # none until a bot is added (增加 bot names its container here)
 DEFAULT_LOGIN_URL = "http://127.0.0.1:6081"  # SnowLuma's noVNC, when Docker does not say where it is
 MAX_CONTAINERS = 8
 # A container's page for scanning the login QR code, by the port it is published from: NapCat's WebUI, or
@@ -160,7 +160,7 @@ def container_names(value: str) -> list[str]:
 def _containers(value: str) -> str:
     names = list(dict.fromkeys(container_names(value)))
     if not names or not all(docker.valid_name(name) for name in names):
-        raise _invalid("容器名只能用字母、数字、点、下划线和横线，几个容器用逗号隔开，例如 snowluma")
+        raise _invalid("容器名只能用字母、数字、点、下划线和横线，几个容器用逗号隔开，例如 napcat-123456789")
     if len(names) > MAX_CONTAINERS:
         raise _invalid(f"最多 {MAX_CONTAINERS} 个容器")
     return ", ".join(names)

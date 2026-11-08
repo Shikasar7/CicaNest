@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     knowledge_embed_model: str = "bge-m3"
     knowledge_rerank_url: str = "http://127.0.0.1:3064"
     knowledge_rerank_model: str = "bge-reranker-v2-m3"
+    # Where the built console is, when not in <home>/web/dist (the Docker image keeps it apart from the data).
+    web_dist_dir: Path | None = None
 
     @field_validator("host")
     @classmethod
@@ -79,7 +81,7 @@ class Settings(BaseSettings):
 
     @property
     def web_dist(self) -> Path:
-        return self.home / "web" / "dist"
+        return self.web_dist_dir or self.home / "web" / "dist"
 
     @property
     def base_url(self) -> str:

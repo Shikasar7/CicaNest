@@ -1,0 +1,33 @@
+# CicaNest on a Linux server with Docker. See README.md in this folder.
+#
+#   cd deploy/docker
+#   docker compose up -d --build
+#   docker compose exec -it cicanest nest set-password
+#
+# Then open http://<the server's address>:18800 and sign in with that password.
+#
+# Why it looks like this:
+# - network_mode: host. nest sees the real address of whoever connects (it only lets in this machine, the
+#   local network and Tailscale), and it reaches the QQ containers it starts on 127.0.0.1, as on a Mac.
+# - The Docker socket, so the console can start, stop and scan in the QQ (NapCat) containers, and create
+#   one when you add a QQ bot.
+# - CICANEST_DIR mounted at the same path inside: the containers nest creates mount their QQ data from
+#   CICANEST_DIR/qq, and Docker reads that path on the host.
+services:
+  cicanest:
+    build: ../..
+    image: cicanest:latest
+    container_name: cicanest
+    restart: unless-stopped
+    network_mode: host
+    working_dir: ${CICANEST_DIR:-/opt/cicanest}/nest
+    environment:
+      NEST_HOME: ${CICANEST_DIR:-/opt/cicanest}/nest
+      NEST_REMOTE: "true" # other devices sign in with the password; this server has no browser of its own
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ${CICANEST_DIR:-/opt/cicanest}:${CICANEST_DIR:-/opt/cicanest}
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }

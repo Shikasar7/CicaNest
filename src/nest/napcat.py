@@ -17,6 +17,7 @@ import re
 import secrets
 import socket
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from nest import docker
@@ -177,15 +178,23 @@ def new_token() -> str:
 
 
 def local_timezone() -> str:
-    """The machine's time zone name (e.g. Asia/Shanghai), so the container's log times match nest's."""
+    """The machine's time zone name (e.g. Asia/Shanghai), so the container's log times match nest's. Where
+    there is no zoneinfo link (Windows), the current offset as an Etc/GMT zone (whose sign is reversed)."""
     if os.environ.get("TZ"):
         return os.environ["TZ"]
     try:
-        target = os.readlink("/etc/localtime")
+        _, _, zone = os.readlink("/etc/localtime").partition("zoneinfo/")
     except OSError:
+        zone = ""
+    return zone or offset_zone(datetime.now().astimezone().utcoffset() or timedelta())
+
+
+def offset_zone(offset: timedelta) -> str:
+    """UTC+8 → "Etc/GMT-8"; an offset of no whole hours → "UTC"."""
+    hours, rest = divmod(int(offset.total_seconds()), 3600)
+    if rest or not -12 <= hours <= 14:
         return "UTC"
-    _, _, zone = target.partition("zoneinfo/")
-    return zone or "UTC"
+    return "UTC" if hours == 0 else f"Etc/GMT{-hours:+d}"
 
 
 def run_args(plan: Plan, *, webui_token: str, password_md5: str = "") -> list[str]:

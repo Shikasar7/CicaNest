@@ -219,7 +219,7 @@ async def test_defaults_follow_the_disk_until_saved(nest: Nest) -> None:
     view = await nest.view()
     assert view["snowluma"] == {
         "mode": "program",
-        "container": "snowluma",
+        "container": "",
         "status": "",
         "problem": "",
         "dir": "",
@@ -374,7 +374,7 @@ async def test_system_view(nest: Nest) -> None:
     assert 0 <= view["nest"]["uptime_seconds"] < 60 and view["nest"]["memory_mb"] > 0
     assert view["snowluma"] == {
         "mode": "program",
-        "container": "snowluma",
+        "container": "",
         "status": "",
         "problem": "",
         "dir": str(nest.machine.snowluma_dir),

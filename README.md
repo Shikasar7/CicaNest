@@ -43,7 +43,15 @@
 
 ## 部署
 
-在 Mac 上从零部署的步骤见 [deploy/mac/README.md](deploy/mac/README.md)。常用命令：
+三种方式，各自的步骤见：
+
+| 方式 | 适合 | 说明 |
+| --- | --- | --- |
+| Windows 直接安装 | 一台常开的 Windows 电脑 | [deploy/windows/README.md](deploy/windows/README.md) |
+| Mac 直接安装 | Mac mini 这类常开的 Mac | [deploy/mac/README.md](deploy/mac/README.md) |
+| Docker | Linux 服务器、NAS | [deploy/docker/README.md](deploy/docker/README.md) |
+
+接 QQ 都要用 Docker 跑 NapCat 容器；只用 Discord 或企业微信时不需要。直接安装时的常用命令：
 
 ```bash
 uv run nest start            # 在后台启动并打开控制台
@@ -54,7 +62,7 @@ uv run nest service install  # macOS：装成登录后自动启动的后台服�
 ```
 
 - 控制台：`http://127.0.0.1:18800`；开启远程访问后，局域网和 Tailscale 的设备用密码登录。
-- QQ 容器：照 `deploy/mac/docker-compose.example.yml` 写好 `docker-compose.yml`，在 `deploy/mac` 里 `docker compose up -d`；也可以在控制台 Bot 页「增加 bot」让 nest 自己建容器。扫码在「系统」页点「扫码登录」。
+- QQ 容器：在控制台 Bot 页「增加 bot」，nest 会自己建 NapCat 容器；想自己管理，照 `deploy/mac/docker-compose.example.yml` 写 compose。扫码在「系统」页点「扫码登录」。
 - Discord 和企业微信：在控制台 Bot 页「增加 bot」选平台，填 Token 或 BotID 和 Secret。
 - 设置和密钥在 `.env`（见 `.env.example`），数据库和日志在 `data/`，都不进 git。
 
@@ -96,7 +104,8 @@ src/nest/
 tests/                全部离线；fakes/ 里是假的平台和模型
 web/                  控制台（React + Vite + Tailwind + shadcn/ui）
 desktop/              Windows 桌面外壳（Electron）
-deploy/mac/           QQ 容器模板、每周重启脚本和 launchd 配置
+deploy/               各种部署方式：windows、mac（QQ 容器模板、每周重启脚本、launchd 配置）、docker
+Dockerfile            Docker 镜像：后端、构建好的控制台和 docker 命令
 ```
 
 ## 许可证

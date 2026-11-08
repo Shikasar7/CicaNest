@@ -94,7 +94,9 @@ async def http(tmp_path: Path, box: FakeDocker) -> AsyncIterator[httpx.AsyncClie
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url=settings.base_url, headers=AUTH) as client:
-            response = await client.patch("/api/system/settings", json={"snowluma_mode": "docker"})
+            response = await client.patch(
+                "/api/system/settings", json={"snowluma_mode": "docker", "snowluma_container": "snowluma"}
+            )
             assert response.status_code == 200, response.text
             yield client
 

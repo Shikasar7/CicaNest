@@ -30,3 +30,13 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t cicanest:ci .
+      - run: |
+          docker run -d --name nest -p 127.0.0.1:18800:18800 -e NEST_REMOTE=true cicanest:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:18800/api/health && exit 0; sleep 1; done
+          docker logs nest; exit 1

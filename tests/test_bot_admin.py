@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -190,3 +191,17 @@ async def test_a_stopped_container_holds_its_connection(http: httpx.AsyncClient,
     box.boxes["napcat-123456789"] = replace(box.boxes["napcat-123456789"], running=True, status="running")
     await guard.check()
     assert "qq:123456789" in hub.adapters
+
+
+@pytest.mark.parametrize(
+    ("hours", "zone"),
+    [(8, "Etc/GMT-8"), (-5, "Etc/GMT+5"), (0, "UTC"), (5.5, "UTC"), (14, "Etc/GMT-14")],
+)
+def test_an_offset_without_a_zoneinfo_link_names_an_etc_zone(hours: float, zone: str) -> None:
+    assert napcat.offset_zone(timedelta(hours=hours)) == zone
+
+
+def test_the_console_can_live_apart_from_the_data(tmp_path: Path) -> None:
+    built = tmp_path / "image" / "dist"
+    assert Settings(home=tmp_path, _env_file=None).web_dist == tmp_path / "web" / "dist"
+    assert Settings(home=tmp_path, web_dist_dir=built, _env_file=None).web_dist == built
