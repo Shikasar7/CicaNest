@@ -17,30 +17,33 @@ MAX_PER_WINDOW = 3  # a group welcomes at most this many people per ONCE (a wave
 MAX_CHARS = 40
 MAX_TOKENS = 120
 
+# The welcome calls the person by their name, or 新朋友 when it is not known; never 新人.
 ASK = (
-    "群里刚进来一位新人{who}。用你自己的口吻说一句欢迎的话，像在群里随口打招呼："
+    "群里刚来了{who}。用你自己的口吻欢迎ta，称呼ta{call}，不要说“新人”。像在群里随口打招呼："
     "二十个字以内，口语，不要表情符号，不要加引号，不要解释，只输出这一句。"
 )
+FRIEND = "新朋友"
 QUOTES = "\"'“”‘’「」『』"
 
 
 def prompt(persona: str, bot_name: str, name: str) -> list[ChatMessage]:
-    who = f"「{name}」" if name else ""
+    who, call = (f"「{name}」", f"「{name}」") if name else (f"一位{FRIEND}", f"“{FRIEND}”")
     return [
         ChatMessage("system", persona.strip() or f"你是群里的{bot_name}。"),
-        ChatMessage("user", ASK.format(who=who)),
+        ChatMessage("user", ASK.format(who=who, call=call)),
     ]
 
 
 def line(text: str) -> str:
-    """The model's answer as one short line: the first non-empty line, unquoted, cut to MAX_CHARS."""
+    """The model's answer as one short line: the first non-empty line, unquoted, 新人 said as 新朋友, cut to
+    MAX_CHARS."""
     first = next((part.strip() for part in text.splitlines() if part.strip()), "")
     first = first.strip(QUOTES).strip()
     first = re.sub(r"\s+", " ", first)
     if first.upper() == "SKIP":  # some personas teach the model to stay quiet; a welcome is never quiet
         return ""
-    return first[:MAX_CHARS]
+    return first.replace("新人", FRIEND)[:MAX_CHARS]
 
 
 def fallback(name: str) -> str:
-    return f"欢迎{name}！" if name else "欢迎新朋友！"
+    return f"欢迎{name or FRIEND}！"

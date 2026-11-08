@@ -77,7 +77,16 @@ async def test_a_join_every_account_reports_is_welcomed_once_by_voice(kit: Kit) 
     assert decision["reply"] == "欢迎小新，进来坐！" and decision["trigger_text"] == JOINED
     assert kit.sent() == [["record"]] and kit.net.texts == ["欢迎小新，进来坐！"]
     system, ask = kit.w.providers["10001"].requests[0]
-    assert "你是阿鲸" in system.content and "「小新」" in ask.content
+    assert "你是阿鲸" in system.content and "称呼ta「小新」" in ask.content
+
+
+async def test_someone_without_a_known_name_is_a_new_friend_never_a_newcomer(kit: Kit) -> None:
+    kit.w.providers["10001"].queue("欢迎新人！")
+    await kit.join(name="")
+    [decision] = await kit.welcomes(1)
+    assert decision["reply"] == "欢迎新朋友！"
+    [(_, ask)] = kit.w.providers["10001"].requests
+    assert "一位新朋友" in ask.content and "称呼ta“新朋友”" in ask.content
 
 
 async def test_without_a_voice_the_welcome_is_text(kit: Kit) -> None:
