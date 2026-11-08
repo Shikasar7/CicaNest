@@ -710,7 +710,12 @@ async def test_api_settings_switches_and_vision_test(api_world: ApiWorld) -> Non
         await http.patch("/api/groups/qq:group:999/features", json={"collect_stickers": True})
     ).status_code == 404
     response = await http.patch("/api/groups/qq:group:42/features", json={"collect_stickers": True})
-    assert response.json() == {"key": "qq:group:42", "collect_stickers": True, "learn_slang": False}
+    assert response.json() == {
+        "key": "qq:group:42",
+        "collect_stickers": True,
+        "learn_slang": False,
+        "welcome": False,
+    }
     assert api_world.state.stickers.collecting("qq:group:42")
 
     api_world.state.providers.get("ark").provider.queue("红色的圆")

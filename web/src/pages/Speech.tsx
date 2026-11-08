@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { Switch } from '@/components/ui/switch'
 import {
   fetchAudio,
   sendJson,
@@ -425,6 +426,41 @@ const LIMITS: { key: keyof SpeechSettings; label: string; unit: string; min: num
   { key: 'max_chars', label: '超过这么长就改发文字', unit: '字', min: 10, max: 300 },
 ]
 
+/** 欢迎新人: per group, whether a bot there welcomes whoever joins. */
+function WelcomeGroups({ groups, reload }: { groups: SpeechView['groups']; reload: () => void }) {
+  const { busy, error, run } = useAction(reload)
+  if (!groups) return null
+  const toggle = (key: string, next: boolean) =>
+    void run(() => sendJson('PATCH', `/api/groups/${encodeURIComponent(key)}/features`, { welcome: next }))
+  return (
+    <section className="space-y-3 rounded-2xl border bg-card p-5">
+      <h2 className="text-base font-semibold tracking-tight">新人进群时欢迎</h2>
+      <p className="text-xs text-muted-foreground">
+        有人进群时，从这个群里在说话的 bot 中随机挑一个，按它的人设说一句欢迎，能发语音就用语音，发不了就发文字。同一个人十分钟内只欢迎一次，一下子进很多人时只欢迎前几个。
+      </p>
+      {groups.length === 0 ? (
+        <p className="text-sm text-muted-foreground">还没有 QQ 群</p>
+      ) : (
+        <ul className="flex flex-wrap gap-x-6 gap-y-2">
+          {groups.map((group) => (
+            <li key={group.key}>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={group.welcome} disabled={busy} onCheckedChange={(next) => toggle(group.key, next)} />
+                {group.name || group.key.split(':').pop()}
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
 /** 语音: the speech services (the user's own keys), each bot's voice, and the limits. */
 export function Speech() {
   const list = useLiveData<SpeechView>('/api/speech', [])
@@ -456,6 +492,8 @@ export function Speech() {
       {view.services.map((service) => (
         <ServiceCard key={service.id} service={service} view={view} patch={patch} />
       ))}
+
+      <WelcomeGroups groups={view.groups} reload={list.reload} />
 
       <section className="space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-base font-semibold tracking-tight">给 bot 选音色</h2>

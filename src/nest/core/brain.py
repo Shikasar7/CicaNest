@@ -32,8 +32,9 @@ from typing import Any
 
 from nest.adapters.base import Adapter, parse_recipient
 from nest.adapters.registry import can, capabilities_of, place_of
+from nest.core import welcome
 from nest.core.broadcast import Broadcaster
-from nest.core.events import CaughtUp, ChannelRef, MessageEvent, Segment, SendMessage
+from nest.core.events import CaughtUp, ChannelRef, MemberJoined, MessageEvent, Segment, SendMessage
 from nest.core.issues import RECORDER_HINT
 from nest.core.prompt import (
     MEMORY_CHARS,
@@ -66,7 +67,7 @@ from nest.llm.speech import SpeechError
 from nest.storage.accounts import list_accounts
 from nest.storage.bots import MAX_REPLY_LINES, BotChannel, BotConfig, BotRepo
 from nest.storage.messages import MessageStore
-from nest.storage.slang import group_key_of
+from nest.storage.slang import GroupFeatureStore, group_key_of
 from nest.storage.tones import ToneRepo
 
 log = logging.getLogger(__name__)
@@ -219,6 +220,8 @@ class Brain:
         self._searched: dict[str, list[float]] = {}  # bot id -> when its 答题 calls searched (last hour)
         self._reading: set[asyncio.Task] = set()  # 看源码 running after an answer the docs could not give
         self._remembering: set[int] = set()  # private chats whose note is being written
+        self._welcomed: dict[tuple[str, str], float] = {}  # (group key, person) -> when they were welcomed
+        self._welcoming: set[asyncio.Task] = set()
         self.tones: dict[str, Tone] = {}  # 语气 by key (nest.core.tones), re-read by load()
 
     async def load(self) -> None:
@@ -236,10 +239,10 @@ class Brain:
     async def stop(self) -> None:
         for state in self._states.values():
             self._cancel(state)
-        for task in self._reading:
+        for task in (*self._reading, *self._welcoming):
             task.cancel()
         tasks = [s.task for s in self._states.values() if s.task is not None]
-        await asyncio.gather(*tasks, *self._reading, return_exceptions=True)
+        await asyncio.gather(*tasks, *self._reading, *self._welcoming, return_exceptions=True)
 
     @property
     def our_accounts(self) -> set[str]:
@@ -344,6 +347,71 @@ class Brain:
             state.pending.extend(missed)
             state.mention, state.last_message_at = True, now
             self._wake(bot, channel, state, now)
+
+    async def on_member_joined(self, event: MemberJoined, row: dict[str, Any]) -> None:
+        """欢迎新人: someone joined a group. Each of our accounts there reports it; the first report starts
+        one welcome, later ones and repeats within welcome.ONCE are ignored."""
+        if event.user_id in self._our_accounts:
+            return
+        now = time.time()
+        if now - event.timestamp > welcome.STALE:
+            return
+        key = group_key_of(event.channel)
+        self._welcomed = {k: at for k, at in self._welcomed.items() if now - at < welcome.ONCE}
+        if (key, event.user_id) in self._welcomed:
+            return
+        recent = sum(1 for (group, _), _at in self._welcomed.items() if group == key)
+        self._welcomed[(key, event.user_id)] = now  # before any await: the next account's report sees it
+        if not (await GroupFeatureStore(self.repo.db).get(key)).welcome:
+            return
+        if recent >= welcome.MAX_PER_WINDOW:
+            log.info("%s 短时间内进了好几个人，这个 %s 就不单独欢迎了", key, event.name or event.user_id)
+            return
+        task = asyncio.create_task(self._welcome(key, event, row), name=f"welcome:{key}")
+        self._welcoming.add(task)
+        task.add_done_callback(self._welcoming.discard)
+
+    def _welcomers(self, key: str) -> list[tuple[BotConfig, BotChannel]]:
+        """The live bots switched on in this group whose accounts are running."""
+        return [
+            (bot, channel)
+            for bot in self.bots.values()
+            if bot.mode == "live" and self.adapters.get(bot.account_id) is not None
+            for channel in bot.channels.values()
+            if channel.enabled and channel.channel.kind == "group" and group_key_of(channel.channel) == key
+        ]
+
+    async def _welcome(self, key: str, event: MemberJoined, row: dict[str, Any]) -> None:
+        low, high = welcome.DELAY
+        await asyncio.sleep(low + (high - low) * self.chance())
+        candidates = self._welcomers(key)
+        if not candidates:
+            log.info("%s 有新人进群，但这个群没有在说话的 bot，没有欢迎", key)
+            return
+        # One that can speak for real first, then one whose voice is on trial, then anyone (as text).
+        spoken = [c for c in candidates if self._can_speak(*c) and c[1].voice_mode == "on"]
+        pool = spoken or [c for c in candidates if self._can_speak(*c)] or candidates
+        bot, channel = pool[min(int(self.chance() * len(pool)), len(pool) - 1)]
+        draft = Draft(
+            outcome="would_reply", reason="有新人进群，欢迎一下", voice=self._can_speak(bot, channel)
+        )
+        try:
+            messages = welcome.prompt(self._persona(bot, channel), bot.name, event.name)
+            completion, call_id, _ = await self._complete(bot, messages, max_tokens=welcome.MAX_TOKENS)
+            said = welcome.line(completion.text)
+            draft = replace(draft, llm_call_id=call_id)
+        except (ProviderUnavailable, ProviderError) as exc:
+            log.info("%s 写欢迎词失败（%s），用默认的一句", bot.name, exc)
+            said = ""
+        plain = not said
+        draft = replace(draft, reply=said or welcome.fallback(event.name), voice_asked=True)
+        try:
+            sent = await self._send(bot, channel, draft)
+            if plain:
+                sent = replace(sent, reason=f"{sent.reason}；模型没写出来，用了默认的一句")
+            await self._record(bot, channel.channel_id, sent, "welcome", row)
+        except Exception:
+            log.exception("%s 欢迎新人出错", bot.name)
 
     async def _mentions(self, bot: BotConfig, channel: BotChannel, event: MessageEvent) -> bool:
         if _private(channel) or bot.self_id in event.mentions:

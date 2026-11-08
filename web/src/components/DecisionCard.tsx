@@ -23,6 +23,8 @@ const STICKER: Record<NonNullable<Decision['sticker_state']>, string> = {
 
 /** A bot's decision in the group timeline, in the bot's own colour: solid edge when it spoke, dashed when it only
  *  would have, quiet when it held back. */
+const TRIGGER: Record<string, string> = { mention: '被点名', source: '看源码补答', welcome: '欢迎新人' }
+
 export function DecisionCard({ decision }: { decision: Decision }) {
   const speaks = decision.outcome === 'would_reply' || decision.outcome === 'replied'
   const failed = decision.outcome === 'failed'
@@ -44,7 +46,7 @@ export function DecisionCard({ decision }: { decision: Decision }) {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">{decision.bot_name}</span>
             <span className={cn(failed && 'text-destructive')}>{OUTCOME[decision.outcome]}</span>
-            <span>{decision.trigger === 'mention' ? '被点名' : decision.trigger === 'source' ? '看源码补答' : '主动插话'}</span>
+            <span>{TRIGGER[decision.trigger] ?? '主动插话'}</span>
             {decision.regenerated && <span>有新消息，重新想过一次</span>}
             <span className="ml-auto tabular-nums">{formatTime(decision.created_at)}</span>
           </div>

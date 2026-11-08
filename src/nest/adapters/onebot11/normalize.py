@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from nest.core.events import ChannelRef, Event, MessageEvent, RecallEvent, Segment
+from nest.core.events import ChannelRef, Event, MemberJoined, MessageEvent, RecallEvent, Segment
 from nest.core.segments import at_target, render_text
 
 
@@ -75,4 +75,7 @@ def normalize(payload: dict[str, Any], account: str, *, backfilled: bool = False
         else:
             channel = ChannelRef("qq", account, "private", str(payload["user_id"]))
         return RecallEvent(channel, str(payload["message_id"]), float(payload.get("time") or time.time()))
+    if post_type == "notice" and payload.get("notice_type") == "group_increase":
+        channel = ChannelRef("qq", account, "group", str(payload["group_id"]))
+        return MemberJoined(channel, str(payload["user_id"]), "", float(payload.get("time") or time.time()))
     return None

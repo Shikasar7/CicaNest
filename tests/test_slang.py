@@ -241,7 +241,12 @@ async def test_api_terms_add_edit_confirm_delete(api_world: ApiWorld) -> None:  
 async def test_api_learning_switch_model_and_learn_now(api_world: ApiWorld) -> None:  # noqa: F811
     http = api_world.http
     response = await http.patch("/api/groups/qq:group:42/features", json={"learn_slang": True})
-    assert response.json() == {"key": "qq:group:42", "collect_stickers": False, "learn_slang": True}
+    assert response.json() == {
+        "key": "qq:group:42",
+        "collect_stickers": False,
+        "learn_slang": True,
+        "welcome": False,
+    }
     assert (await http.get("/api/slang")).json()["groups"][0]["learn"] is True
     assert (await http.patch("/api/slang/settings", json={"provider_id": "nope"})).status_code == 400
     assert (await http.patch("/api/slang/settings", json={"provider_id": "grok"})).json() == {

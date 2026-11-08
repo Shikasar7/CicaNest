@@ -11,7 +11,9 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from nest.adapters.registry import can
 from nest.api.auth import require_token
+from nest.api.routes_stickers import group_names
 from nest.api.text import has_bad_chars
 from nest.core.speech import KEY_REFS
 from nest.llm.speech import FISH_MODELS, SpeechError, clean_library
@@ -87,7 +89,16 @@ def _library(sent: dict[str, list[dict[str, str]]]) -> dict[str, list[dict[str, 
 
 @router.get("/speech")
 async def speech(request: Request) -> dict[str, Any]:
-    return request.app.state.speech.view()  # type: ignore[no-any-return]
+    """The services, voices and limits, and the groups that can 欢迎新人 with whether they do."""
+    state = request.app.state
+    features = await state.stickers.groups.all()
+    names = await group_names(state)
+    groups = [
+        {"key": key, "name": name, "welcome": bool(features.get(key) and features[key].welcome)}
+        for key, name in sorted(names.items(), key=lambda item: (item[1] or "~", item[0]))
+        if can(key, "member_joins")
+    ]
+    return {**state.speech.view(), "groups": groups}
 
 
 @router.patch("/speech")

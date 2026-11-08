@@ -336,6 +336,8 @@ export type SpeechView = {
   services: SpeechService[]
   fish_models: string[]
   minimax_models: string[]
+  /** 欢迎新人, per group (only platforms that report joins); absent on an older nest. */
+  groups?: { key: string; name: string; welcome: boolean }[]
 }
 
 export type BotChannel = {
@@ -432,7 +434,7 @@ export type Decision = {
   bot_name: string
   channel_id: number
   trigger_id: number | null
-  trigger: 'mention' | 'chime_in' | 'source'
+  trigger: 'mention' | 'chime_in' | 'source' | 'welcome'
   outcome: Outcome
   reason: string
   reply: string | null

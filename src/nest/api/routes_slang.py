@@ -32,6 +32,7 @@ class Features(BaseModel):
 
     collect_stickers: bool | None = None
     learn_slang: bool | None = None
+    welcome: bool | None = None
 
 
 class EntryCreate(BaseModel):
@@ -91,21 +92,28 @@ async def _group(state: Any, key: str) -> str:
 @router.patch("/groups/{key}/features")
 async def group_features(request: Request, key: str, body: Features) -> dict[str, Any]:
     state = request.app.state
-    if body.collect_stickers is None and body.learn_slang is None:
+    if body.collect_stickers is None and body.learn_slang is None and body.welcome is None:
         raise _invalid("没有要改的内容")
     if body.collect_stickers and not can(key, "sticker_source"):
         raise HTTPException(status_code=400, detail="这个平台的表情不收藏")
     if body.learn_slang and not can(key, "sees_all"):
         raise HTTPException(status_code=400, detail="这个平台的 bot 只看得到找它的话，学不了黑话")
+    if body.welcome and not can(key, "member_joins"):
+        raise HTTPException(status_code=400, detail="这个平台不告诉 nest 有人进群，没法欢迎新人")
     async with state.config_lock:
         await _group(state, key)
         await state.stickers.groups.set(
-            key, collect_stickers=body.collect_stickers, learn_slang=body.learn_slang
+            key, collect_stickers=body.collect_stickers, learn_slang=body.learn_slang, welcome=body.welcome
         )
         await state.stickers.reload()
     features = await state.stickers.groups.get(key)
     state.broadcaster.publish("groups", {"key": key})
-    return {"key": key, "collect_stickers": features.collect_stickers, "learn_slang": features.learn_slang}
+    return {
+        "key": key,
+        "collect_stickers": features.collect_stickers,
+        "learn_slang": features.learn_slang,
+        "welcome": features.welcome,
+    }
 
 
 @router.get("/slang")

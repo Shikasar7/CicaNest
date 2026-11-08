@@ -71,6 +71,31 @@ class RecallEvent:
     timestamp: float
 
 
+JOINED = "（加入了群聊）"
+
+
+@dataclass(frozen=True, slots=True)
+class MemberJoined:
+    """Someone joined a group one of our accounts is in. `name`: their name there, "" when not known."""
+
+    channel: ChannelRef
+    user_id: str
+    name: str
+    timestamp: float
+
+    def as_message(self) -> MessageEvent:
+        """The join as a line in the group's history, so the console and later prompts see it."""
+        return MessageEvent(
+            channel=self.channel,
+            message_id=f"join:{self.user_id}:{int(self.timestamp)}",
+            sender_id=self.user_id,
+            sender_name=self.name or self.user_id,
+            segments=(Segment("text", {"text": JOINED}),),
+            text=JOINED,
+            timestamp=self.timestamp,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CaughtUp:
     """An account finished fetching what it missed. `gaps`: each channel with the newest message it had
@@ -81,7 +106,7 @@ class CaughtUp:
     until: float
 
 
-Event = MessageEvent | RecallEvent | CaughtUp | ChannelsSeen
+Event = MessageEvent | RecallEvent | CaughtUp | ChannelsSeen | MemberJoined
 
 
 @dataclass(frozen=True, slots=True)

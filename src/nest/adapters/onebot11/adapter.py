@@ -30,6 +30,7 @@ from nest.core.events import (
     ActionResult,
     ChannelInfo,
     ChannelRef,
+    MemberJoined,
     MessageEvent,
     Segment,
     SendMessage,
@@ -80,6 +81,7 @@ class OneBotAdapter:
         {
             "fetch_history",
             "list_channels",
+            "member_joins",
             "mention",
             "proactive",
             "reply",
@@ -353,6 +355,8 @@ class OneBotAdapter:
             if self._backfilling:
                 self._seen_live.add(event.message_id)
             event = await self._with_words(event)
+        elif isinstance(event, MemberJoined) and not event.name:
+            event = replace(event, name=await self._member_name(event.channel.id, event.user_id))
         try:
             await emit(event)
         except Exception:

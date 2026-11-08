@@ -21,7 +21,7 @@ from nest.adapters.base import Adapter, AdapterStatus, BackfillSource, StatusSin
 from nest.adapters.registry import PLATFORMS, build_adapter, can
 from nest.core.brain import Brain
 from nest.core.broadcast import Broadcaster
-from nest.core.events import CaughtUp, ChannelsSeen, Event, MessageEvent, RecallEvent
+from nest.core.events import CaughtUp, ChannelsSeen, Event, MemberJoined, MessageEvent, RecallEvent
 from nest.core.stickers import StickerKeeper
 from nest.secrets import SecretStore
 from nest.storage.accounts import Account, get_account, list_accounts
@@ -225,6 +225,12 @@ class Hub:
                             self.stickers.on_message(event)
                         if self.brain is not None:
                             await self.brain.on_message(event, row)
+                elif isinstance(event, MemberJoined):
+                    row = await self.store.save(event.as_message())
+                    if row is not None:
+                        self.broadcaster.publish("message", row)
+                        if self.brain is not None:
+                            await self.brain.on_member_joined(event, row)
                 elif isinstance(event, RecallEvent):
                     row = await self.store.recall(event)
                     if row is not None:

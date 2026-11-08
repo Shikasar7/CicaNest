@@ -68,7 +68,7 @@ def test_recall_notice() -> None:
     [
         {"post_type": "meta_event", "meta_event_type": "heartbeat"},
         {"post_type": "request", "request_type": "friend"},
-        {"post_type": "notice", "notice_type": "group_increase"},
+        {"post_type": "notice", "notice_type": "group_decrease"},
         {"post_type": "message", "message_type": "guild"},
     ],
 )

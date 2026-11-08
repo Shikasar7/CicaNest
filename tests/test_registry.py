@@ -12,6 +12,7 @@ def test_qq_keeps_every_capability_it_had() -> None:
     assert capabilities_of("qq") == {
         "fetch_history",
         "list_channels",
+        "member_joins",
         "mention",
         "proactive",
         "reply",
