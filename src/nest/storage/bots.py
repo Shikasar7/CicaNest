@@ -619,6 +619,16 @@ class BotRepo:
         )
         return {row["bot_id"]: _decision(row) for row in rows}
 
+    async def welcomes_said(self, bot_id: str, limit: int) -> list[str]:
+        """The bot's latest welcome lines (欢迎新人), newest first."""
+        rows = await self.db.fetchall(
+            """SELECT reply FROM decisions
+               WHERE bot_id = ? AND trigger = 'welcome' AND outcome = 'replied' AND reply IS NOT NULL
+               ORDER BY id DESC LIMIT ?""",
+            (bot_id, limit),
+        )
+        return [row["reply"] for row in rows]
+
     async def spoken_since(self, since: float, bot_id: str | None = None) -> int:
         marks = ",".join("?" * len(SPOKEN))
         row = await self.db.fetchone(

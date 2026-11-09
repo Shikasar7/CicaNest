@@ -395,17 +395,19 @@ class Brain:
         draft = Draft(
             outcome="would_reply", reason="有新人进群，欢迎一下", voice=self._can_speak(bot, channel)
         )
+        name = welcome.spoken(event.name)
         try:
-            messages = welcome.prompt(self._persona(bot, channel), bot.name, event.name)
+            before = await self.repo.welcomes_said(bot.id, welcome.RECENT)
+            messages = welcome.prompt(self._persona(bot, channel), bot.name, name, before)
             completion, call_id, _ = await self._complete(bot, messages, max_tokens=welcome.MAX_TOKENS)
             # Cut off by the output limit, the line stops mid-sentence ("……来了就"): the plain one is better.
-            said = "" if completion.cut else welcome.line(completion.text)
+            said = "" if completion.cut else welcome.line(completion.text, name)
             draft = replace(draft, llm_call_id=call_id)
         except (ProviderUnavailable, ProviderError) as exc:
             log.info("%s 写欢迎词失败（%s），用默认的一句", bot.name, exc)
             said = ""
         plain = not said
-        draft = replace(draft, reply=said or welcome.fallback(event.name), voice_asked=True)
+        draft = replace(draft, reply=said or welcome.fallback(name), voice_asked=True)
         try:
             sent = await self._send(bot, channel, draft)
             if plain:

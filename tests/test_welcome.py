@@ -96,6 +96,29 @@ async def test_a_line_cut_off_by_the_output_limit_is_not_said_half(kit: Kit) -> 
     assert decision["reply"] == "欢迎阿星！" and "默认的一句" in decision["reason"]
 
 
+async def test_a_catchphrase_without_welcome_gets_it_and_an_emoji_name_is_said_without_emoji(
+    kit: Kit,
+) -> None:
+    kit.w.providers["10001"].queue("✨，来了就坐，别拘着。")
+    await kit.join(name="阿星✨✨")
+    [decision] = await kit.welcomes(1)
+    assert decision["reply"] == "欢迎阿星，来了就坐，别拘着。"
+    [(_, ask)] = kit.w.providers["10001"].requests
+    assert "称呼ta「阿星」" in ask.content and "✨" not in ask.content and "一定要说“欢迎”" in ask.content
+
+
+async def test_the_bot_is_shown_its_last_welcomes_so_it_says_something_new(kit: Kit) -> None:
+    kit.w.providers["10001"].queue("欢迎阿星，来了就坐", "欢迎阿月，随便聊")
+    await kit.join(user="501", name="阿星")
+    await kit.welcomes(1)
+    await kit.join(user="502", name="😏")
+    second = await kit.welcomes(2)
+    assert [d["reply"] for d in second] == ["欢迎阿星，来了就坐", "欢迎阿月，随便聊"]
+    first_ask, again = (request[1].content for request in kit.w.providers["10001"].requests)
+    assert "前几次" not in first_ask
+    assert "“欢迎阿星，来了就坐”" in again and "换个说法" in again and "一位新朋友" in again
+
+
 async def test_without_a_voice_the_welcome_is_text(kit: Kit) -> None:
     await kit.w.repo.update_bot(BOT, voice="")
     await kit.w.brain.load()
@@ -149,6 +172,9 @@ def test_the_model_answer_becomes_one_short_line() -> None:
     assert welcome.line("\n  “欢迎！”  \n二") == "欢迎！"
     assert len(welcome.line("长" * 100)) == welcome.MAX_CHARS
     assert welcome.line("SKIP") == "" and welcome.fallback("小新") == "欢迎小新！"
+    assert welcome.line("😏，来了就坐") == "欢迎新朋友，来了就坐"
+    assert welcome.line("阿星，来了就坐", "阿星") == "欢迎阿星，来了就坐"
+    assert welcome.spoken("招财✨纳福 ") == "招财纳福" and welcome.spoken("😏") == ""
 
 
 def test_qq_reports_a_join() -> None:
