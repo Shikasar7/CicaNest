@@ -430,6 +430,24 @@ export function ModelForm({
             )}
           </Field>
         )}
+        {form.kind === 'anthropic' && (
+          <Field
+            label="联网搜索"
+            hint="开了以后，开着答题的群里有人问正经问题，先用 Anthropic 官方的搜索查再答（每个 bot 每小时最多 20 次）。按次收费：每 1000 次搜索 10 美元，搜到的内容也算 token；中转站不一定支持"
+          >
+            {(control) => (
+              <NativeSelect
+                {...control}
+                className="w-full"
+                value={form.web_search ? 'on' : 'off'}
+                onChange={(e) => update({ web_search: e.target.value === 'on' })}
+              >
+                <option value="off">关（默认）</option>
+                <option value="on">开</option>
+              </NativeSelect>
+            )}
+          </Field>
+        )}
         {form.kind === 'codex' && (
           <Field label="登录文件" hint="Codex 登录后生成的文件，留空用默认位置">
             {(control) => (

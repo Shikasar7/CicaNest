@@ -714,7 +714,6 @@ async def test_api_settings_switches_and_vision_test(api_world: ApiWorld) -> Non
         "key": "qq:group:42",
         "collect_stickers": True,
         "learn_slang": False,
-        "welcome": False,
     }
     assert api_world.state.stickers.collecting("qq:group:42")
 

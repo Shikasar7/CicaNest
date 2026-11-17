@@ -102,6 +102,9 @@ function Summary({ channel }: { channel: BotChannel }) {
     if (channel.answer_questions) chips.push('答题')
   }
   if (!isPrivate(channel) && channel.recorder) chips.push('记录官')
+  if (channel.enabled && !isPrivate(channel) && channel.welcome) chips.push('进群欢迎')
+  if (channel.enabled && !isPrivate(channel) && channel.birthday) chips.push('生日祝福')
+  if (channel.enabled && channel.remember) chips.push('长期记忆')
   return (
     <span className="flex min-w-0 flex-wrap gap-1">
       {chips.map((chip) => (
@@ -408,7 +411,7 @@ function ExtrasControls({ bot, channel, reload }: { bot: Bot; channel: BotChanne
         )}
         {channel.voice_mode !== undefined && speaks && (
           <div className="flex items-center gap-2">
-            <span id={`${id}-voice`} className="text-xs text-muted-foreground">
+            <span id={`${id}-voice`} className="shrink-0 text-xs text-muted-foreground">
               发语音
             </span>
             <Segmented
@@ -534,13 +537,13 @@ function AnswerControl({
   }
 
   if (channel.answer_questions === undefined) return null // a nest from before 答题
-  const searches = bot.provider?.kind === 'codex'
+  const searches = bot.provider?.can_search ?? bot.provider?.kind === 'codex'
   const who = isPrivate(channel) ? '对方说话' : '有人点名'
   const hint = !answering.value
     ? '关闭：照平时聊天'
     : searches
       ? `${who}时先分辨是闲聊还是正经问题：问题就先联网查再认真答，整段发一条，不带参考链接；问以前群里的事（比如「上次谁发的链接」）就翻聊天记录答；闲聊照旧。每小时最多联网查 20 次`
-      : `${who}时先分辨是闲聊还是正经问题：问题就认真答，整段发一条，但这个模型不能联网，只凭记得的答（联网要用 Codex 订阅的模型）；问以前群里的事就翻聊天记录答`
+      : `${who}时先分辨是闲聊还是正经问题：问题就认真答，整段发一条，但这个模型不能联网，只凭记得的答（联网要用 Codex 订阅的模型，或打开了联网搜索的 Claude 模型）；问以前群里的事就翻聊天记录答`
   return (
     <div className="space-y-1">
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -594,6 +597,220 @@ function RecorderControl({ bot, channel, reload }: { bot: Bot; channel: BotChann
           ? '每小时用这个 bot 的模型看一遍群里的新消息，把 bot 没解决的问题、答错的、故障、想要的功能和意见记到「问题记录」页，按设定的时间私聊汇总给你。有人让它「记一下」它会答应。即使它在这个群关着、只看不说，也照样记'
           : '关闭：不记。每个群只能有一个记录官，打开这里会换掉原来那个'}
       </p>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** 生日祝福: whether this bot may be the one that wishes a group member a happy birthday on the day. */
+function BirthdayControl({ bot, channel, reload }: { bot: Bot; channel: BotChannel; reload: () => void }) {
+  const { busy, error, run } = useAction(reload)
+  const on = useJustSaved(channel.birthday ?? false)
+  const id = useId()
+
+  const toggle = async (next: boolean) => {
+    on.mark(next)
+    const body: ChannelPatch = { birthday: next }
+    if (!(await run(() => sendJson<Ok>('PATCH', channelPath(bot.id, channel.channel_id), body)))) on.drop()
+  }
+
+  if (channel.birthday === undefined) return null // a nest from before 生日祝福
+  const waiting = !channel.enabled
+    ? '这个群现在关着，打开后才会祝。'
+    : bot.mode === 'paused'
+      ? '这个 bot 暂停着，不会祝。'
+      : bot.mode !== 'live'
+        ? '这个 bot 现在只看不说：只在动态里记下本来会说什么，不发。'
+        : ''
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Switch checked={on.value} disabled={busy} onCheckedChange={(next) => void toggle(next)} aria-describedby={`${id}-hint`} />
+        群友生日时祝福
+      </label>
+      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        {on.value
+          ? `从群友的 QQ 资料里读生日，资料里没写或设了隐私的人不祝。生日当天早上 9 点以后，从这个群里打开了生日祝福的 bot 中挑一个（优先正式发言的），按人设 @ta 说一句生日快乐。每人每年只祝一次。${waiting}`
+          : '关闭：这个 bot 不祝生日。这个群里有别的 bot 开着的话，由它们祝'}
+      </p>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** 长期记忆: whether this bot remembers people here (likes, how they are, what they agreed with it). */
+function RememberControl({ bot, channel, reload }: { bot: Bot; channel: BotChannel; reload: () => void }) {
+  const { busy, error, run } = useAction(reload)
+  const on = useJustSaved(channel.remember ?? false)
+  const id = useId()
+
+  const toggle = async (next: boolean) => {
+    on.mark(next)
+    const body: ChannelPatch = { remember: next }
+    if (!(await run(() => sendJson<Ok>('PATCH', channelPath(bot.id, channel.channel_id), body)))) on.drop()
+  }
+
+  if (channel.remember === undefined) return null // a nest from before 长期记忆
+  const who = isPrivate(channel) ? '对方' : '群友'
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Switch checked={on.value} disabled={busy} onCheckedChange={(next) => void toggle(next)} aria-describedby={`${id}-hint`} />
+        记住{who}的事
+      </label>
+      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        {on.value
+          ? `隔一阵从聊天里整理${who}的喜好、情况和跟 bot 的约定，${who}说话时 bot 会想起来。喜好和情况这里开着的 bot 都知道，约定只有约好的那个 bot 知道；只在这里用，不会带到别的群或私聊。电话、证件号这类不记。记了什么在「记忆」页能看、能改、能删`
+          : `关闭：这个 bot 在这里不记${who}的事，也不会被告知已经记下的`}
+      </p>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+const WELCOME_DELAYS = [
+  { value: 0, label: '马上' },
+  { value: 3, label: '约 3 秒后' },
+  { value: 5, label: '约 5 秒后' },
+  { value: 10, label: '约 10 秒后' },
+  { value: 20, label: '约 20 秒后' },
+  { value: 30, label: '约 30 秒后' },
+  { value: 60, label: '约 1 分钟后' },
+  { value: 120, label: '约 2 分钟后' },
+]
+const WELCOME_NOTE_MAX = 200
+
+/** 进群欢迎: whether this bot may welcome whoever joins the group, how, after how long, and a line after it. */
+function WelcomeControl({ bot, channel, reload }: { bot: Bot; channel: BotChannel; reload: () => void }) {
+  const { busy, error, run } = useAction(reload)
+  const on = useJustSaved(channel.welcome ?? false)
+  const voice = useJustSaved(channel.welcome_voice ?? true)
+  const delay = useJustSaved(channel.welcome_delay ?? 5)
+  const [note, setNote] = useState(channel.welcome_note ?? '')
+  const id = useId()
+  const patch = (body: ChannelPatch) => run(() => sendJson<Ok>('PATCH', channelPath(bot.id, channel.channel_id), body))
+
+  const setOn = async (next: boolean) => {
+    on.mark(next)
+    if (!(await patch({ welcome: next }))) on.drop()
+  }
+  const setVoice = async (next: boolean) => {
+    voice.mark(next)
+    if (!(await patch({ welcome_voice: next }))) voice.drop()
+  }
+  const setDelay = async (next: number) => {
+    delay.mark(next)
+    if (!(await patch({ welcome_delay: next }))) delay.drop()
+  }
+  const saveNote = () => void patch({ welcome_note: note.trim() })
+
+  if (channel.welcome === undefined) return null // a nest from before these settings
+  const speaks = can(bot, 'send_voice')
+  const delays = WELCOME_DELAYS.some((d) => d.value === delay.value)
+    ? WELCOME_DELAYS
+    : [...WELCOME_DELAYS, { value: delay.value, label: `约 ${delay.value} 秒后` }].sort((x, y) => x.value - y.value)
+  const spokenHint = !voice.value
+    ? '只发文字'
+    : !bot.voice
+      ? '要先在「语音」页给它选音色才会发语音，现在发文字'
+      : channel.voice_mode !== 'on'
+        ? '这个群的「发语音」没开启，现在发文字'
+        : '能发语音就用语音'
+  const waiting = !channel.enabled
+    ? '这个群现在关着，打开后才会欢迎。'
+    : bot.mode !== 'live'
+      ? '这个 bot 正式发言后才会欢迎。'
+      : ''
+  const noteChanged = note.trim() !== (channel.welcome_note ?? '')
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Switch checked={on.value} disabled={busy} onCheckedChange={(next) => void setOn(next)} aria-describedby={`${id}-hint`} />
+        有人进群时欢迎
+      </label>
+      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        {on.value
+          ? `有人进群时，从这个群里打开了欢迎的 bot 中随机挑一个，按人设说一句带“欢迎”的话，叫对方的群名片，不知道名字就叫“新朋友”。同一个人十分钟内只欢迎一次，一下子进很多人时只欢迎前三个。${waiting}`
+          : '关闭：有人进群时这个 bot 不出声。这个群里有别的 bot 开着的话，由它们欢迎'}
+      </p>
+      {on.value && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span id={`${id}-delay`} className="shrink-0 text-xs text-muted-foreground">
+                什么时候说
+              </span>
+              <NativeSelect
+                aria-labelledby={`${id}-delay`}
+                value={delay.value}
+                disabled={busy}
+                onChange={(e) => void setDelay(Number(e.target.value))}
+              >
+                {delays.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            {speaks && (
+              <div className="flex items-center gap-2">
+                <span id={`${id}-voice`} className="shrink-0 text-xs text-muted-foreground">
+                  怎么说
+                </span>
+                <NativeSelect
+                  aria-labelledby={`${id}-voice`}
+                  aria-describedby={`${id}-voice-hint`}
+                  value={voice.value ? 'voice' : 'text'}
+                  disabled={busy}
+                  onChange={(e) => void setVoice(e.target.value === 'voice')}
+                >
+                  <option value="voice">能发语音就用语音</option>
+                  <option value="text">只发文字</option>
+                </NativeSelect>
+              </div>
+            )}
+          </div>
+          {speaks && voice.value && spokenHint !== '能发语音就用语音' && (
+            <p id={`${id}-voice-hint`} className="text-xs text-amber-700 dark:text-amber-400">
+              {spokenHint}
+            </p>
+          )}
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Label htmlFor={`${id}-note`} className="text-xs font-normal text-muted-foreground">
+                欢迎后再发一句
+              </Label>
+              <Input
+                id={`${id}-note`}
+                className="h-8 w-72 max-w-full"
+                value={note}
+                maxLength={WELCOME_NOTE_MAX}
+                placeholder="比如：进群先看群公告～"
+                disabled={busy}
+                onChange={(e) => setNote(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && noteChanged && saveNote()}
+              />
+              <Button size="sm" variant="outline" disabled={busy || !noteChanged} onClick={saveNote}>
+                保存
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">原样发文字，跟在欢迎后面单独一条；留空就不发</p>
+          </div>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}
@@ -685,6 +902,21 @@ export function ChannelRow({
           <SplitControls bot={bot} channel={channel} reload={reload} />
           <AnswerControl bot={bot} channel={channel} tones={tones} reload={reload} />
         </Part>
+        {!privateChat && channel.welcome !== undefined && can(bot, 'member_joins') && (
+          <Part title="进群欢迎">
+            <WelcomeControl bot={bot} channel={channel} reload={reload} />
+          </Part>
+        )}
+        {!privateChat && channel.birthday !== undefined && can(bot, 'birthdays') && (
+          <Part title="生日祝福">
+            <BirthdayControl bot={bot} channel={channel} reload={reload} />
+          </Part>
+        )}
+        {channel.remember !== undefined && (
+          <Part title="长期记忆">
+            <RememberControl bot={bot} channel={channel} reload={reload} />
+          </Part>
+        )}
         {!privateChat && channel.recorder !== undefined && can(bot, 'sees_all') && (
           <Part title="记录">
             <RecorderControl bot={bot} channel={channel} reload={reload} />

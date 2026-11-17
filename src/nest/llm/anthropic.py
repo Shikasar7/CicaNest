@@ -5,10 +5,15 @@ The system messages go into the top-level `system` field; pictures become base64
 Claude models think before answering and that thinking counts against `max_tokens`, so each call asks
 for THINKING_ROOM more than the reply itself needs. `temperature` is never sent: the newer models
 refuse it.
+
+Answering a question on a model with 联网搜索 on (option web_search), the call carries Anthropic's own web
+search and page reading tools; they run on Anthropic's side and are billed per search. Only the text
+after the last search is the answer: what the model says before searching ("我查一下") is not.
 """
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -24,6 +29,65 @@ THINKING_ROOM = 2048
 # thinking, and now and then writes its judgment into the reply instead.
 EFFORTS = ("low", "medium", "high")
 DEFAULT_EFFORT = "low"
+SEARCH_TIMEOUT = 120.0  # a few searches and page reads take 15–60 seconds
+SEARCH_ROOM = 1024  # what the search queries themselves take of the output
+MAX_SEARCHES = 5  # per answer
+MAX_FETCHES = 3
+# The server pauses a long search turn ("pause_turn"); it is sent back to go on, at most this many times.
+MAX_CONTINUATIONS = 2
+# Models with the newer search tools, which filter the results before reading them; the others (Haiku,
+# Claude 4.5 and older) have only the basic search.
+FILTERING = re.compile(r"fable|mythos|(?:opus|sonnet)-(?:4-[6-9]|[5-9])", re.IGNORECASE)
+NOT_ANSWER = frozenset({"text", "thinking", "redacted_thinking"})
+
+
+def search_tools(model: str) -> list[dict[str, Any]]:
+    if not FILTERING.search(model):
+        return [{"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCHES}]
+    return [
+        {"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES},
+        {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": MAX_FETCHES},
+    ]
+
+
+def answer_text(blocks: Sequence[Any]) -> str:
+    """The text after the last tool block (all of it when there is none)."""
+    last = max(
+        (i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") not in NOT_ANSWER),
+        default=-1,
+    )
+    return "".join(
+        b.get("text", "") for b in blocks[last + 1 :] if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
+def search_record(
+    blocks: Sequence[Any], usages: Sequence[dict[str, Any]]
+) -> tuple[int, tuple[tuple[str, str], ...]]:
+    """(searches and page reads, cited pages as (title, url) in order, each once)."""
+    calls = sum(
+        1
+        for b in blocks
+        if isinstance(b, dict)
+        and b.get("type") == "server_tool_use"
+        and b.get("name") in ("web_search", "web_fetch")
+    )
+    counted = 0
+    for usage in usages:
+        used = usage.get("server_tool_use") or {}
+        counted += sum(
+            n for n in (used.get("web_search_requests"), used.get("web_fetch_requests")) if isinstance(n, int)
+        )
+    sources, seen = [], set()
+    for b in blocks:
+        if not isinstance(b, dict) or b.get("type") != "text":
+            continue
+        for cite in b.get("citations") or ():
+            url = str(cite.get("url") or "") if isinstance(cite, dict) else ""
+            if url and url not in seen:
+                seen.add(url)
+                sources.append((str(cite.get("title") or ""), url))
+    return max(calls, counted), tuple(sources)
 
 
 def _image(url: str) -> dict[str, Any]:
@@ -76,12 +140,17 @@ class Anthropic:
         self._http = client(timeout=timeout, proxy=proxy, transport=transport)
 
     async def complete(
-        self, messages: Sequence[ChatMessage], *, max_tokens: int, temperature: float | None = None
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float | None = None,
+        search: bool = False,
     ) -> Completion:
         system, turns = request_parts(messages)
         body: dict[str, Any] = {
             "model": self.model,
-            "max_tokens": max_tokens + THINKING_ROOM,
+            "max_tokens": max_tokens + THINKING_ROOM + (SEARCH_ROOM if search else 0),
             "messages": turns,
             "cache_control": {"type": "ephemeral"},  # the persona prefix is the same call after call
             "output_config": {"effort": self._effort},
@@ -89,39 +158,66 @@ class Anthropic:
         }
         if system:
             body["system"] = system
+        if search:
+            body["tools"] = search_tools(self.model)
+        started = time.monotonic()
+        blocks: list[Any] = []
+        usages: list[dict[str, Any]] = []
+        for _ in range(MAX_CONTINUATIONS + 1):
+            data = await self._post(body, SEARCH_TIMEOUT if search else None)
+            content = data.get("content")
+            if not isinstance(content, list):
+                raise ProviderError("模型返回的格式看不懂", retryable=False)
+            blocks.extend(content)
+            usages.append(data.get("usage") or {})
+            if data.get("stop_reason") != "pause_turn" or not search:
+                break
+            # Sent back as it is, the paused turn goes on where it stopped.
+            body["messages"] = [*turns, {"role": "assistant", "content": blocks}]
+        stop = data.get("stop_reason")
+        if stop == "refusal":
+            raise ProviderError("模型拒绝回答这一条", retryable=False)
+        searches, sources = search_record(blocks, usages) if search else (0, ())
+        prompt = [
+            usage.get(k)
+            for usage in usages
+            for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+        ]
+        output = [usage.get("output_tokens") for usage in usages]
+        return Completion(
+            text=answer_text(blocks),
+            latency_ms=(time.monotonic() - started) * 1000,
+            prompt_tokens=sum(n for n in prompt if isinstance(n, int))
+            if usages[0].get("input_tokens") is not None
+            else None,
+            completion_tokens=sum(n for n in output if isinstance(n, int)) if output[0] is not None else None,
+            searches=searches,
+            sources=sources,
+            cut=stop in ("max_tokens", "pause_turn"),
+        )
+
+    async def _post(self, body: dict[str, Any], seconds: float | None) -> dict[str, Any]:
         headers = {"anthropic-version": API_VERSION}
         if self._key and self._bearer:
             headers["authorization"] = f"Bearer {self._key}"
         elif self._key:
             headers["x-api-key"] = self._key
-        started = time.monotonic()
         try:
-            response = await self._http.post(self._url, json=body, headers=headers)
+            if seconds is None:
+                response = await self._http.post(self._url, json=body, headers=headers)
+            else:
+                response = await self._http.post(self._url, json=body, headers=headers, timeout=seconds)
         except httpx.HTTPError as exc:
             raise transport_error(exc) from exc
         if response.status_code >= 400:
             raise status_error(response, self._key)
         try:
             data = response.json()
-            blocks = data["content"]
-            text = "".join(
-                b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"
-            )
-        except (ValueError, KeyError, TypeError) as exc:
+        except ValueError as exc:
             raise ProviderError("模型返回的格式看不懂", retryable=False) from exc
-        if data.get("stop_reason") == "refusal":
-            raise ProviderError("模型拒绝回答这一条", retryable=False)
-        usage = data.get("usage") or {}
-        prompt = [
-            usage.get(k) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-        ]
-        return Completion(
-            text=text,
-            latency_ms=(time.monotonic() - started) * 1000,
-            prompt_tokens=sum(n for n in prompt if isinstance(n, int)) if prompt[0] is not None else None,
-            completion_tokens=usage.get("output_tokens"),
-            cut=data.get("stop_reason") == "max_tokens",
-        )
+        if not isinstance(data, dict):
+            raise ProviderError("模型返回的格式看不懂", retryable=False)
+        return data
 
     async def aclose(self) -> None:
         await self._http.aclose()

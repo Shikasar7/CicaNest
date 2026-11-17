@@ -26,6 +26,7 @@ from nest.api.routes_issues import digest_settings
 from nest.api.routes_issues import router as issues_router
 from nest.api.routes_knowledge import router as knowledge_router
 from nest.api.routes_live import router as live_router
+from nest.api.routes_memories import router as memories_router
 from nest.api.routes_models import router as models_router
 from nest.api.routes_personas import router as personas_router
 from nest.api.routes_qq_password import router as qq_password_router
@@ -41,11 +42,13 @@ from nest.api.routes_tones import router as tones_router
 from nest.api.routes_usage import router as usage_router
 from nest.api.routes_watches import router as watches_router
 from nest.config import Settings
+from nest.core.birthday import BirthdayKeeper
 from nest.core.brain import Brain, Policy
 from nest.core.broadcast import Broadcaster
 from nest.core.deaf import DeafWatch
 from nest.core.hub import AdapterFactory, Hub
 from nest.core.issues import IssueKeeper
+from nest.core.memory import MemoryKeeper
 from nest.core.offline_alert import OfflineAlert
 from nest.core.screenshots import ScreenshotReader
 from nest.core.slang import SlangLearner
@@ -64,10 +67,13 @@ from nest.remote import RemoteAccess, Throttle
 from nest.secrets import SecretStore
 from nest.storage.accounts import list_accounts
 from nest.storage.avatars import AvatarStore
+from nest.storage.birthdays import BirthdayStore
 from nest.storage.bots import BotRepo
 from nest.storage.db import Database
 from nest.storage.knowledge import KnowledgeRepo
+from nest.storage.memories import MemoryStore
 from nest.storage.messages import MessageStore
+from nest.storage.settings import SettingsRepo
 from nest.storage.tones import ToneRepo
 from nest.watch.watcher import Watcher, WatchPolicy
 
@@ -201,6 +207,16 @@ def create_app(
             )
             await app.state.slang.start()
             app.state.brain.slang = app.state.slang
+            app.state.memory = MemoryKeeper(
+                MemoryStore(db),
+                app.state.store,
+                app.state.providers,
+                app.state.broadcaster,
+                SettingsRepo(db),
+                bots=app.state.brain,
+            )
+            await app.state.memory.start()
+            app.state.brain.memory = app.state.memory
             app.state.knowledge = KnowledgeService(
                 KnowledgeRepo(db),
                 embed=EmbeddingModel(settings.knowledge_embed_model, settings.knowledge_embed_url),
@@ -241,6 +257,7 @@ def create_app(
                 partial(storage_plan, app.state),
                 stickers=app.state.stickers,
                 slang=app.state.slang,
+                memory=app.state.memory,
             )
             await app.state.housekeeper.start()
             await app.state.qr_guard.start()
@@ -259,6 +276,8 @@ def create_app(
                 partial(digest_settings, app.state),
             )
             await app.state.issues.start()
+            app.state.birthdays = BirthdayKeeper(BirthdayStore(db), app.state.brain)
+            await app.state.birthdays.start()
             log.info(
                 "nest 已启动，数据目录 %s，%d 个账号，%d 个 bot",
                 settings.data_dir,
@@ -271,6 +290,7 @@ def create_app(
                 learner = getattr(app.state, "name_learner", None)
                 if learner is not None:
                     learner.cancel()
+                await app.state.birthdays.stop()
                 await app.state.issues.stop()
                 await app.state.offline_alert.stop()
                 await app.state.deaf_watch.stop()
@@ -280,6 +300,7 @@ def create_app(
                 await app.state.hub.stop()
                 await app.state.brain.stop()
                 await app.state.slang.stop()
+                await app.state.memory.stop()
                 await app.state.knowledge.stop()
                 await app.state.stickers.stop()
                 await app.state.providers.aclose()
@@ -325,6 +346,7 @@ def create_app(
     app.include_router(watches_router)
     app.include_router(stickers_router)
     app.include_router(slang_router)
+    app.include_router(memories_router)
     app.include_router(knowledge_router)
     mount_console(app, settings.web_dist)  # catch-all route: must stay last
     return app

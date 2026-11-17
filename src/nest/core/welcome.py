@@ -1,7 +1,9 @@
-"""欢迎新人: when someone joins a group that has it on, one bot there says a short welcome, spoken if it can.
+"""欢迎新人: when someone joins a group, one of the bots that have it on there says a short welcome.
 
-Every one of our accounts in the group is told of the join; the brain welcomes once (nest.core.brain). These
-are the parts that need no brain: what the model is asked, and how its answer becomes one short line.
+Each bot sets it in its own group settings: whether it welcomes, spoken when it can or always as text, after
+about how many seconds, and a line sent after the welcome. Every one of our accounts in the group is told of
+the join; the brain welcomes once (nest.core.brain). These are the parts that need no brain: what the model
+is asked, and how its answer becomes one short line.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from collections.abc import Sequence
 
 from nest.llm.base import ChatMessage
 
-DELAY = (3.0, 8.0)  # seconds after the join, like someone noticing; random in between
+JITTER = 0.25  # the bot's 等几秒, give or take this share, so it does not read like a timer
 STALE = 300.0  # a join older than this when it arrives (a replay after reconnecting) is left alone
 ONCE = 600.0  # the same person joining the same group again within this long is welcomed once
 MAX_PER_WINDOW = 3  # a group welcomes at most this many people per ONCE (a wave of joins: the first few)
@@ -74,6 +76,11 @@ def line(text: str, name: str = "") -> str:
         call = name or FRIEND
         first = f"欢迎{first}" if first.startswith(call) else f"欢迎{call}，{first}"
     return first[:MAX_CHARS]
+
+
+def wait(seconds: float, roll: float) -> float:
+    """How long after the join to welcome: the bot's setting, give or take JITTER; `roll` in [0, 1)."""
+    return max(0.0, seconds * (1 + JITTER * (2 * roll - 1)))
 
 
 def fallback(name: str) -> str:

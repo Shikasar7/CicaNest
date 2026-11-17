@@ -234,3 +234,44 @@ def test_what_counts_as_reasoning() -> None:
     assert without_thought("想了半天</think>你好") == "你好"  # the opening was cut off
     assert without_thought("<think>写到一半被截断") == ""
     assert without_thought("a <b> 不是思考") == "a <b> 不是思考"
+
+
+def pool_timeout() -> ProviderError:
+    """What a provider raises when every slot of its HTTP connection pool is taken."""
+    try:
+        raise httpx.PoolTimeout("no free connection")
+    except httpx.PoolTimeout as exc:
+        try:
+            raise ProviderError("超时：PoolTimeout", retryable=True) from exc
+        except ProviderError as error:
+            return error
+
+
+async def test_a_stuck_connection_pool_gets_a_fresh_provider_and_the_stuck_one_closes() -> None:
+    stuck = FakeProvider(pool_timeout(), pool_timeout())
+    fresh = FakeProvider("又通了")
+    built: list[ProviderConfig] = []
+
+    def factory(config: ProviderConfig, secrets: object) -> FakeProvider:
+        built.append(config)
+        return fresh
+
+    registry = ProviderRegistry(Recorder(), factory=factory, secrets={}, retry_delay=0)  # type: ignore[arg-type]
+    registry.runtimes["m"] = runtime = registry._runtime(CONFIG, stuck)
+    completion, _ = await runtime.complete(PROMPT, bot_id=None, max_tokens=10)
+    assert completion.text == "又通了"  # the retry already went through the new client
+    assert built == [CONFIG] and runtime.provider is fresh and len(stuck.requests) == 1
+    assert runtime.health.consecutive_failures == 0
+    await runtime.aclose()  # closing the runtime also closes the stuck one still waiting out its calls
+    assert stuck.closed and fresh.closed
+
+
+async def test_other_errors_and_runtimes_without_a_factory_keep_their_provider() -> None:
+    provider = FakeProvider(ProviderError("超时：ReadTimeout", retryable=True), "好")
+    runtime = ProviderRuntime(CONFIG, provider, Recorder(), retry_delay=0, renew=lambda: FakeProvider())
+    await runtime.complete(PROMPT, bot_id=None, max_tokens=10)
+    assert runtime.provider is provider
+    lone = FakeProvider(pool_timeout(), "好")
+    runtime = ProviderRuntime(CONFIG, lone, Recorder(), retry_delay=0)  # built without a factory
+    await runtime.complete(PROMPT, bot_id=None, max_tokens=10)
+    assert runtime.provider is lone

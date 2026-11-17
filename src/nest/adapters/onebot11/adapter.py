@@ -30,6 +30,7 @@ from nest.core.events import (
     ActionResult,
     ChannelInfo,
     ChannelRef,
+    Member,
     MemberJoined,
     MessageEvent,
     Segment,
@@ -79,6 +80,7 @@ class OneBotAdapter:
     platform = "qq"
     capabilities = frozenset(
         {
+            "birthdays",
             "fetch_history",
             "list_channels",
             "member_joins",
@@ -218,6 +220,31 @@ class OneBotAdapter:
             for g in groups or []
             if isinstance(g, dict) and "group_id" in g
         ]
+
+    async def group_members(self, group: str) -> list[Member]:
+        """Everyone in the group, as the member list says (生日祝福)."""
+        members = await self.call("get_group_member_list", group_id=int(group))
+        return [
+            Member(
+                str(m["user_id"]),
+                str(m.get("card") or m.get("nickname") or ""),
+                bool(m.get("is_robot")),
+            )
+            for m in members or []
+            if isinstance(m, dict) and m.get("user_id") is not None
+        ]
+
+    async def birthday(self, user: str) -> tuple[int, int]:
+        """(month, day) as the person's profile shows it, asked fresh; (0, 0) when it does not show one
+        (not set, or kept private: QQ then sends zeros)."""
+        info = await self.call("get_stranger_info", user_id=int(user), no_cache=True)
+        if not isinstance(info, dict):
+            return 0, 0
+        try:
+            month, day = int(info.get("birthday_month") or 0), int(info.get("birthday_day") or 0)
+        except (TypeError, ValueError):
+            return 0, 0
+        return (month, day) if 1 <= month <= 12 and 1 <= day <= 31 else (0, 0)
 
     def status(self) -> AdapterStatus:
         return self._status

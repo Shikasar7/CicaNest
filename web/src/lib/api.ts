@@ -295,6 +295,8 @@ export type ProviderHealth = {
   id: string
   kind: string
   model: string
+  /** Searches the web when answering; absent on an older nest (then only Codex can). */
+  can_search?: boolean
   available: boolean
   retry_in: number
   consecutive_failures: number
@@ -336,8 +338,6 @@ export type SpeechView = {
   services: SpeechService[]
   fish_models: string[]
   minimax_models: string[]
-  /** 欢迎新人, per group (only platforms that report joins); absent on an older nest. */
-  groups?: { key: string; name: string; welcome: boolean }[]
 }
 
 export type BotChannel = {
@@ -372,6 +372,18 @@ export type BotChannel = {
   chat_tone?: string
   /** 问题记录官 (groups only, one bot per group); absent on a nest from before 问题记录. */
   recorder?: boolean
+  /** 进群欢迎 (groups whose platform reports joins): this bot may be the one that welcomes; spoken when it
+   * can (welcome_voice) or as text, about welcome_delay seconds after the join, then welcome_note if set.
+   * Absent on a nest from before these settings. */
+  welcome?: boolean
+  welcome_voice?: boolean
+  welcome_delay?: number
+  welcome_note?: string
+  /** 生日祝福 (groups whose platform shows birthdays): this bot may be the one that wishes a member a happy
+   * birthday on the day. Absent on a nest from before it. */
+  birthday?: boolean
+  /** 长期记忆: this bot remembers people here and is told it when they talk. Absent on an older nest. */
+  remember?: boolean
 }
 
 /** A 语气 (GET /api/tones): built-in ones can be rewritten and reset, added ones deleted when unused. */
@@ -434,7 +446,7 @@ export type Decision = {
   bot_name: string
   channel_id: number
   trigger_id: number | null
-  trigger: 'mention' | 'chime_in' | 'source' | 'welcome'
+  trigger: 'mention' | 'chime_in' | 'source' | 'welcome' | 'birthday'
   outcome: Outcome
   reason: string
   reply: string | null
@@ -496,6 +508,12 @@ export type ChannelPatch = {
   answer_tone?: string
   chat_tone?: string
   recorder?: boolean
+  welcome?: boolean
+  welcome_voice?: boolean
+  welcome_delay?: number
+  welcome_note?: string
+  birthday?: boolean
+  remember?: boolean
 }
 
 // ---- 问题记录 (/api/issues) ----
@@ -633,6 +651,55 @@ export type SlangView = {
   runs: SlangRun[]
 }
 
+// ---- 长期记忆 (/api/memories) ----
+
+export type MemoryKind = 'like' | 'fact' | 'promise'
+
+export type Memory = {
+  id: number
+  place: string
+  person_id: string
+  person: string
+  /** 约定 only: the bot it was made with (only that bot is told); null for 喜好 and 情况. */
+  bot_id: string | null
+  bot_name: string
+  kind: MemoryKind
+  content: string
+  /** 约定 only: YYYY-MM-DD. */
+  due: string | null
+  /** "manual": added or edited here; learning leaves it alone. */
+  source: 'learned' | 'manual'
+  created_at: number
+  updated_at: number
+  used_at: number | null
+}
+
+export type MemoryPlace = {
+  /** "qq:group:123", or "chat:<channel id>" for one private chat. */
+  key: string
+  name: string
+  kind: 'group' | 'private'
+  /** The bots that have 长期记忆 on here. */
+  bots: string[]
+  count: number
+  learned_at: number | null
+  detail: string
+  error: string
+}
+
+/** POST /api/memories/learn's answer. */
+export type MemoryRun = { place: string; at: number; detail: string; error: string }
+
+/** GET /api/memories?place=: every place, and what is remembered in the chosen one. */
+export type MemoryView = {
+  places: MemoryPlace[]
+  place: string
+  /** Our bots in the chosen place: who a 约定 may be with. */
+  bots: { id: string; name: string }[]
+  settings: { provider_id: string | null; provider_loaded: boolean }
+  memories: Memory[]
+}
+
 /** GET /api/bots/{id}/groups: the QQ groups the bot's account is in. */
 export type BotGroup = { channel_id: number; group_id: string; name: string; joined: boolean }
 /** fresh = read from QQ just now; otherwise the list stored when the account last connected. */
@@ -662,6 +729,8 @@ export type ProviderOptions = {
   auth_header?: 'x-api-key' | 'bearer'
   /** anthropic only (default "low"): how much the model thinks before replying. */
   effort?: 'low' | 'medium' | 'high'
+  /** anthropic only (default off): search the web when answering a question; billed per search. */
+  web_search?: boolean
   /** codex only (default ~/.codex/auth.json). */
   auth_file?: string
 }

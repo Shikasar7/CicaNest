@@ -75,6 +75,15 @@ JOINED = "（加入了群聊）"
 
 
 @dataclass(frozen=True, slots=True)
+class Member:
+    """Someone in a group, as its member list shows them. `name`: their group card, else their nickname."""
+
+    user_id: str
+    name: str
+    robot: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class MemberJoined:
     """Someone joined a group one of our accounts is in. `name`: their name there, "" when not known."""
 

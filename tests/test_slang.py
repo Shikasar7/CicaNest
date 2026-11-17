@@ -245,7 +245,6 @@ async def test_api_learning_switch_model_and_learn_now(api_world: ApiWorld) -> N
         "key": "qq:group:42",
         "collect_stickers": False,
         "learn_slang": True,
-        "welcome": False,
     }
     assert (await http.get("/api/slang")).json()["groups"][0]["learn"] is True
     assert (await http.patch("/api/slang/settings", json={"provider_id": "nope"})).status_code == 400

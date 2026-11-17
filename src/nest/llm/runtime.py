@@ -15,6 +15,8 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
+import httpx
+
 from nest.llm.anthropic import DEFAULT_EFFORT, Anthropic
 from nest.llm.base import ChatMessage, Completion, Painter, Provider, ProviderError, without_thought
 from nest.llm.codex import Codex
@@ -114,9 +116,15 @@ class ProviderRuntime:
         retry_delay: float = 1.0,
         breaker_threshold: int = 5,
         breaker_cooldown: float = 60.0,
+        renew: Callable[[], Provider] | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
+        # Builds the same model again with a fresh HTTP client, for when the client's connection pool is
+        # stuck (see `_renew`). None: the runtime cannot rebuild its provider.
+        self._renew_with = renew
+        self._stale: set[Provider] = set()  # providers swapped out by `_renew`, not closed yet
+        self._stale_closers: set[asyncio.Task] = set()
         self._record = record
         self._semaphore = asyncio.Semaphore(concurrency)
         self._retries = retries
@@ -134,7 +142,10 @@ class ProviderRuntime:
 
     @property
     def can_search(self) -> bool:
-        """Whether this model can search the web while answering: the ChatGPT subscription (Codex) can."""
+        """Whether this model can search the web while answering: the ChatGPT subscription (Codex) can, and a
+        Claude model with 联网搜索 turned on (it is billed per search, so it is off by default)."""
+        if self.config.kind == "anthropic":
+            return self.config.options.get("web_search") is True
         return self.config.kind == "codex"
 
     @property
@@ -152,6 +163,7 @@ class ProviderRuntime:
             "id": self.config.id,
             "kind": self.config.kind,
             "model": self.config.model,
+            "can_search": self.can_search,
             "available": self.health.open_until <= now,
             "retry_in": max(0.0, round(self.health.open_until - now)),
             "consecutive_failures": self.health.consecutive_failures,
@@ -169,7 +181,7 @@ class ProviderRuntime:
         search: bool = False,
     ) -> tuple[Completion, int]:
         """Returns (completion, llm_calls id). Raises ProviderUnavailable or ProviderError. `search`: let
-        the model search the web (only a Codex model can; see `can_search`)."""
+        the model search the web (only for a model that `can_search`)."""
         self._in_flight += 1
         self._idle.clear()
         try:
@@ -229,8 +241,9 @@ class ProviderRuntime:
         attempt = 0
         while True:
             started = time.time()
+            provider = self.provider
             try:
-                completion = await self.provider.complete(
+                completion = await provider.complete(
                     messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -238,6 +251,8 @@ class ProviderRuntime:
                 )
             except ProviderError as exc:
                 await self._log(bot_id, started, None, "error", str(exc), prompt_chars)
+                if isinstance(exc.__cause__, httpx.PoolTimeout):
+                    self._renew(provider)
                 if exc.retryable and attempt < self._retries:
                     attempt += 1
                     await asyncio.sleep(self._retry_delay * attempt)
@@ -267,6 +282,35 @@ class ProviderRuntime:
             self.health.last_ok_at = time.time()
             # The call log keeps what the model really said; nobody after this point sees its reasoning.
             return replace(completion, text=without_thought(completion.text)), call_id
+
+    def _renew(self, stuck: Provider) -> None:
+        """Swap in a freshly built provider when `stuck`'s connection pool is full of connections that
+        were never given back. httpx through a proxy can lose a pool slot on each failed connection: a
+        night of a dead proxy fills the pool, and every later call waits for a slot until PoolTimeout,
+        long after the network is back. The stuck provider closes once its waiting calls have timed out."""
+        if self._renew_with is None or stuck is not self.provider or self._closing:
+            return  # nothing to rebuild with, or another call already renewed it
+        try:
+            self.provider = self._renew_with()
+        except Exception as exc:
+            log.warning("模型 %s 的连接池卡住了，重建也失败：%s", self.config.id, error_text(exc))
+            return
+        log.warning("模型 %s 的连接池卡住了（之前的连接一直没放回来），换了一个新的", self.config.id)
+        self._stale.add(stuck)
+        task = asyncio.create_task(self._close_stale(stuck), name=f"provider-renew:{self.config.id}")
+        self._stale_closers.add(task)
+        task.add_done_callback(self._stale_closers.discard)
+
+    async def _close_stale(self, stuck: Provider) -> None:
+        await asyncio.sleep(2 * _timeout(self.config) + 5)  # the calls still waiting on it time out first
+        await self._close_provider(stuck)
+
+    async def _close_provider(self, provider: Provider) -> None:
+        self._stale.discard(provider)
+        closer = getattr(provider, "aclose", None)
+        if closer is not None:
+            with contextlib.suppress(Exception):
+                await closer()
 
     def _failed(self, error: str) -> None:
         self.health.consecutive_failures += 1
@@ -327,10 +371,10 @@ class ProviderRuntime:
         await self.aclose()
 
     async def aclose(self) -> None:
-        closer = getattr(self.provider, "aclose", None)
-        if closer is not None:
-            with contextlib.suppress(Exception):
-                await closer()
+        for task in list(self._stale_closers):
+            task.cancel()
+        for provider in [*self._stale, self.provider]:
+            await self._close_provider(provider)
         self.closed = True
 
 
@@ -340,11 +384,21 @@ class ProviderRegistry:
     `runtimes` is mutated in place, never rebound: the brain and the API hold this object.
     """
 
-    def __init__(self, record: CallRecorder | None = None, **runtime_options: Any) -> None:
+    def __init__(
+        self,
+        record: CallRecorder | None = None,
+        *,
+        factory: ProviderFactory | None = None,
+        secrets: SecretReader | None = None,
+        **runtime_options: Any,
+    ) -> None:
         self.runtimes: dict[str, ProviderRuntime] = {}
         self.errors: dict[str, str] = {}  # provider id -> why it did not build (secret-free)
         self._record = record
         self._runtime_options = runtime_options
+        # With `secrets`: how a runtime rebuilds its provider (ProviderRuntime._renew).
+        self._factory = factory
+        self._secrets = secrets
         self._closers: set[asyncio.Task] = set()
         self._retired: set[ProviderRuntime] = set()  # swapped out, not closed yet
 
@@ -357,7 +411,7 @@ class ProviderRegistry:
         factory: ProviderFactory = build_provider,
         **runtime_options: Any,
     ) -> ProviderRegistry:
-        registry = cls(record, **runtime_options)
+        registry = cls(record, factory=factory, secrets=secrets, **runtime_options)
         for config in configs:
             # Any exception: one bad row (`timeout: null` from the CLI, a socks5 proxy…) must never stop
             # nest from starting. The row stays listed, with the reason, and can be fixed in the console.
@@ -367,8 +421,14 @@ class ProviderRegistry:
                 registry.set_error(config.id, error_text(exc, secrets.get(config.key_ref)))
                 log.warning("模型 %s 配置有误，已跳过：%s", config.id, registry.errors[config.id])
                 continue
-            registry.runtimes[config.id] = ProviderRuntime(config, provider, record, **runtime_options)
+            registry.runtimes[config.id] = registry._runtime(config, provider)
         return registry
+
+    def _runtime(self, config: ProviderConfig, provider: Provider) -> ProviderRuntime:
+        assert self._record is not None
+        factory, secrets = self._factory, self._secrets
+        renew = None if factory is None or secrets is None else (lambda: factory(config, secrets))
+        return ProviderRuntime(config, provider, self._record, renew=renew, **self._runtime_options)
 
     def get(self, provider_id: str | None) -> ProviderRuntime | None:
         return self.runtimes.get(provider_id or "")
@@ -381,7 +441,7 @@ class ProviderRegistry:
         """Swap in a freshly built provider; the previous runtime finishes its calls, then closes."""
         if self._record is None:
             raise RuntimeError("ProviderRegistry.replace needs a call recorder")
-        runtime = ProviderRuntime(config, provider, self._record, **self._runtime_options)
+        runtime = self._runtime(config, provider)
         old = self.runtimes.get(config.id)
         self.runtimes[config.id] = runtime
         self.errors.pop(config.id, None)

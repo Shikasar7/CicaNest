@@ -49,6 +49,8 @@ type Live = {
   stickersVersion: number
   /** Bumps when a group's 黑话, the learning model or a group's switches changed. */
   slangVersion: number
+  /** Bumps when 长期记忆 changed: learned, edited, or its model. */
+  memoriesVersion: number
   /** Bumps when 问题记录 changed: an issue written down, its status, the digest settings or a digest sent. */
   issuesVersion: number
   /** Which picture each bot shows (bot id -> view); empty until loaded, or on a nest from before pictures. */
@@ -98,6 +100,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [watchesVersion, setWatchesVersion] = useState(0)
   const [stickersVersion, setStickersVersion] = useState(0)
   const [slangVersion, setSlangVersion] = useState(0)
+  const [memoriesVersion, setMemoriesVersion] = useState(0)
   const [issuesVersion, setIssuesVersion] = useState(0)
   const [avatarsVersion, setAvatarsVersion] = useState(0)
   const fetchedAvatars = useLiveData<Record<string, AvatarView>>('/api/avatars', [avatarsVersion]).data
@@ -166,6 +169,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     source.addEventListener('avatars', () => setAvatarsVersion((v) => v + 1))
     source.addEventListener('stickers', () => setStickersVersion((v) => v + 1))
     source.addEventListener('slang', () => setSlangVersion((v) => v + 1))
+    source.addEventListener('memories', () => setMemoriesVersion((v) => v + 1))
     source.addEventListener('issues', () => setIssuesVersion((v) => v + 1))
     source.addEventListener('groups', () => {
       setStickersVersion((v) => v + 1)
@@ -213,6 +217,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         watchesVersion,
         stickersVersion,
         slangVersion,
+        memoriesVersion,
         issuesVersion,
         avatars,
         setAvatar,

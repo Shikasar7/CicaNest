@@ -212,6 +212,15 @@ class MessageStore:
         )
         return [message_dict(row) for row in reversed(rows)]
 
+    async def since(self, channel: int, since: float, *, limit: int) -> list[dict[str, Any]]:
+        """The first `limit` messages of a channel sent after `since`, everyone's (ours too), oldest first."""
+        rows = await self.db.fetchall(
+            f"""SELECT {MESSAGE_COLUMNS} FROM messages WHERE channel_id = ? AND sent_at > ?
+                ORDER BY sent_at, id LIMIT ?""",
+            (channel, since, limit),
+        )
+        return [message_dict(row) for row in rows]
+
     async def count_from_members(self, channel: int, *, since: float, exclude: set[str]) -> int:
         marks = ",".join("?" * len(exclude)) or "SELECT NULL WHERE 0"  # NOT IN (NULL) matches nothing
         row = await self.db.fetchone(

@@ -32,8 +32,8 @@ class Completion:
     latency_ms: float
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
-    # A call with web search (Codex only): how many searches or page visits it made, and the pages the
-    # answer cites as (title, url).
+    # A call with web search (Codex, or Claude with 联网搜索 on): how many searches or page visits it
+    # made, and the pages the answer cites as (title, url).
     searches: int = 0
     sources: tuple[tuple[str, str], ...] = ()
     # The model hit the output limit and stopped mid-sentence (a thinking model can spend most of a small
@@ -51,7 +51,8 @@ class ProviderError(Exception):
 
 @runtime_checkable
 class Provider(Protocol):
-    """`search=True` (web search while answering a question) is only ever passed to a Codex provider."""
+    """`search=True` (web search while answering a question) is only ever passed to a provider whose
+    runtime `can_search` (Codex, or Claude with 联网搜索 on)."""
 
     name: str
 

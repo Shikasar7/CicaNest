@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from nest.core.hub import Hub
+from nest.core.memory import MemoryKeeper
 from nest.core.slang import SlangLearner
 from nest.core.stickers import StickerKeeper
 from nest.storage.db import Database
@@ -136,11 +137,13 @@ class Housekeeper:
         first_delay: float = 60.0,
         stickers: StickerKeeper | None = None,
         slang: SlangLearner | None = None,
+        memory: MemoryKeeper | None = None,
     ) -> None:
         self.db = db
         self.hub = hub
         self.stickers = stickers
         self.slang = slang
+        self.memory = memory
         self._plan = plan
         self._interval = interval
         self._first_delay = first_delay
@@ -161,6 +164,8 @@ class Housekeeper:
                 stickers, sticker_bytes = await self.stickers.tidy(now)
             if self.slang is not None:
                 records += await self.slang.tidy(now, plan.history_days)
+            if self.memory is not None:
+                records += await self.memory.tidy(now)
             freed = await self.db.compact(COMPACT_MIN_FREE) + sticker_bytes
             files = 0
             if plan.qq_cache_dir is not None and plan.qq_cache_days > 0:

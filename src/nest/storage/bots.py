@@ -68,6 +68,19 @@ class BotChannel:
     answer_tone: str = "crisp"  # 答题的语气 (a tones key, nest.core.tones)
     chat_tone: str = "persona"  # 聊天的语气
     recorder: bool = False  # 问题记录官: this bot writes down the group's unsolved questions (one per group)
+    # 欢迎新人 (groups whose platform reports joins): this bot may be the one that welcomes whoever joins;
+    # spoken when it can (or always as text), about welcome_delay seconds after the join, and welcome_note
+    # (if any) sent as its own message after the welcome.
+    welcome: bool = False
+    welcome_voice: bool = True
+    welcome_delay: int = 5
+    welcome_note: str = ""
+    # 生日祝福 (groups whose platform shows birthdays): this bot may be the one that wishes a member a happy
+    # birthday on the day (nest.core.birthday).
+    birthday: bool = False
+    # 长期记忆: this bot remembers people here (their likes, how they are, what they agreed with it) and is
+    # told what it remembers of whoever it is talking with (nest.core.memory).
+    remember: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +394,12 @@ class BotRepo:
         answer_tone: str | None = None,
         chat_tone: str | None = None,
         recorder: bool | None = None,
+        welcome: bool | None = None,
+        welcome_voice: bool | None = None,
+        welcome_delay: int | None = None,
+        welcome_note: str | None = None,
+        birthday: bool | None = None,
+        remember: bool | None = None,
     ) -> None:
         """None (UNSET for persona_id) leaves a setting as it is; persona_id=None removes the persona.
         recorder=True takes 问题记录官 away from any other bot in the same group."""
@@ -419,6 +438,18 @@ class BotRepo:
             columns["chat_tone"] = chat_tone
         if recorder is not None:
             columns["recorder"] = int(recorder)
+        if welcome is not None:
+            columns["welcome"] = int(welcome)
+        if welcome_voice is not None:
+            columns["welcome_voice"] = int(welcome_voice)
+        if welcome_delay is not None:
+            columns["welcome_delay"] = welcome_delay
+        if welcome_note is not None:
+            columns["welcome_note"] = welcome_note
+        if birthday is not None:
+            columns["birthday"] = int(birthday)
+        if remember is not None:
+            columns["remember"] = int(remember)
         async with self.db.transaction() as conn:
             if recorder:
                 await conn.execute(
@@ -451,6 +482,8 @@ class BotRepo:
                       coalesce(p.examples, '') AS examples,
                       bc.sticker_mode, bc.voice_mode, bc.voice_rate, bc.reply_lines, bc.split_rate,
                       bc.use_slang, bc.answer_questions, bc.answer_tone, bc.chat_tone, bc.recorder,
+                      bc.welcome, bc.welcome_voice, bc.welcome_delay, bc.welcome_note,
+                      bc.birthday, bc.remember,
                       c.kind,
                       c.external_id, c.name,
                       coalesce(p.name, '') AS persona_name,
@@ -481,6 +514,12 @@ class BotRepo:
                     answer_tone=ch["answer_tone"],
                     chat_tone=ch["chat_tone"],
                     recorder=bool(ch["recorder"]),
+                    welcome=bool(ch["welcome"]),
+                    welcome_voice=bool(ch["welcome_voice"]),
+                    welcome_delay=ch["welcome_delay"],
+                    welcome_note=ch["welcome_note"],
+                    birthday=bool(ch["birthday"]),
+                    remember=bool(ch["remember"]),
                 )
                 for ch in channel_rows
                 if ch["bot_id"] == row["id"]

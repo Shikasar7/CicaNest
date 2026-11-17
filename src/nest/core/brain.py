@@ -26,21 +26,23 @@ import logging
 import random
 import re
 import time
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from nest.adapters.base import Adapter, parse_recipient
 from nest.adapters.registry import can, capabilities_of, place_of
-from nest.core import welcome
+from nest.core import birthday, welcome
 from nest.core.broadcast import Broadcaster
 from nest.core.events import CaughtUp, ChannelRef, MemberJoined, MessageEvent, Segment, SendMessage
 from nest.core.issues import RECORDER_HINT
+from nest.core.memory import MemoryKeeper
 from nest.core.prompt import (
     MEMORY_CHARS,
     UNSURE,
     ProjectContext,
     Sorting,
+    after_drafting,
     build_answer_prompt,
     build_memory_prompt,
     build_private_prompt,
@@ -67,7 +69,7 @@ from nest.llm.speech import SpeechError
 from nest.storage.accounts import list_accounts
 from nest.storage.bots import MAX_REPLY_LINES, BotChannel, BotConfig, BotRepo
 from nest.storage.messages import MessageStore
-from nest.storage.slang import GroupFeatureStore, group_key_of
+from nest.storage.slang import group_key_of
 from nest.storage.tones import ToneRepo
 
 log = logging.getLogger(__name__)
@@ -214,6 +216,7 @@ class Brain:
         self.speech: SpeechKeeper | None = None
         self.chance = random.random  # 语音频率's dice
         self.slang: SlangLearner | None = None
+        self.memory: MemoryKeeper | None = None  # 长期记忆
         self.knowledge: KnowledgeService | None = None
         self.screenshots: ScreenshotReader | None = None
         self._foreign_logged: dict[str, float] = {}
@@ -362,7 +365,7 @@ class Brain:
             return
         recent = sum(1 for (group, _), _at in self._welcomed.items() if group == key)
         self._welcomed[(key, event.user_id)] = now  # before any await: the next account's report sees it
-        if not (await GroupFeatureStore(self.repo.db).get(key)).welcome:
+        if not self._welcomers(key):
             return
         if recent >= welcome.MAX_PER_WINDOW:
             log.info("%s 短时间内进了好几个人，这个 %s 就不单独欢迎了", key, event.name or event.user_id)
@@ -372,28 +375,36 @@ class Brain:
         task.add_done_callback(self._welcoming.discard)
 
     def _welcomers(self, key: str) -> list[tuple[BotConfig, BotChannel]]:
-        """The live bots switched on in this group whose accounts are running."""
+        """The live bots switched on in this group, with 欢迎新人 on there, whose accounts are running."""
         return [
             (bot, channel)
             for bot in self.bots.values()
             if bot.mode == "live" and self.adapters.get(bot.account_id) is not None
             for channel in bot.channels.values()
-            if channel.enabled and channel.channel.kind == "group" and group_key_of(channel.channel) == key
+            if channel.enabled
+            and channel.welcome
+            and channel.channel.kind == "group"
+            and group_key_of(channel.channel) == key
         ]
 
     async def _welcome(self, key: str, event: MemberJoined, row: dict[str, Any]) -> None:
-        low, high = welcome.DELAY
-        await asyncio.sleep(low + (high - low) * self.chance())
-        candidates = self._welcomers(key)
-        if not candidates:
-            log.info("%s 有新人进群，但这个群没有在说话的 bot，没有欢迎", key)
+        pool = self._welcomers(key)
+        if not pool:
             return
-        # One that can speak for real first, then one whose voice is on trial, then anyone (as text).
-        spoken = [c for c in candidates if self._can_speak(*c) and c[1].voice_mode == "on"]
-        pool = spoken or [c for c in candidates if self._can_speak(*c)] or candidates
         bot, channel = pool[min(int(self.chance() * len(pool)), len(pool) - 1)]
+        await asyncio.sleep(welcome.wait(channel.welcome_delay, self.chance()))
+        # Settings may have changed while it waited: the fresh ones, or none when it was switched off.
+        fresh = [
+            (b, c) for b, c in self._welcomers(key) if (b.id, c.channel_id) == (bot.id, channel.channel_id)
+        ]
+        if not fresh:
+            log.info("%s 等着欢迎的时候被关掉了，没有欢迎", bot.name)
+            return
+        [(bot, channel)] = fresh
         draft = Draft(
-            outcome="would_reply", reason="有新人进群，欢迎一下", voice=self._can_speak(bot, channel)
+            outcome="would_reply",
+            reason="有新人进群，欢迎一下",
+            voice=channel.welcome_voice and self._can_speak(bot, channel),
         )
         name = welcome.spoken(event.name)
         try:
@@ -401,7 +412,7 @@ class Brain:
             messages = welcome.prompt(self._persona(bot, channel), bot.name, name, before)
             completion, call_id, _ = await self._complete(bot, messages, max_tokens=welcome.MAX_TOKENS)
             # Cut off by the output limit, the line stops mid-sentence ("……来了就"): the plain one is better.
-            said = "" if completion.cut else welcome.line(completion.text, name)
+            said = "" if completion.cut else welcome.line(after_drafting(completion.text)[0], name)
             draft = replace(draft, llm_call_id=call_id)
         except (ProviderUnavailable, ProviderError) as exc:
             log.info("%s 写欢迎词失败（%s），用默认的一句", bot.name, exc)
@@ -412,9 +423,66 @@ class Brain:
             sent = await self._send(bot, channel, draft)
             if plain:
                 sent = replace(sent, reason=f"{sent.reason}；模型没写出来，用了默认的一句")
+            if channel.welcome_note and sent.outcome == "replied":
+                after = await self._follow_up(bot, channel, sent, [channel.welcome_note])
+                note = "接着发了设好的那句话" if after.reason == "已发送 2 条" else after.reason
+                sent = replace(sent, reason=f"{sent.reason}；{note}")
             await self._record(bot, channel.channel_id, sent, "welcome", row)
         except Exception:
             log.exception("%s 欢迎新人出错", bot.name)
+
+    def birthday_wishers(self) -> dict[str, list[tuple[BotConfig, BotChannel]]]:
+        """生日祝福 (nest.core.birthday): by group key, the bots with it on there, live or observing, whose
+        accounts are running."""
+        found: dict[str, list[tuple[BotConfig, BotChannel]]] = {}
+        for bot in self.bots.values():
+            if bot.mode == "paused" or self.adapters.get(bot.account_id) is None:
+                continue
+            for channel in bot.channels.values():
+                if channel.enabled and channel.birthday and channel.channel.kind == "group":
+                    found.setdefault(group_key_of(channel.channel), []).append((bot, channel))
+        return found
+
+    async def wish_birthday(
+        self, bot: BotConfig, channel: BotChannel, user_id: str, name: str, said: Sequence[str] = ()
+    ) -> tuple[str, str]:
+        """生日祝福: one wish in the bot's own words, @ing the person; an observing bot only notes it.
+        `name` as welcome.spoken(); `said`: the bot's last wishes. (What became of it — "replied" when it
+        went out or may have, "would_reply", "failed" — and the words.)"""
+        capable = capabilities_of(channel.channel.platform)
+        mention = "mention" in capable
+        draft = Draft(
+            outcome="would_reply",
+            reason="今天是群友的生日，祝ta生日快乐",
+            target={"id": None, "external_id": "", "sender_id": user_id} if mention else None,
+        )
+        try:
+            messages = birthday.prompt(self._persona(bot, channel), bot.name, name, said)
+            completion, call_id, _ = await self._complete(bot, messages, max_tokens=birthday.MAX_TOKENS)
+            words = "" if completion.cut else birthday.line(after_drafting(completion.text)[0])
+            draft = replace(draft, llm_call_id=call_id)
+        except (ProviderUnavailable, ProviderError) as exc:
+            log.info("%s 写生日祝福失败（%s），用默认的一句", bot.name, exc)
+            words = ""
+        plain = not words
+        words = words or birthday.fallback()
+        # After the @ comes a space, as when people @ someone in QQ.
+        draft = replace(draft, reply=f" {words}" if mention else words)
+        if bot.mode == "live":
+            sent = await self._send(bot, channel, draft)
+        else:
+            sent = replace(draft, reason="只看不说：本来会祝ta生日快乐")
+        if plain:
+            sent = replace(sent, reason=f"{sent.reason}；模型没写出来，用了默认的一句")
+        shown = f"@{name or user_id} {words}" if mention else words
+        trigger_row = {"id": None, "sender_name": name or user_id, "text": None, "sent_at": None}
+        try:
+            await self._record(bot, channel.channel_id, replace(sent, reply=shown), "birthday", trigger_row)
+        except Exception:
+            log.exception("%s 记录生日祝福出错", bot.name)
+        if sent.outcome == "replied" or sent.maybe_sent:
+            return "replied", words
+        return ("would_reply" if sent.outcome == "would_reply" else "failed"), words
 
     async def _mentions(self, bot: BotConfig, channel: BotChannel, event: MessageEvent) -> bool:
         if _private(channel) or bot.self_id in event.mentions:
@@ -889,6 +957,7 @@ class Brain:
                 glossary = await self.slang.glossary(
                     group_key_of(channel.channel), [row["text"] for row in (*context, *shown)]
                 )
+            people = await self.memory.recall(bot, channel, [*context, *shown]) if self.memory else ""
             # Looked up on every attempt, with no await before the call: the model may have been edited
             # (its runtime swapped) or removed, or the bot switched to another one, while this evaluation
             # was waiting.
@@ -918,6 +987,7 @@ class Brain:
                     project=project,
                     tone=self.tone(channel.answer_tone, DEFAULT_ANSWER),
                     place=place_of(channel.channel.platform),
+                    people=people,
                 )
             elif private:
                 memory, _ = await self.store.memory(channel.channel_id)
@@ -931,6 +1001,7 @@ class Brain:
                     sing=sing and speakable,
                     memory=memory,
                     place=place_of(channel.channel.platform)[1],
+                    people=people,
                 )
             else:
                 messages = build_prompt(
@@ -948,6 +1019,7 @@ class Brain:
                     sing=sing and speakable,
                     reply_lines=SONG_LINES if sing and speakable else lines,
                     place=place_of(channel.channel.platform)[0],
+                    people=people,
                 )
             terms = [term for term, _ in glossary]
             if answering:
@@ -968,7 +1040,11 @@ class Brain:
             if used.config.id != own:
                 note = f"{own} 用不了，用了备用模型 {used.config.id}"
                 sorted_as = f"{note}；{sorted_as}" if sorted_as else note
-            raw, spoken = split_voice(completion.text)
+            text, drafted = after_drafting(completion.text)
+            if drafted:
+                note = "模型把盘算也写进了回复，只取「输出：」后面的话"
+                sorted_as = f"{sorted_as}；{note}" if sorted_as else note
+            raw, spoken = split_voice(text)
             offered = [self.stickers.describe_choice(s) for s in choices] if self.stickers else []
             raw, number = split_sticker(raw, offered)
             sticker = choices[number - 1] if number else None

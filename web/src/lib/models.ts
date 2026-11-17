@@ -18,7 +18,7 @@ export const CODEX_AUTH_FILE = '~/.codex/auth.json'
 export const KIND_OPTIONS: Record<ProviderKind, string[]> = {
   openai_chat: ['proxy', 'timeout', 'temperature', 'extra_body'],
   openai_responses: ['proxy', 'timeout', 'extra_body', 'input_format'],
-  anthropic: ['proxy', 'timeout', 'extra_body', 'auth_header', 'effort'],
+  anthropic: ['proxy', 'timeout', 'extra_body', 'auth_header', 'effort', 'web_search'],
   codex: ['proxy', 'timeout', 'auth_file'],
 }
 
@@ -30,6 +30,7 @@ export const OPTION_LABEL: Record<string, string> = {
   input_format: '对话格式',
   auth_header: '密钥请求头',
   effort: '思考档',
+  web_search: '联网搜索',
   auth_file: '登录文件',
 }
 

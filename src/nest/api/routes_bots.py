@@ -29,6 +29,10 @@ ALIAS_LIMIT = 10
 CHANNEL_NAME_LIMIT = 40
 
 
+MAX_WELCOME_DELAY = 120  # 欢迎新人: seconds after the join, at most
+MAX_WELCOME_NOTE = 200
+
+
 class BotPatch(BaseModel):
     """Every field optional; null means "not sent", except provider_id and backup_provider_id, where null
     removes the model (told apart with model_fields_set)."""
@@ -64,6 +68,13 @@ class ChannelPatch(BaseModel):
     answer_tone: Annotated[str, Field(min_length=1, max_length=40)] | None = None
     chat_tone: Annotated[str, Field(min_length=1, max_length=40)] | None = None
     recorder: bool | None = None  # 问题记录官 (groups only; one bot per group)
+    # 欢迎新人 (groups whose platform reports joins)
+    welcome: bool | None = None
+    welcome_voice: bool | None = None  # false: always as text
+    welcome_delay: Annotated[int, Field(strict=True, ge=0, le=MAX_WELCOME_DELAY)] | None = None  # seconds
+    welcome_note: Annotated[str, Field(max_length=MAX_WELCOME_NOTE)] | None = None  # "" removes it
+    birthday: bool | None = None  # 生日祝福 (groups whose platform shows birthdays)
+    remember: bool | None = None  # 长期记忆
 
 
 class ChannelCreate(BaseModel):
@@ -182,6 +193,12 @@ async def bots(request: Request) -> list[dict[str, Any]]:
                         "answer_tone": ch.answer_tone,
                         "chat_tone": ch.chat_tone,
                         "recorder": ch.recorder,
+                        "welcome": ch.welcome,
+                        "welcome_voice": ch.welcome_voice,
+                        "welcome_delay": ch.welcome_delay,
+                        "welcome_note": ch.welcome_note,
+                        "birthday": ch.birthday,
+                        "remember": ch.remember,
                     }
                     for ch in sorted(bot.channels.values(), key=lambda c: names.get(c.channel_id) or c.name)
                 ],
@@ -282,6 +299,10 @@ def _within_capabilities(account: str, patch: ChannelPatch | ChannelCreate) -> N
         refuse("这个平台发不了语音")
     if not can(account, "send_image") and patch.sticker_mode not in (None, "off"):
         refuse("这个平台发不了表情")
+    if not can(account, "member_joins") and patch.welcome:
+        refuse("这个平台不告诉 nest 有人进群，没法欢迎")
+    if not can(account, "birthdays") and patch.birthday:
+        refuse("这个平台看不到群友的生日，没法祝生日快乐")
 
 
 @router.patch("/bots/{bot_id}/channels/{channel_id}")
@@ -299,6 +320,13 @@ async def update_bot_channel(
             raise HTTPException(status_code=400, detail="没有这个人设")
         if patch.recorder and bot.channels[channel_id].channel.kind != "group":
             raise HTTPException(status_code=400, detail="问题记录官只在群里当")
+        if patch.welcome and bot.channels[channel_id].channel.kind != "group":
+            raise HTTPException(status_code=400, detail="只有群里才有人进来")
+        if patch.birthday and bot.channels[channel_id].channel.kind != "group":
+            raise HTTPException(status_code=400, detail="生日祝福只在群里发")
+        note = patch.welcome_note.strip() if patch.welcome_note is not None else None
+        if note and has_bad_chars(note):
+            raise _invalid("欢迎后的那句话里不能有换行或控制字符")
         _within_capabilities(bot.account_id, patch)
         for key in (patch.answer_tone, patch.chat_tone):
             if key is not None and await ToneRepo(state.db).get(key) is None:
@@ -320,6 +348,12 @@ async def update_bot_channel(
             answer_tone=patch.answer_tone,
             chat_tone=patch.chat_tone,
             recorder=patch.recorder,
+            welcome=patch.welcome,
+            welcome_voice=patch.welcome_voice,
+            welcome_delay=patch.welcome_delay,
+            welcome_note=note,
+            birthday=patch.birthday,
+            remember=patch.remember,
         )
         await state.brain.load()
         state.broadcaster.publish("bots", {"bot_id": bot_id})

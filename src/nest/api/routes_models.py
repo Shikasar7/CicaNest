@@ -50,7 +50,7 @@ NOT_LOADED = "还没有加载，保存一次或重启 nest"
 OPTIONS = {
     "openai_chat": ("proxy", "timeout", "temperature", "extra_body"),
     "openai_responses": ("proxy", "timeout", "extra_body", "input_format"),
-    "anthropic": ("proxy", "timeout", "extra_body", "auth_header", "effort"),
+    "anthropic": ("proxy", "timeout", "extra_body", "auth_header", "effort", "web_search"),
     "codex": ("proxy", "timeout", "auth_file"),
 }
 RESERVED_BODY = (
@@ -268,6 +268,12 @@ def _effort(value: Any) -> str:
     return value
 
 
+def _web_search(value: Any) -> bool | str:
+    if not isinstance(value, bool):
+        raise _invalid("联网搜索只能开或关")
+    return value or ""  # off is the default: not stored
+
+
 def _auth_file(value: Any) -> str:
     if not isinstance(value, str):
         raise _invalid("登录文件要填文件路径")
@@ -291,6 +297,7 @@ CHECKS = {
     "input_format": _input_format,
     "auth_header": _auth_header,
     "effort": _effort,
+    "web_search": _web_search,
     "auth_file": _auth_file,
 }
 

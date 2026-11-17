@@ -151,11 +151,13 @@ def build_prompt(
     sing: bool = False,
     reply_lines: int = 3,
     place: str = QQ_PLACE[0],
+    people: str = "",
 ) -> list[ChatMessage]:
     """`stickers`: what the bot may send, numbered from 1 in this order (表情包); `glossary`: the group's
     terms that occur in these messages (黑话); `tone`: how it talks (语气; None or 跟人设走: as the persona
     says); `voice`: it may speak a reply (发语音), `sing`: and was asked to sing; `reply_lines`: how many
-    lines this reply may have (一次最多发, 分条频率). Without them the prompt is exactly the plain one."""
+    lines this reply may have (一次最多发, 分条频率); `people`: what it remembers of who is talking (长期记忆,
+    nest.core.memory). Without them the prompt is exactly the plain one."""
     rules = RULES.format(lines=_lines_rule(reply_lines), place=place)
     system = (persona.strip() or f"你是群里的{bot_name}。") + "\n" + rules + _manner(tone)
     if glossary:
@@ -164,7 +166,7 @@ def build_prompt(
         )
     lines = [render(row, bot_name=bot_name, peers=peers, called=called) for row in context]
     fresh = [render(row, bot_name=bot_name, peers=peers, called=called) for row in batch]
-    parts = []
+    parts = [people] if people else []
     if lines:
         parts.append("之前的聊天：\n" + "\n".join(lines))
     parts.append("新消息：\n" + "\n".join(fresh))
@@ -219,9 +221,11 @@ def build_private_prompt(
     sing: bool = False,
     memory: str = "",
     place: str = QQ_PLACE[1],
+    people: str = "",
 ) -> list[ChatMessage]:
     """A private chat: everything the other person says is to the bot, so nothing is marked as calling it.
-    `memory`: what older talk came to (nest.core.brain._remember)."""
+    `memory`: what older talk came to (nest.core.brain._remember); `people`: what it remembers of them
+    (长期记忆)."""
     rules = PRIVATE_RULES.format(place=place)
     system = (persona.strip() or f"你是{bot_name}。") + "\n" + rules + _manner(tone)
 
@@ -231,7 +235,7 @@ def build_private_prompt(
         return f"{who}：{text}" + ("（已撤回）" if row.get("recalled_at") else "")
 
     lines = [show(row) for row in context]
-    parts = []
+    parts = [people] if people else []
     if memory:
         parts.append(f"更早聊过的（摘要，不一定全，别主动复述）：\n{memory}")
     if lines:
@@ -401,11 +405,13 @@ def build_answer_prompt(
     project: ProjectContext | None = None,
     tone: Tone = BUILTIN_BY_KEY[DEFAULT_ANSWER],
     place: tuple[str, str] = QQ_PLACE,
+    people: str = "",
 ) -> list[ChatMessage]:
     """答题: someone called the bot with what may be a question; the model may still find it is chat (a
     line or two, as usual). `search`: the model can search the web. `sorting`: what step one made of it;
     `records`: for a question about the chat log, the messages found there; `project`: for a question
-    about the project, its help docs. `tone`: how the answer sounds (nest.core.tones)."""
+    about the project, its help docs. `tone`: how the answer sounds (nest.core.tones). `people`: what it
+    remembers of who is asking (长期记忆)."""
     stamp = time.localtime(now)
     history = sorting is not None and sorting.kind == "history"
     if project is not None:
@@ -423,7 +429,7 @@ def build_answer_prompt(
     fresh = [
         render(row, bot_name=bot_name, peers=peers, called=called, limit=2000) for row in batch
     ]  # room for 截图读字
-    parts = []
+    parts = [people] if people else []
     if history and sorting is not None:
         looked = "、".join(f"「{word}」" for word in sorting.keywords)
         looked = (looked + ("和链接" if looked else "链接")) if sorting.links else looked
@@ -458,6 +464,33 @@ MD_BOLD = re.compile(r"\*\*|__")
 MD_HEADING = re.compile(r"^\s*#{1,6}\s*")
 MD_BULLET = re.compile(r"^\s*[-*+]\s+")
 SOURCE_LINE = re.compile(r"\s*(?:来源|出处)[:：].*$")
+
+
+# A model that drafts in the open (Claude now and then: its judgment, the persona's rules, a draft, then
+# 「输出：」 and what it means to send) marks what it means to send with a line of its own. A marker line is
+# only the word and a colon, so 「输出：3」 in an answer about code is not one; 「最终输出：……」 may carry the
+# words on the same line.
+DRAFT_MARK = re.compile(
+    r"^\s*(?:(?:最终|最后)的?)?(?:输出|回复|回答|要发的话|发送的?内容)(?:如下)?\s*[:：]\s*$"
+    r"|^\s*(?:最终|最后)的?(?:输出|回复|回答)\s*[:：]\s*(?P<rest>\S.*)$"
+    r"|^\s*(?:final\s+)?(?:output|reply|answer)\s*:\s*$",
+    re.IGNORECASE,
+)
+
+
+def after_drafting(raw: str) -> tuple[str, bool]:
+    """(what the model means to send, whether it drafted in the open): the text after its last 「输出：」
+    line when it wrote one, else all of it."""
+    lines = (raw or "").splitlines()
+    last = None
+    for number, line in enumerate(lines):
+        match = DRAFT_MARK.match(line)
+        if match:
+            last = (number, match.group("rest") or "")
+    if last is None:
+        return raw, False
+    number, rest = last
+    return "\n".join([rest, *lines[number + 1 :]]).strip(), True
 
 
 def clean_answer(raw: str, *, max_chars: int) -> tuple[str, str]:

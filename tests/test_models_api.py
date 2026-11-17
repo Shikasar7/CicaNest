@@ -285,6 +285,9 @@ async def test_a_bad_row_at_startup_is_listed_and_can_be_fixed(nest: Nest) -> No
         (chat(kind="anthropic", options={"effort": "medium"}), 201, None),
         (chat(kind="anthropic", options={"effort": "max"}), 422, "思考档只能选"),
         (chat(options={"effort": "medium"}), 422, "「effort」这个设置在这种接口里不起作用"),
+        (chat(kind="anthropic", options={"web_search": True}), 201, None),
+        (chat(kind="anthropic", options={"web_search": "yes"}), 422, "联网搜索只能开或关"),
+        (chat(options={"web_search": True}), 422, "「web_search」这个设置在这种接口里不起作用"),
         (
             chat(kind="anthropic", options={"effort": "high", "extra_body": {"output_config": {}}}),
             422,

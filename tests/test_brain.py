@@ -13,7 +13,7 @@ import pytest
 from nest.core.brain import Brain, Draft, Policy, _opening
 from nest.core.broadcast import Broadcaster
 from nest.core.events import CaughtUp, ChannelRef, MessageEvent, Segment
-from nest.core.prompt import MISSED_NOTE, build_prompt, clean_reply
+from nest.core.prompt import MISSED_NOTE, after_drafting, build_prompt, clean_reply
 from nest.llm.base import ProviderError
 from nest.llm.runtime import ProviderRegistry, ProviderRuntime
 from nest.storage.accounts import upsert_account
@@ -139,6 +139,33 @@ async def set_activity(w: World, activity: str, bots: list[str] | None = None) -
         for channel_id in bot.channels:
             await w.repo.set_channel(bot.id, channel_id, activity=activity)
     await w.brain.load()
+
+
+DRAFTED = (
+    "阿星在夸我，阿月也点到我了。被夸要先停顿，说「……谢谢」。\n\n"
+    "但这是回阿月的话，我可以接一下。\n\n"
+    "输出：\n……谢谢\n阿月那边先留好记录\n\n"
+    "我想想要不要加表情：12 挺合适。\n\n"
+    "最终输出：\n\n……谢谢，能帮上忙就好\n阿月那边先留好记录再催"
+)
+
+
+def test_a_reply_drafted_in_the_open_is_only_what_follows_its_last_output_line() -> None:
+    assert after_drafting(DRAFTED) == ("……谢谢，能帮上忙就好\n阿月那边先留好记录再催", True)
+    assert after_drafting("想了想。\n最终回复：好呀") == ("好呀", True)
+    assert after_drafting("thinking...\nOutput:\nhi") == ("hi", True)
+    # Not markers: an answer about code, a plain reply.
+    assert after_drafting("输入：1 2\n输出：3") == ("输入：1 2\n输出：3", False)
+    assert after_drafting("运行后输出：\nhello") == ("运行后输出：\nhello", False)
+    assert after_drafting("在呢在呢") == ("在呢在呢", False)
+
+
+async def test_a_drafted_reply_sends_only_the_final_words(world: World) -> None:
+    world.providers["10001"].queue(DRAFTED)
+    await world.say("阿鲸你在吗")
+    [decision] = await world.settle(1)
+    assert decision["reply"] == "……谢谢，能帮上忙就好\n阿月那边先留好记录再催"
+    assert "只取「输出：」后面的话" in decision["reason"]
 
 
 async def test_mention_leads_to_a_would_reply_with_persona_and_context(world: World) -> None:

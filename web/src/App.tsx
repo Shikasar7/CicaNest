@@ -3,6 +3,7 @@ import {
   IdCard,
   MessageSquareQuote,
   BookOpen,
+  Brain,
   ChartColumn,
   Cpu,
   House,
@@ -32,6 +33,7 @@ import { setTheme, useTheme, type ThemeChoice } from '@/lib/theme'
 import { UnsavedProvider, useConfirmLeave } from '@/lib/unsaved'
 import { Bots } from '@/pages/Bots'
 import { Knowledge } from '@/pages/Knowledge'
+import { Memories } from '@/pages/Memories'
 import { Messages } from '@/pages/Messages'
 import { Models } from '@/pages/Models'
 import { Overview } from '@/pages/Overview'
@@ -59,6 +61,7 @@ const PAGES: PageDef[] = [
   { hash: '#/stickers', label: '表情包', Icon: Smile, Page: Stickers },
   { hash: '#/speech', label: '语音', Icon: AudioLines, Page: Speech },
   { hash: '#/slang', label: '黑话', Icon: BookOpen, Page: Slang },
+  { hash: '#/memories', label: '记忆', Icon: Brain, Page: Memories },
   { hash: '#/knowledge', label: '资料', Icon: Library, Page: Knowledge },
   { hash: '#/issues', label: '问题记录', Icon: NotebookPen, Page: Issues },
   { hash: '#/system', label: '系统', Icon: Server, Page: System },

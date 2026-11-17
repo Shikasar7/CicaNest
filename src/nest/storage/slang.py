@@ -32,7 +32,6 @@ class GroupFeatures:
     group_key: str
     collect_stickers: bool = False
     learn_slang: bool = False
-    welcome: bool = False
     slang_learned_at: float | None = None
     slang_learned_until: float | None = None
 
@@ -48,7 +47,6 @@ class GroupFeatureStore:
                 group_key=row["group_key"],
                 collect_stickers=bool(row["collect_stickers"]),
                 learn_slang=bool(row["learn_slang"]),
-                welcome=bool(row["welcome"]),
                 slang_learned_at=row["slang_learned_at"],
                 slang_learned_until=row["slang_learned_until"],
             )
@@ -64,11 +62,8 @@ class GroupFeatureStore:
         *,
         collect_stickers: bool | None = None,
         learn_slang: bool | None = None,
-        welcome: bool | None = None,
     ) -> None:
         columns: dict[str, Any] = {}
-        if welcome is not None:
-            columns["welcome"] = int(welcome)
         if collect_stickers is not None:
             columns["collect_stickers"] = int(collect_stickers)
         if learn_slang is not None:

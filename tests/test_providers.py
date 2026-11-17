@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from nest.llm.anthropic import THINKING_ROOM, Anthropic
+from nest.llm.anthropic import THINKING_ROOM, Anthropic, search_tools
 from nest.llm.base import ChatMessage, Completion, ProviderError
 from nest.llm.codex import INSTRUCTIONS, Codex, parse_sse
 from nest.llm.models_list import list_models
@@ -419,6 +419,60 @@ async def test_anthropic_for_a_relay_and_its_failures() -> None:
     with pytest.raises(ProviderError) as busy:
         await provider.complete(PROMPT, max_tokens=10)
     assert busy.value.retryable and "529" in str(busy.value) and "busy" in str(busy.value)
+
+
+async def test_anthropic_searches_the_web_when_answering() -> None:
+    first = [
+        {"type": "text", "text": "我查一下。"},
+        {"type": "server_tool_use", "id": "s1", "name": "web_search", "input": {"query": "雾港 天气"}},
+        {"type": "web_search_tool_result", "tool_use_id": "s1", "content": []},
+    ]
+    second = [
+        {"type": "server_tool_use", "id": "s2", "name": "web_fetch", "input": {"url": "https://a.example"}},
+        {"type": "web_fetch_tool_result", "tool_use_id": "s2", "content": {}},
+        {"type": "text", "text": "雾港明天", "citations": [{"url": "https://a.example", "title": "雾港"}]},
+        {"type": "text", "text": "有雨。", "citations": [{"url": "https://a.example", "title": "雾港"}]},
+    ]
+    answers = iter(
+        [
+            {
+                "content": first,
+                "stop_reason": "pause_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            },
+            {"content": second, "stop_reason": "end_turn", "usage": {"input_tokens": 20, "output_tokens": 7}},
+            {"content": [{"type": "text", "text": "在"}], "stop_reason": "end_turn", "usage": {}},
+        ]
+    )
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=next(answers))
+
+    provider = Anthropic(name="c", base_url="http://x", model="claude-opus-5-5", transport=mock(handler))
+    result = await provider.complete(PROMPT, max_tokens=80, search=True)
+    assert [t["type"] for t in bodies[0]["tools"]] == ["web_search_20260209", "web_fetch_20260209"]
+    assert bodies[1]["messages"][-1] == {"role": "assistant", "content": first}  # the paused turn goes on
+    assert result.text == "雾港明天有雨。"  # not what it said before searching
+    assert result.searches == 2 and result.sources == (("雾港", "https://a.example"),)
+    assert result.prompt_tokens == 30 and result.completion_tokens == 12 and not result.cut
+    plain = await provider.complete(PROMPT, max_tokens=80)  # chatting: no tools
+    assert "tools" not in bodies[2] and plain.text == "在" and plain.searches == 0
+
+    older = Anthropic(name="h", base_url="http://x", model="claude-haiku-4-5", transport=mock(handler))
+    assert [t["type"] for t in search_tools(older.model)] == ["web_search_20250305"]
+
+
+def test_only_a_claude_model_with_search_on_can_search() -> None:
+    def runtime(kind: str, options: dict[str, object]) -> ProviderRuntime:
+        config = ProviderConfig("m", kind, "http://x", "m", "", options)
+        return ProviderRuntime(config, FakeProvider([]), Recorder())
+
+    assert runtime("anthropic", {"web_search": True}).can_search
+    assert runtime("anthropic", {"web_search": True}).health_view()["can_search"] is True
+    assert not runtime("anthropic", {}).can_search
+    assert runtime("codex", {}).can_search and not runtime("openai_chat", {"web_search": True}).can_search
 
 
 def test_anthropic_is_built_from_config(tmp_path: Path) -> None:
