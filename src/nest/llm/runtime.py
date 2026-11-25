@@ -13,12 +13,26 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import httpx
 
+from nest import plugin_code
+from nest.llm import purpose
 from nest.llm.anthropic import DEFAULT_EFFORT, Anthropic
-from nest.llm.base import ChatMessage, Completion, Painter, Provider, ProviderError, without_thought
+from nest.llm.base import (
+    ChatMessage,
+    Completion,
+    Painter,
+    Provider,
+    ProviderError,
+    TextSink,
+    Tool,
+    ToolCall,
+    ToolRunner,
+    Turn,
+    without_thought,
+)
 from nest.llm.codex import Codex
 from nest.llm.http import scrub
 from nest.llm.openai_chat import OpenAIChat
@@ -34,6 +48,9 @@ ProviderFactory = Callable[[ProviderConfig, SecretReader], Provider]
 DEFAULT_TIMEOUT = 40.0
 SHUTDOWN_GRACE = 2.0  # nest stop: how long retired runtimes may finish their calls before being closed
 CLOSE_TIMEOUT = 0.5  # nest stop: per runtime, for closing its HTTP client
+
+
+Answer = TypeVar("Answer", Completion, Turn)
 
 
 class ProviderUnavailable(Exception):
@@ -86,6 +103,9 @@ def build_provider(config: ProviderConfig, secrets: SecretReader) -> Provider:
         return Codex(
             base_url=config.base_url, auth_file=options.get("auth_file", "~/.codex/auth.json"), **common
         )
+    added = plugin_code.MODEL_KINDS.get(config.kind)
+    if added is not None:
+        return added.build(config, secrets)
     raise ValueError(f"未知的模型接口类型：{config.kind}（可选 {', '.join(KINDS)}）")
 
 
@@ -149,6 +169,18 @@ class ProviderRuntime:
         return self.config.kind == "codex"
 
     @property
+    def can_use_tools(self) -> bool:
+        """Whether this model can call tools of ours while answering (伙伴模式): Claude and the ChatGPT
+        subscription (Codex) can; an OpenAI-compatible gateway when its option `tools` is on (not every
+        gateway passes tools through). Ark's Responses endpoint, which takes the chat as one text, cannot."""
+        if self.config.kind in ("anthropic", "codex"):
+            return True
+        added = plugin_code.MODEL_KINDS.get(self.config.kind)
+        if added is not None:
+            return added.tools
+        return self.config.kind == "openai_chat" and self.config.options.get("tools") is True
+
+    @property
     def can_draw(self) -> bool:
         """Whether this model can draw pictures: the ChatGPT subscription (Codex) can."""
         return self.config.kind == "codex"
@@ -179,9 +211,14 @@ class ProviderRuntime:
         max_tokens: int,
         temperature: float | None = None,
         search: bool = False,
+        tools: Sequence[Tool] = (),
+        run: ToolRunner | None = None,
+        on_text: TextSink | None = None,
     ) -> tuple[Completion, int]:
         """Returns (completion, llm_calls id). Raises ProviderUnavailable or ProviderError. `search`: let
-        the model search the web (only for a model that `can_search`)."""
+        the model search the web (only for a model that `can_search`); `tools` and `run`: tools of ours it
+        may call (only for a model that `can_use_tools`; ignored otherwise); `on_text`: told the answer as
+        it is written (by a model that streams; the others say it at the end as always)."""
         self._in_flight += 1
         self._idle.clear()
         try:
@@ -193,7 +230,67 @@ class ProviderRuntime:
                     f"{self.health.open_until - time.time():.0f} 秒后再试"
                 )
             async with self._semaphore:
-                return await self._attempts(messages, bot_id, max_tokens, temperature, search)
+                given: dict[str, Any] = (
+                    {"tools": tools, "run": run} if tools and run and self.can_use_tools else {}
+                )
+
+                def call(provider: Provider) -> Awaitable[Completion]:
+                    told: dict[str, Any] = {}
+                    if on_text is not None and getattr(provider, "streams", False):
+                        on_text(None)  # a call made again starts over
+                        told["on_text"] = on_text
+                    return provider.complete(
+                        messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        **({"search": True} if search else {}),
+                        **given,
+                        **told,
+                    )
+
+                return await self._attempts(
+                    call,
+                    bot_id,
+                    sum(len(m.content) for m in messages),
+                )
+        finally:
+            self._in_flight -= 1
+            if self._in_flight == 0:
+                self._idle.set()
+
+    async def converse(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        bot_id: str | None,
+        tools: Sequence[Tool],
+        max_tokens: int,
+        state: Any = None,
+        results: Sequence[tuple[ToolCall, str]] = (),
+    ) -> tuple[Turn, int]:
+        """One round of a conversation with tools (任务): (turn, llm_calls id). Only for a model that
+        `can_use_tools`. Each round takes its own place in the queue, so a long task never holds the model
+        for long; a failed round is tried again like any call (nothing has been done yet in it)."""
+        self._in_flight += 1
+        self._idle.clear()
+        try:
+            if self._closing:
+                raise ProviderUnavailable("模型设置刚改过，这次没有调用")
+            if self.health.open_until > time.time():
+                raise ProviderUnavailable(
+                    f"模型 {self.config.id} 连续失败 {self.health.consecutive_failures} 次，"
+                    f"{self.health.open_until - time.time():.0f} 秒后再试"
+                )
+            if not self.can_use_tools:
+                raise ProviderUnavailable(f"模型 {self.config.id} 不会用工具")
+            async with self._semaphore:
+                return await self._attempts(
+                    lambda provider: provider.converse(  # type: ignore[attr-defined]
+                        messages, tools=tools, max_tokens=max_tokens, state=state, results=results
+                    ),
+                    bot_id,
+                    sum(len(m.content) for m in messages) + sum(len(r) for _, r in results),
+                )
         finally:
             self._in_flight -= 1
             if self._in_flight == 0:
@@ -230,25 +327,15 @@ class ProviderRuntime:
                 self._idle.set()
 
     async def _attempts(
-        self,
-        messages: Sequence[ChatMessage],
-        bot_id: str | None,
-        max_tokens: int,
-        temperature: float | None,
-        search: bool = False,
-    ) -> tuple[Completion, int]:
-        prompt_chars = sum(len(m.content) for m in messages)
+        self, call: Callable[[Provider], Awaitable[Answer]], bot_id: str | None, prompt_chars: int
+    ) -> tuple[Answer, int]:
+        """`call` once, again on a retryable failure; logged. A Completion or a Turn."""
         attempt = 0
         while True:
             started = time.time()
             provider = self.provider
             try:
-                completion = await provider.complete(
-                    messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    **({"search": True} if search else {}),
-                )
+                completion = await call(provider)
             except ProviderError as exc:
                 await self._log(bot_id, started, None, "error", str(exc), prompt_chars)
                 if isinstance(exc.__cause__, httpx.PoolTimeout):
@@ -348,6 +435,7 @@ class ProviderRuntime:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             output=output,
+            purpose=purpose.current(),
         )
 
     def aclose_when_idle(self) -> Coroutine[Any, Any, None]:

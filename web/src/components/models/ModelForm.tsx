@@ -30,6 +30,7 @@ import { editKeys } from '@/lib/forms'
 import {
   CODEX_AUTH_FILE,
   MODEL_KINDS,
+  usePluginKinds,
   OPTION_LABEL,
   isInsecureRemote,
   liveUsers,
@@ -90,6 +91,7 @@ export function ModelForm({
   draft: Draft<ModelFormState>
   onSaved: (view: ProviderView) => void
 }) {
+  const kinds = usePluginKinds()
   const creating = provider === null
   const form = draft.value
   const [tried, setTried] = useState(false)
@@ -265,7 +267,7 @@ export function ModelForm({
                 draft.set((current) => withKind(current, kind))
               }}
             >
-              {MODEL_KINDS.map((k) => (
+              {kinds >= 0 && MODEL_KINDS.map((k) => (
                 <option key={k.kind} value={k.kind}>
                   {k.label}
                 </option>
@@ -441,6 +443,24 @@ export function ModelForm({
                 className="w-full"
                 value={form.web_search ? 'on' : 'off'}
                 onChange={(e) => update({ web_search: e.target.value === 'on' })}
+              >
+                <option value="off">关（默认）</option>
+                <option value="on">开</option>
+              </NativeSelect>
+            )}
+          </Field>
+        )}
+        {form.kind === 'openai_chat' && (
+          <Field
+            label="工具调用"
+            hint="开了以后，桌面伙伴用这个模型和你私聊时可以自己读网页、设提醒、翻回忆档案和聊天记录。要模型和中转站都支持 function calling；不支持的中转站可能直接报错，那就关掉"
+          >
+            {(control) => (
+              <NativeSelect
+                {...control}
+                className="w-full"
+                value={form.tools ? 'on' : 'off'}
+                onChange={(e) => update({ tools: e.target.value === 'on' })}
               >
                 <option value="off">关（默认）</option>
                 <option value="on">开</option>

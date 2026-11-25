@@ -108,13 +108,13 @@ async def test_account_voices_of_fish_and_minimax() -> None:
     def fish(request: httpx.Request) -> httpx.Response:
         assert request.url.params["self"] == "true"
         items = [
-            {"_id": "a", "title": "小马", "state": "trained"},
+            {"_id": "a", "title": "小鹿", "state": "trained"},
             {"_id": "b", "title": "鱼", "state": "training"},
         ]
         return httpx.Response(200, json={"items": items})
 
     assert await account_voices(FISH, transport=mock(fish)) == [
-        {"id": "a", "name": "小马"},
+        {"id": "a", "name": "小鹿"},
         {"id": "b", "name": "鱼（未训练完）"},
     ]
 
@@ -517,12 +517,12 @@ async def test_api_keys_are_saved_but_never_shown(api_world: ApiWorld) -> None: 
 
 async def test_api_keeps_a_voice_library_per_service(api_world: ApiWorld) -> None:  # noqa: F811
     http = api_world.http
-    fish = {"library": {"fish": [{"id": "abc", "name": "小马"}]}}
+    fish = {"library": {"fish": [{"id": "abc", "name": "小鹿"}]}}
     assert (await http.patch("/api/speech", json=fish)).json()["settings"]["library"] == fish["library"]
     minimax = {"library": {"minimax": [{"id": "female-shaonv"}]}}
     library = (await http.patch("/api/speech", json=minimax)).json()["settings"]["library"]
     assert library == {
-        "fish": [{"id": "abc", "name": "小马"}],
+        "fish": [{"id": "abc", "name": "小鹿"}],
         "minimax": [{"id": "female-shaonv", "name": ""}],
     }
     assert (await http.patch("/api/speech", json={"library": {"fish": []}})).json()["settings"][

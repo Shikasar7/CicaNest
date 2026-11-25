@@ -27,13 +27,15 @@ from typing import Any
 
 from nest.adapters.registry import place_of
 from nest.core.broadcast import Broadcaster
+from nest.core.prompt import DESK_ID, first_part
 from nest.llm.base import ChatMessage, ProviderError
+from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderRegistry, ProviderUnavailable
 from nest.storage.bots import BotChannel, BotConfig
 from nest.storage.memories import KINDS, MemoryStore
 from nest.storage.messages import MessageStore
 from nest.storage.settings import SettingsRepo
-from nest.storage.slang import group_key_of, split_group_key
+from nest.storage.slang import account_in, group_key_of, split_group_key
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +44,8 @@ DAY = 86400.0
 SETTINGS_KEY = "memory"
 CONTENT_MAX = 60
 LINE_MAX = 200
+DESK_LINE_MAX = 4000  # the desk chat, where a message may be long (nest.core.desk.MAX_CHARS)
+READ_MAX = 40_000  # characters per run; the rest of a long talk is read by the next one
 MAX_OPS = 20
 KIND_LABEL = {"like": "喜好", "fact": "情况", "promise": "约定"}
 WEEKDAYS = "一二三四五六日"
@@ -87,6 +91,7 @@ class MemoryConfig:
     promises_per_bot: int = 8
     prompt_people: int = 6
     prompt_items: int = 8
+    prompt_items_private: int = 16  # a one-to-one chat: one person, so room for more of them
     promise_grace_days: int = 3  # a 约定 is forgotten this many days after its day
     promise_idle_days: float = 60.0  # one without a day, when not used or changed for this long
 
@@ -96,6 +101,10 @@ def place_key(channel: BotChannel) -> str:
     if channel.channel.kind == "group":
         return group_key_of(channel.channel)
     return f"chat:{channel.channel_id}"
+
+
+def line_max(row: dict[str, Any]) -> int:
+    return DESK_LINE_MAX if str(row.get("external_id") or "").startswith(DESK_ID) else LINE_MAX
 
 
 def is_private(place: str) -> bool:
@@ -271,7 +280,7 @@ class MemoryKeeper:
             for c in await self.messages.channels()
             if c["kind"] == kind
             and c["external_id"] == external_id
-            and c["account_id"].startswith(f"{platform}:")
+            and account_in(c["account_id"], platform, external_id)
         ]
         return max(members, key=lambda c: c["message_count"])["id"] if members else None
 
@@ -321,12 +330,52 @@ class MemoryKeeper:
             for m in await self.store.of_people(place, list(people))
             if m["bot_id"] is None or m["bot_id"] == bot.id
         ]
-        text, used = render_recall(
-            list(people.items()), memories, limit=self.config.prompt_items, today=self._today()
-        )
+        limit = self.config.prompt_items_private if is_private(place) else self.config.prompt_items
+        text, used = render_recall(list(people.items()), memories, limit=limit, today=self._today())
         if used:
             await self.store.used(used, time.time())
         return text
+
+    async def note(self, bot: BotConfig, channel: BotChannel, given: dict[str, Any]) -> str:
+        """「记一条」 (a tool, nest.core.tools): she writes down something of the person she talks with in
+        private, under the same rules as what is learned (privacy, limits). What she is told."""
+        if not channel.remember:
+            return "没记：这段私聊的「长期记忆」没有开（在控制台 Bot 页她的私聊里打开）"
+        place = place_key(channel)
+        kind = given.get("kind") if given.get("kind") in KINDS else "fact"
+        content = clean_content(given.get("content"))
+        if content is None:
+            return f"没记：空的、超过 {CONTENT_MAX} 个字，或者是不该记的隐私（证件、电话、密码这些）"
+        rows = await self.messages.recent(channel.channel_id, limit=50)
+        person = next(
+            (
+                r
+                for r in reversed(rows)
+                if not r["from_self"] and r["sender_id"] not in self._brain.our_accounts
+            ),
+            None,
+        )
+        if person is None:
+            return "没记：还不知道是谁的事"
+        known = await self.store.of_people(place, [person["sender_id"]])
+        if any(m["content"] == content and m["bot_id"] in (None, bot.id) for m in known):
+            return "已经记着了"
+        due = clean_due(given.get("due"), self._today()) if kind == "promise" else None
+        await self.store.add(
+            place,
+            person["sender_id"],
+            person["sender_name"],
+            kind,
+            content,
+            bot_id=bot.id if kind == "promise" else None,
+            due=due,
+            at=time.time(),
+        )
+        await self.store.delete(
+            await self.store.overflow(self.config.per_person, self.config.promises_per_bot)
+        )
+        self.changed(place)
+        return f"记下了：{content}" + (f"（{due}）" if due else "")
 
     # -- learning -----------------------------------------------------------------------------------
 
@@ -335,6 +384,7 @@ class MemoryKeeper:
             return self.config.provider_id
         return next((bot.provider_id for bot, _ in self.places().get(place, []) if bot.provider_id), None)
 
+    @for_purpose("memory")
     async def learn(self, place: str, *, force: bool = False) -> dict[str, Any]:
         """One run for a place; returns what it did ({"detail", "error", ...}). Never two at once for one
         place."""
@@ -355,13 +405,14 @@ class MemoryKeeper:
         )
         rows = [row for row in rows if not row.get("recalled_at")]
         ours = self._brain.our_accounts
+        from_people = sum(1 for row in rows if not (row["from_self"] or row["sender_id"] in ours))
+        rows = first_part(rows, line_max, READ_MAX)
         labels: dict[str, str] = {}  # person id -> "P1"
         names: dict[str, str] = {}
         for row in rows:
             if not (row["from_self"] or row["sender_id"] in ours):
                 labels.setdefault(row["sender_id"], f"P{len(labels) + 1}")
                 names[row["sender_id"]] = row["sender_name"]
-        from_people = sum(1 for row in rows if not (row["from_self"] or row["sender_id"] in ours))
         needed = (
             self.config.forced_min
             if force
@@ -398,7 +449,7 @@ class MemoryKeeper:
             return f"{labels[row['sender_id']]} {row['sender_name']}"
 
         chat = "\n".join(
-            f"{who(row)}：{' '.join(str(row.get('text') or '').split())[:LINE_MAX] or '[非文本]'}"
+            f"{who(row)}：{' '.join(str(row.get('text') or '').split())[: line_max(row)] or '[非文本]'}"
             for row in rows
         )
         today = self._today()

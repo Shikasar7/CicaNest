@@ -5,25 +5,13 @@ import { AvatarCropper } from '@/components/bots/AvatarCropper'
 import { BotGlyph } from '@/components/BotGlyph'
 import { Button } from '@/components/ui/button'
 import { avatarPath, avatarUrl, sendBlob, sendJson, type AvatarView, type Bot } from '@/lib/api'
+import { PICTURE_TYPES, readPicture } from '@/lib/pictures'
 import { useLive } from '@/lib/live'
 import { cn } from '@/lib/utils'
 
-const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-const MAX_FILE = 20 * 1024 * 1024 // before cropping; what is uploaded is a 512 px square
 const NONE: AvatarView = { chosen: null, qq: null, custom: null }
 
 type Busy = 'glyph' | 'qq' | 'custom' | 'refetch' | 'delete' | 'upload' | null
-
-function readPicture(file: File): Promise<string> {
-  if (!TYPES.includes(file.type)) return Promise.reject(new Error('只能用 PNG、JPEG、WebP 或 GIF 图片'))
-  if (file.size > MAX_FILE) return Promise.reject(new Error('图片太大了（超过 20 MB），换一张小一点的'))
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error('读不了这个文件'))
-    reader.readAsDataURL(file)
-  })
-}
 
 function Choice({
   label,
@@ -185,7 +173,7 @@ export function AvatarPicker({ bot, onDone }: { bot: Bot; onDone: () => void }) 
           <input
             ref={input}
             type="file"
-            accept={TYPES.join(',')}
+            accept={PICTURE_TYPES.join(',')}
             className="hidden"
             onChange={(e) => {
               void pick(e.target.files?.[0])

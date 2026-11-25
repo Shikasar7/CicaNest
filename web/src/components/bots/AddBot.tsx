@@ -17,6 +17,8 @@ const blank = (platform: PlatformView) => Object.fromEntries(platform.fields.map
 
 const AFTER_ADDING: Record<string, string> = {
   discord: '在它的「群」里打开要去的频道，看过效果再改成正式发言。',
+  telegram: '把它拉进群，群里说一句话，群就会出现在「在其他群启用」里；看过效果再改成正式发言。',
+  slack: '在频道里 /invite 它，频道就会出现在「在其他群启用」里；看过效果再改成正式发言。',
   wecom: '先去群里 @ 它一次，群才会出现在「在其他群启用」里；回来给群起个名字再开启。它只收得到 @ 它的话。',
 }
 
@@ -63,7 +65,7 @@ function NameAndModel({
   )
 }
 
-/** 增加 bot: pick the platform, then its form. QQ: nest sets up the account's container on the Mac and shows the
+/** 增加 bot: pick the platform, then its form. QQ: nest sets up the account's container on its machine and shows the
  * login code to scan. Others connect with what is filled in here; secrets are cleared from the page once used. */
 export function AddBot({ providers, reload }: { providers: ProviderView[] | null; reload: () => void }) {
   const [open, setOpen] = useState(false)
@@ -219,7 +221,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
       </div>
       {!others && (
         <p className="text-xs text-muted-foreground">
-          nest 会在 Mac 上给这个号建一个 QQ 容器（端口、令牌、自动登录都配好），然后在这里显示登录二维码。一个号同一时间只能在一个地方登录：如果它正在别的设备或程序里挂着，先退出。
+          nest 会在它所在的电脑上给这个号建一个 QQ 容器（端口、令牌、自动登录都配好），然后在这里显示登录二维码。一个号同一时间只能在一个地方登录：如果它正在别的设备或程序里挂着，先退出。
         </p>
       )}
       {others && platform.probe_kicks && (

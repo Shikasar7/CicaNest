@@ -7,7 +7,7 @@ and a OneBot server that nest starts and stops through `docker` (deploy/mac): on
 account, or SnowLuma with all of them ("snowluma_container" names one or several). QQ logs in there through
 each container's own page, found from the port Docker publishes it on (LOGIN_PAGES), else qq_login_url. A
 NapCat container's QR code can also be shown in the console itself (GET /api/system/qq/login): that page is
-only published on the Mac, the console is reachable from the phone.
+only published on nest's machine, the console is reachable from the phone.
 
 Process work runs in worker threads through nest.system, one action at a time (app.state.process_lock);
 settings changes hold app.state.config_lock. Every change publishes an SSE "system" event

@@ -9,7 +9,7 @@
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
         'Noto Sans SC', sans-serif;
-    /* The bots' marks: one brush-style character each (鲸 / 马 / 龙). */
+    /* The bots' marks: one brush-style character each. */
     --font-glyph: 'KaiTi', 'STKaiti', 'Kaiti SC', 'Noto Serif SC', serif;
     --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
     --color-ok: var(--ok);
@@ -78,15 +78,15 @@
     --border: #e1e6ea;
     --input: #d3dae0;
     --ring: #8ea2b2;
-    --bot-whale: #2f7fd0;
-    --bot-pony: #e2557f;
-    --bot-dragon: #1e9c82;
+    --bot-1: #2f7fd0;
+    --bot-2: #e2557f;
+    --bot-3: #1e9c82;
     --bot-4: #8a63d2;
     --bot-5: #d9822b;
     --bot-6: #4e7fa6;
-    --chart-1: var(--bot-whale);
-    --chart-2: var(--bot-pony);
-    --chart-3: var(--bot-dragon);
+    --chart-1: var(--bot-1);
+    --chart-2: var(--bot-2);
+    --chart-3: var(--bot-3);
     --chart-4: var(--bot-4);
     --chart-5: var(--bot-5);
     --radius: 0.625rem;
@@ -123,9 +123,9 @@
     --border: #262e35;
     --input: #323c45;
     --ring: #5b7083;
-    --bot-whale: #6aaef2;
-    --bot-pony: #f27fa0;
-    --bot-dragon: #4cc7a8;
+    --bot-1: #6aaef2;
+    --bot-2: #f27fa0;
+    --bot-3: #4cc7a8;
     --bot-4: #ad8cf0;
     --bot-5: #eba35c;
     --bot-6: #7ba7c9;
@@ -155,7 +155,7 @@
         line-height: 1.6;
     }
     ::selection {
-        background: color-mix(in oklch, var(--bot-whale) 28%, transparent);
+        background: color-mix(in oklch, var(--bot-1) 28%, transparent);
     }
     /* Thin scrollbars that only show their thumb. */
     * {
@@ -214,7 +214,7 @@ html[data-desktop].dark {
 .feed-in {
     display: grid;
     grid-template-rows: 1fr;
-    animation: feed-in 420ms var(--ease-out-soft) both;
+    animation: feed-in 300ms var(--ease-out-soft) both;
 }
 .feed-in > * {
     min-height: 0;
@@ -254,7 +254,7 @@ html[data-desktop].dark {
     }
 }
 .nudge {
-    animation: nudge 360ms var(--ease-out-soft);
+    animation: nudge 300ms var(--ease-out-soft);
 }
 
 @keyframes dot-pulse {
@@ -264,6 +264,22 @@ html[data-desktop].dark {
 }
 .dot-pulse {
     animation: dot-pulse 1.4s ease-in-out infinite;
+}
+
+/* 小窝: she breathes while she stands or sits there. */
+@keyframes home-breath {
+    50% {
+        transform: scaleY(1.018);
+    }
+}
+.home-breath {
+    animation: home-breath 3.4s ease-in-out infinite;
+}
+
+/* 动效统一: what pops in uses the same curve as the pages, and takes 0.15–0.3 s. */
+.animate-in,
+.animate-out {
+  animation-timing-function: var(--ease-out-soft);
 }
 
 @media (prefers-reduced-motion: reduce) {

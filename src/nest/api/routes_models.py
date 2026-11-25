@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
+from nest import plugin_code
 from nest.api.auth import require_token
 from nest.api.text import has_bad_chars, proxy_url
 from nest.llm.anthropic import EFFORTS
@@ -48,7 +49,7 @@ NOT_LOADED = "还没有加载，保存一次或重启 nest"
 
 # Exactly what build_provider reads for each kind.
 OPTIONS = {
-    "openai_chat": ("proxy", "timeout", "temperature", "extra_body"),
+    "openai_chat": ("proxy", "timeout", "temperature", "extra_body", "tools"),
     "openai_responses": ("proxy", "timeout", "extra_body", "input_format"),
     "anthropic": ("proxy", "timeout", "extra_body", "auth_header", "effort", "web_search"),
     "codex": ("proxy", "timeout", "auth_file"),
@@ -146,7 +147,17 @@ def _ref(config: ProviderConfig) -> str:
 # -- validation -------------------------------------------------------------------------------------
 
 
+def options_of(kind: str) -> tuple[str, ...]:
+    """The options a kind reads: nest's own, or what a plugin's kind declared."""
+    if kind in OPTIONS:
+        return OPTIONS[kind]
+    added = plugin_code.MODEL_KINDS.get(kind)
+    return added.options if added is not None else ()
+
+
 def _kind(value: str) -> str:
+    if value in plugin_code.MODEL_KINDS:
+        return value
     if value not in KINDS:
         raise _invalid("接口类型只能是 OpenAI Chat 格式、Responses 格式、Claude（Anthropic）或 Codex 订阅")
     return value
@@ -274,6 +285,12 @@ def _web_search(value: Any) -> bool | str:
     return value or ""  # off is the default: not stored
 
 
+def _tools(value: Any) -> bool | str:
+    if not isinstance(value, bool):
+        raise _invalid("工具调用只能开或关")
+    return value or ""  # off is the default: not stored
+
+
 def _auth_file(value: Any) -> str:
     if not isinstance(value, str):
         raise _invalid("登录文件要填文件路径")
@@ -298,6 +315,7 @@ CHECKS = {
     "auth_header": _auth_header,
     "effort": _effort,
     "web_search": _web_search,
+    "tools": _tools,
     "auth_file": _auth_file,
 }
 
@@ -308,7 +326,7 @@ def _options(kind: str, options: dict[str, Any]) -> dict[str, Any]:
     for name, value in options.items():
         if has_bad_chars(name):
             raise _invalid("参数名里有不能保存的字符")
-        if name not in OPTIONS[kind]:
+        if name not in options_of(kind):
             raise _invalid(f"「{name[:40]}」这个设置在这种接口里不起作用")
         if value is None:
             continue

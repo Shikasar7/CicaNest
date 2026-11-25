@@ -1,4 +1,6 @@
-import type { ProviderKind, ProviderView } from '@/lib/api'
+import { useEffect, useState } from 'react'
+
+import { getJson, type ProviderKind, type ProviderView } from '@/lib/api'
 
 export const MODEL_KINDS: { kind: ProviderKind; label: string }[] = [
   { kind: 'openai_chat', label: 'OpenAI Chat 格式' },
@@ -6,6 +8,31 @@ export const MODEL_KINDS: { kind: ProviderKind; label: string }[] = [
   { kind: 'anthropic', label: 'Claude（Anthropic）' },
   { kind: 'codex', label: 'Codex 订阅' },
 ]
+
+type PluginKind = { kind: string; label: string; options: string[]; plugin: string }
+let pluginKinds: Promise<PluginKind[]> | null = null
+
+/** Kinds of model that trusted plugins added: fetched once, then offered like nest's own.
+ * Returns how many were added, so a page re-renders once they are known. */
+export function usePluginKinds(): number {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    pluginKinds ??= getJson<PluginKind[]>('/api/model-kinds').catch(() => [])
+    void pluginKinds.then((kinds) => {
+      for (const k of kinds) {
+        const kind = k.kind as ProviderKind
+        if (!MODEL_KINDS.some((m) => m.kind === kind)) MODEL_KINDS.push({ kind, label: `${k.label}（插件）` })
+        KIND_OPTIONS[kind] = k.options
+      }
+      if (!cancelled) setCount(kinds.length)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return count
+}
 
 export function kindLabel(kind: string): string {
   return MODEL_KINDS.find((k) => k.kind === kind)?.label ?? kind
@@ -16,7 +43,7 @@ export const CODEX_AUTH_FILE = '~/.codex/auth.json'
 
 /** Options each kind of model reads (mirrors the backend; anything else is rejected there). */
 export const KIND_OPTIONS: Record<ProviderKind, string[]> = {
-  openai_chat: ['proxy', 'timeout', 'temperature', 'extra_body'],
+  openai_chat: ['proxy', 'timeout', 'temperature', 'extra_body', 'tools'],
   openai_responses: ['proxy', 'timeout', 'extra_body', 'input_format'],
   anthropic: ['proxy', 'timeout', 'extra_body', 'auth_header', 'effort', 'web_search'],
   codex: ['proxy', 'timeout', 'auth_file'],
@@ -31,6 +58,7 @@ export const OPTION_LABEL: Record<string, string> = {
   auth_header: '密钥请求头',
   effort: '思考档',
   web_search: '联网搜索',
+  tools: '工具调用',
   auth_file: '登录文件',
 }
 

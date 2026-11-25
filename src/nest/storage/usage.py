@@ -59,6 +59,28 @@ class UsageRepo:
         )
         return [dict(row) for row in rows]
 
+    async def by_purpose(self, since: float) -> list[dict[str, Any]]:
+        """What the calls were for (nest.llm.purpose), per bot ("" : no bot): calls and tokens."""
+        rows = await self.db.fetchall(
+            """SELECT coalesce(bot_id, '') AS bot_id, purpose, count(*) AS calls,
+                      coalesce(sum(prompt_tokens), 0) AS prompt_tokens,
+                      coalesce(sum(completion_tokens), 0) AS completion_tokens
+               FROM llm_calls WHERE started_at >= ? GROUP BY 1, purpose""",
+            (since,),
+        )
+        return [dict(row) for row in rows]
+
+    async def tasks(self, since: float) -> dict[str, dict[str, Any]]:
+        """Bot id -> its background tasks started since: how many, and the tokens they used (their calls are
+        among the bot's calls too; this is the part of them that went to tasks)."""
+        rows = await self.db.fetchall(
+            """SELECT bot_id, count(*) AS tasks, coalesce(sum(tokens), 0) AS tokens,
+                      coalesce(sum(steps), 0) AS steps
+               FROM tasks WHERE created_at >= ? GROUP BY bot_id""",
+            (since,),
+        )
+        return {row["bot_id"]: dict(row) for row in rows}
+
     async def by_bot(self, since: float) -> list[dict[str, Any]]:
         """Every bot (in creation order) with its calls, tokens and the count of each decision outcome."""
         bots = await self.db.fetchall("SELECT id, name FROM bots ORDER BY created_at, id")

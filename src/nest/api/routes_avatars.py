@@ -1,11 +1,14 @@
 """Bot pictures: a bot's QQ avatar or an uploaded picture, shown in the console instead of its brush
-character.
+character. And the user's own picture (ME), beside what they say in the chat window.
 
 Pictures live in the database and are served from here, so the console never loads anything from outside.
 """
 
 from __future__ import annotations
 
+import os
+import time
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -24,6 +27,21 @@ CACHE = "private, max-age=31536000, immutable"
 TOO_BIG = f"图片太大了（超过 {MAX_BYTES // (1024 * 1024)} MB），换一张小一点的"
 NOT_AN_IMAGE = "只能用 PNG、JPEG、WebP 或 GIF 图片"
 MISSING = {"qq": "还没有 QQ 头像，先获取一次", "custom": "还没有上传图片"}
+# The user (聊天窗口里「你」): not a bot, so not in bot_avatars; one uploaded picture, a file in data/me/.
+# Listed and served beside the bots' under this id, which no bot can have (theirs are "<platform>:<id>").
+ME = "me"
+
+
+def _me_file(request: Request) -> Path:
+    return request.app.state.settings.data_dir / "me" / "avatar"
+
+
+def _me_view(request: Request) -> dict[str, Any]:
+    try:
+        changed = _me_file(request).stat().st_mtime
+    except OSError:
+        return empty_view()
+    return empty_view() | {"chosen": "custom", "custom": changed}
 
 
 class Choice(BaseModel):
@@ -51,11 +69,20 @@ async def avatars(request: Request) -> dict[str, dict[str, Any]]:
     when each stored picture last changed (null: none stored)."""
     state = request.app.state
     stored = await state.avatars.views()
-    return {bot_id: stored.get(bot_id, empty_view()) for bot_id in state.brain.bots}
+    return {bot_id: stored.get(bot_id, empty_view()) for bot_id in state.brain.bots} | {ME: _me_view(request)}
 
 
 @router.get("/bots/{bot_id}/avatar/{source}")
 async def avatar(request: Request, bot_id: str, source: Literal["qq", "custom"]) -> Response:
+    if bot_id == ME:
+        try:
+            data = _me_file(request).read_bytes() if source == "custom" else b""
+        except OSError:
+            data = b""
+        content_type = image_type(data)
+        if content_type is None:
+            raise HTTPException(status_code=404, detail=MISSING[source])
+        return Response(data, media_type=content_type, headers={"cache-control": CACHE})
     picture = await request.app.state.avatars.get(bot_id, source)
     if picture is None:
         raise HTTPException(status_code=404, detail=MISSING[source])
@@ -98,7 +125,8 @@ async def fetch_qq_avatar(request: Request, bot_id: str) -> dict[str, Any]:
 async def upload_avatar(request: Request, bot_id: str) -> dict[str, Any]:
     """The picture is the raw request body (the console sends the cropped square); its type is read from
     its first bytes, not from the request."""
-    _bot(request, bot_id)
+    if bot_id != ME:
+        _bot(request, bot_id)
     length = request.headers.get("content-length", "")
     if length.isdigit() and int(length) > MAX_BYTES:
         raise HTTPException(status_code=413, detail=TOO_BIG)
@@ -111,12 +139,24 @@ async def upload_avatar(request: Request, bot_id: str) -> dict[str, Any]:
     content_type = image_type(data)
     if content_type is None:
         raise HTTPException(status_code=415, detail=NOT_AN_IMAGE)
+    if bot_id == ME:
+        target = _me_file(request)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        part = target.with_name(f"avatar.{time.time_ns()}.part")
+        part.write_bytes(data)
+        os.replace(part, target)
+        request.app.state.broadcaster.publish("avatars", {"bot_id": ME})
+        return _me_view(request)
     await request.app.state.avatars.put(bot_id, "custom", content_type, data)
     return await _changed(request, bot_id)
 
 
 @router.delete("/bots/{bot_id}/avatar/custom")
 async def delete_avatar(request: Request, bot_id: str) -> dict[str, Any]:
+    if bot_id == ME:
+        _me_file(request).unlink(missing_ok=True)
+        request.app.state.broadcaster.publish("avatars", {"bot_id": ME})
+        return empty_view()
     _bot(request, bot_id)
     await request.app.state.avatars.delete(bot_id, "custom")
     return await _changed(request, bot_id)

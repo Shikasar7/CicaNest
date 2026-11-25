@@ -27,8 +27,11 @@ from PIL import Image
 
 from nest.adapters.base import Adapter
 from nest.adapters.common import download
+from nest.core.desk_media import MAX_PICTURES as MAX_DESK_PICTURES
+from nest.core.desk_media import SCHEME, DeskMedia, name_of
 from nest.core.stickers import data_url
 from nest.llm.base import ChatMessage, ProviderError
+from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderRuntime, ProviderUnavailable
 from nest.watch import fetch as watch_fetch
 
@@ -54,6 +57,9 @@ NOTE_PROMPT = (
 )
 NOTE_PICTURES = 2  # at most this many new pictures per reply: the reply waits for them
 NOTE_TIMEOUT = 12.0
+# Pictures the user sends her in the desk chat are meant for her: she looks at all of one message's.
+DESK_PICTURES = MAX_DESK_PICTURES
+DESK_TIMEOUT = 50.0  # nine of them, and the vision model takes a few at a time
 NOTE_CHARS = 60
 NOTES = 300
 HOUR = 3600.0
@@ -69,7 +75,7 @@ def pictures(rows: Iterable[Mapping[str, Any]]) -> list[str]:
             if (
                 segment.get("type") == "image"
                 and str(data.get("sub_type", "0")) != "1"
-                and url.startswith(("http://", "https://"))
+                and url.startswith(("http://", "https://", SCHEME))
                 and url not in urls
             ):
                 urls.append(url)
@@ -86,7 +92,7 @@ def picture_keys(row: Mapping[str, Any]) -> list[tuple[str, str]]:
         if (
             segment.get("type") == "image"
             and str(data.get("sub_type", "0")) != "1"
-            and url.startswith(("http://", "https://"))
+            and url.startswith(("http://", "https://", SCHEME))
         ):
             found.append((str(data.get("file") or url), url))
     return found
@@ -127,6 +133,7 @@ class ScreenshotReader:
         self._notes: OrderedDict[str, str] = OrderedDict()
         self._noting: dict[str, asyncio.Task[str]] = {}
         self._noted: deque[float] = deque()
+        self.desk_media: DeskMedia | None = None  # pictures sent in the desk chat (desk-media: urls)
 
     @property
     def ready(self) -> bool:
@@ -184,31 +191,39 @@ class ScreenshotReader:
         return [self._with_notes(row) for row in context], [self._with_notes(row) for row in fresh]
 
     def _with_notes(self, row: dict[str, Any]) -> dict[str, Any]:
-        text = str(row.get("text") or "")
+        text = said = str(row.get("text") or "")
         for key, _ in picture_keys(row):
             if self._notes.get(key):
                 text = text.replace("[图片]", f"[图片：{self._notes[key]}]", 1)
-        return row | {"text": text} if text != row.get("text") else row
+        # What the pictures show does not use up the room for what was said with them (nest.core.prompt).
+        return row | {"text": text, "spare": len(text) - len(said)} if text != said else row
 
+    @for_purpose("upkeep")
     async def _write_notes(self, pairs: list[tuple[str, str]], account: str) -> None:
         now = time.time()
         while self._noted and self._noted[0] < now - HOUR:
             self._noted.popleft()
-        tasks = []
+        tasks: list[asyncio.Task[str]] = []
+        desk = others = 0
         for key, url in dict(pairs).items():
-            if len(tasks) >= NOTE_PICTURES:
-                break
+            ours = url.startswith(SCHEME)
+            if (desk >= DESK_PICTURES) if ours else (others >= NOTE_PICTURES):
+                continue
             task = self._noting.get(key)  # the bots of one group see the same picture at the same moment
             if task is None:
-                if len(self._noted) >= self._notes_per_hour() or self._vision() is None:
+                # A picture sent to her in the desk chat is not held to the hourly budget.
+                if self._vision() is None or (not ours and len(self._noted) >= self._notes_per_hour()):
                     continue
-                self._noted.append(now)
+                if not ours:
+                    self._noted.append(now)
                 task = asyncio.create_task(self._write_note(key, url, account))
                 self._noting[key] = task
                 task.add_done_callback(lambda _, key=key: self._noting.pop(key, None))
             tasks.append(task)
+            desk, others = desk + ours, others + (not ours)
         if tasks:
-            await asyncio.wait(tasks, timeout=NOTE_TIMEOUT)  # a late line still serves the next reply
+            # A late line still serves the next reply.
+            await asyncio.wait(tasks, timeout=DESK_TIMEOUT if desk else NOTE_TIMEOUT)
 
     async def _write_note(self, key: str, url: str, account: str) -> str:
         runtime = self._vision()
@@ -230,7 +245,13 @@ class ScreenshotReader:
 
     async def _download(self, url: str, account: str) -> bytes:
         """Through the account that saw the picture (Discord's CDN needs its proxy). A test's transport comes
-        first. Raises ValueError."""
+        first. A picture sent in the desk chat is read from its file. Raises ValueError."""
+        if url.startswith(SCHEME):
+            name = name_of(url)
+            data = await asyncio.to_thread(self.desk_media.read, name) if self.desk_media and name else None
+            if data is None:
+                raise ValueError("桌面聊天里的这张图已经不在了")
+            return data
         adapter = None if self._transport else self._adapters.get(account)
         if adapter is not None:
             return await adapter.fetch_media(url, MAX_BYTES)

@@ -32,6 +32,20 @@ export async function fetchAudio(path: string, body: unknown): Promise<Blob> {
   throw new ApiError(response.status, typeof parsed?.detail === 'string' ? parsed.detail : serverError(response.status))
 }
 
+/** GET a file's bytes; errors read like every other request's. */
+export async function fetchBytes(path: string, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+  let response: Response
+  try {
+    response = await fetch(path, { credentials: 'same-origin', signal })
+    if (response.ok) return new Uint8Array(await response.arrayBuffer())
+  } catch (e) {
+    if (signal?.aborted) throw e
+    throw new ApiError(0, '连不上 nest 后台')
+  }
+  const parsed = (await response.json().catch(() => null)) as { detail?: unknown } | null
+  throw new ApiError(response.status, typeof parsed?.detail === 'string' ? parsed.detail : serverError(response.status))
+}
+
 /** PUT a file (e.g. a picture) as the raw request body. */
 export function sendBlob<T>(path: string, blob: Blob): Promise<T> {
   return request<T>('PUT', path, blob)
@@ -408,7 +422,7 @@ export type Bot = {
   voice?: string
   name: string
   self_id: string
-  /** "qq", "discord", "wecom"; absent on a nest from before other platforms, which has only QQ. */
+  /** "qq", "discord", "telegram", "slack", "wecom"; absent on a nest from before other platforms, which has only QQ. */
   platform?: string
   /** What its platform can do (GET /api/platforms); absent like `platform`: everything. */
   capabilities?: string[]
@@ -419,12 +433,25 @@ export type Bot = {
   provider: ProviderHealth | null
   /** 备用模型: speaks when `provider_id` is out of quota or down. */
   backup_provider_id?: string | null
+  /** 做事模型: her background tasks and routines run on it; null = her own model. */
+  task_provider_id?: string | null
   today: Partial<Record<Outcome, number>>
   /** Last time another program spoke as this bot's account (unix seconds), if seen. */
   foreign_at: number | null
   /** The bot's latest line, sent or would-have-been, however long ago; absent on an older nest. */
   last_line?: Decision | null
   channels: BotChannel[]
+  /** 人设方案, by name; absent on an older nest. */
+  persona_sets?: PersonaSet[]
+}
+
+/** 人设方案: the persona a bot used in each of its places when the set was saved (only places it still has;
+ * persona_id null: 不用人设). current: every such place uses that persona now. */
+export type PersonaSet = {
+  id: number
+  name: string
+  items: { channel_id: number; persona_id: number | null }[]
+  current: boolean
 }
 
 /** Where a bot's console picture comes from: its QQ avatar or one the user uploaded. */
@@ -487,6 +514,7 @@ export type BotPatch = {
   aliases?: string[]
   provider_id?: string | null
   backup_provider_id?: string | null
+  task_provider_id?: string | null
 }
 
 /** PATCH /api/bots/{id}/channels/{channel_id}. Answers {ok: true}. */
@@ -580,6 +608,8 @@ export type Sticker = {
   edited: boolean
   /** 「保留」: never removed to make room. */
   kept: boolean
+  /** 收藏: when you starred it. */
+  starred_at: number | null
   /** Only this bot sends it (a drawn sticker of its character); null: any bot. */
   bot_id: string | null
   used_count: number
@@ -731,6 +761,9 @@ export type ProviderOptions = {
   effort?: 'low' | 'medium' | 'high'
   /** anthropic only (default off): search the web when answering a question; billed per search. */
   web_search?: boolean
+  /** openai_chat only (default off): let a desk companion use her tools (read pages, reminders, records)
+   * on this model; not every gateway passes tools through. */
+  tools?: boolean
   /** codex only (default ~/.codex/auth.json). */
   auth_file?: string
 }
@@ -856,12 +889,26 @@ export type UsageError = {
   error: string
 }
 
+export type UsagePurpose = {
+  bot_id: string
+  purpose: string
+  label: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+
 export type Usage = {
   /** Unix seconds: local midnight (days − 1) days ago. */
   since: number
   days: UsageDays
   providers: UsageProvider[]
   bots: UsageBot[]
+  /** Bot id -> its background tasks started in range; their tokens are part of the bot's. Absent on an
+   * older nest. */
+  tasks?: Record<string, { tasks: number; tokens: number; steps: number }>
+  /** What the calls were for, per bot ('': no bot). Absent on an older nest. */
+  purposes?: UsagePurpose[]
   /** Every day in range for every model with calls in range, zero-filled. */
   daily: UsageDay[]
   /** Newest first, at most 20. */
@@ -871,10 +918,10 @@ export type Usage = {
 // ---- 监控 (/api/watches) ----
 
 /** feed = 订阅 (RSS/Atom), page = 网页变化, price = 价格. */
-export type WatchKind = 'feed' | 'page' | 'price'
+export type WatchKind = 'feed' | 'page' | 'price' | 'discord'
 /** preview = 试运行 (the message is only recorded), push = 推送 (really sent). */
 export type WatchMode = 'preview' | 'push'
-export type WatchTargetKind = 'group' | 'private'
+export type WatchTargetKind = 'group' | 'private' | 'desk'
 /** baseline: the first check after adding (or after changing what is watched) only remembers what is there. */
 export type WatchOutcome = 'baseline' | 'unchanged' | 'changed' | 'error'
 /**
@@ -920,6 +967,8 @@ export type WatchView = {
   /** The model that rewrites the message; null = the plain list. */
   provider_id: string | null
   instructions: string
+  /** What its bot does in the background with what was found ('': nothing). */
+  task_goal: string
   use_proxy: boolean
   mode: WatchMode
   enabled: boolean
@@ -950,6 +999,7 @@ export type WatchCreate = {
   target_id: string
   provider_id?: string | null
   instructions?: string
+  task_goal?: string
   use_proxy?: boolean
   mode?: WatchMode
   enabled?: boolean
@@ -959,7 +1009,14 @@ export type WatchCreate = {
 export type WatchPatch = Partial<WatchCreate>
 
 /** GET /api/watches/targets: for each bot, the groups its account is in. */
-export type WatchTarget = { bot_id: string; bot_name: string; groups: { group_id: string; name: string }[] }
+export type WatchTarget = {
+  bot_id: string
+  bot_name: string
+  groups: { group_id: string; name: string }[]
+  /** It can message people on its platform, and there is a chat with it in the app. Absent on an older nest. */
+  platform?: boolean
+  desk?: boolean
+}
 
 /** SSE "watch": a check finished. */
 export type WatchEvent = { watch_id: number; run: WatchRun }

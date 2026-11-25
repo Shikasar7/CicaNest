@@ -28,6 +28,7 @@ from nest.llm.speech import (
     account_voices,
     known_voices,
     synth,
+    transcribe,
 )
 from nest.secrets import SecretStore
 from nest.storage.db import Database
@@ -47,6 +48,7 @@ KEY_REFS = {
     "minimax": "NEST_SPEECH_MINIMAX_KEY",
     "openai": "NEST_SPEECH_OPENAI_KEY",
 }
+LISTEN_REF = "NEST_LISTEN_KEY"  # 语音输入 (transcription): its own key, beside the speech services
 SENT_STATES = ("sent", "trial", "unknown")  # what counts as the bot having (or as good as) spoken
 
 
@@ -63,6 +65,8 @@ class SpeechConfig:
     hourly_per_bot: int = 6  # voice messages one bot may send in one group per hour
     group_gap: float = 60.0  # seconds between two voice messages from any of our bots in one group
     max_chars: int = 100  # a longer reply goes out as text
+    listen_url: str = ""  # 语音输入: an OpenAI-compatible base url (…/v1), for /audio/transcriptions
+    listen_model: str = ""  # e.g. whisper-1, FunAudioLLM/SenseVoiceSmall
     library: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # 音色库: service -> [{id, name}]
 
 
@@ -151,6 +155,25 @@ class SpeechKeeper:
                 break
         return best
 
+    @property
+    def can_listen(self) -> bool:
+        return bool(self.config.listen_url and self.config.listen_model)
+
+    async def listen(self, audio: bytes, filename: str) -> str:
+        """语音输入: the words in the recording. SpeechError says why not."""
+        if not self.can_listen:
+            raise SpeechError("还没设置语音转写：在「语音」页填转写接口的地址和模型")
+        config = self.config
+        return await transcribe(
+            config.listen_url,
+            self.secrets.get(LISTEN_REF),
+            config.listen_model,
+            audio,
+            filename,
+            proxy=config.proxy or None,
+            transport=self._transport,
+        )
+
     async def voices(self, service_id: str) -> list[dict[str, str]]:
         """The voices cloned or designed on the account. SpeechError says why not."""
         return await account_voices(self.service(service_id), transport=self._transport)
@@ -169,6 +192,11 @@ class SpeechKeeper:
                 }
                 for service_id, ref in KEY_REFS.items()
             ],
+            "listen": {
+                "key_set": bool(self.secrets.get(LISTEN_REF)),
+                "key_from_env": self.secrets.source(LISTEN_REF) == "env",
+                "ready": self.can_listen,
+            },
             "fish_models": list(FISH_MODELS),
             "minimax_models": list(MINIMAX_MODELS),
         }

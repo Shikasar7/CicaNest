@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nest.api.auth import require_token
 from nest.api.text import has_bad_chars
-from nest.core.speech import KEY_REFS
+from nest.core.desk_media import audio_ext
+from nest.core.speech import KEY_REFS, LISTEN_REF
 from nest.llm.speech import FISH_MODELS, SpeechError, clean_library
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
@@ -48,6 +49,9 @@ class SpeechPatch(BaseModel):
     hourly_per_bot: Annotated[int, Field(strict=True, ge=1, le=60)] | None = None
     group_gap: Annotated[int, Field(strict=True, ge=10, le=3600)] | None = None
     max_chars: Annotated[int, Field(strict=True, ge=10, le=300)] | None = None
+    listen_key: Line | None = None
+    listen_url: Line | None = None
+    listen_model: Line | None = None
     library: dict[Service, list[Voice]] | None = None  # the services sent get this whole list
 
 
@@ -105,10 +109,12 @@ async def update_speech(request: Request, patch: SpeechPatch) -> dict[str, Any]:
         values["openai_url"] = _address(values["openai_url"], "接口地址")
     if "proxy" in values:
         values["proxy"] = _address(values["proxy"], "代理地址")
+    if "listen_url" in values:
+        values["listen_url"] = _address(values["listen_url"], "转写接口地址")
     async with state.config_lock:
         if "library" in values:
             values["library"] = state.speech.config.library | _library(values["library"])
-        for service, ref in KEY_REFS.items():
+        for service, ref in (*KEY_REFS.items(), ("listen", LISTEN_REF)):
             key = values.pop(f"{service}_key", None)
             if key is None:
                 continue
@@ -121,6 +127,31 @@ async def update_speech(request: Request, patch: SpeechPatch) -> dict[str, Any]:
         await state.speech.save_config(values)
     state.broadcaster.publish("bots", {"change": "speech"})
     return state.speech.view()  # type: ignore[no-any-return]
+
+
+LISTEN_BYTES = 8 * 1024 * 1024  # a minute or two of speech
+
+
+@router.post("/speech/listen")
+async def listen(request: Request) -> dict[str, Any]:
+    """语音输入: the recording is the raw request body (WebM, Ogg, MP3, WAV or M4A); its words come back as
+    {"text"} for the chat box, to be read before they are sent."""
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > LISTEN_BYTES:
+        raise HTTPException(status_code=413, detail="录音太长了")
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > LISTEN_BYTES:
+            raise HTTPException(status_code=413, detail="录音太长了")
+    ext = audio_ext(bytes(body))
+    if ext is None:
+        raise HTTPException(status_code=415, detail="不是认得的录音格式")
+    try:
+        text = await request.app.state.speech.listen(bytes(body), f"speech.{ext}")
+    except SpeechError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    return {"text": text}
 
 
 @router.post("/speech/voices")

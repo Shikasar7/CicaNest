@@ -140,7 +140,7 @@ class StickerStore:
         """Stickers to remove first when over the limits: never kept ones; unsuitable and failed first,
         then the ones never sent, then by when they were last seen or sent."""
         rows = await self.db.fetchall(
-            """SELECT * FROM stickers WHERE kept = 0
+            """SELECT * FROM stickers WHERE kept = 0 AND starred_at IS NULL
                ORDER BY status NOT IN ('unsuitable', 'failed'), used_count > 0,
                         max(last_seen_at, coalesce(last_used_at, 0)), id
                LIMIT ?""",
@@ -150,7 +150,9 @@ class StickerStore:
 
     async def expired_unsuitable(self, before: float) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
-            "SELECT * FROM stickers WHERE status = 'unsuitable' AND kept = 0 AND status_at < ?", (before,)
+            """SELECT * FROM stickers WHERE status = 'unsuitable' AND kept = 0 AND starred_at IS NULL
+               AND status_at < ?""",
+            (before,),
         )
         return [sticker_dict(row) for row in rows]
 
@@ -283,6 +285,18 @@ class StickerStore:
                 (at, sticker_id),
             )
 
+    async def star(self, sticker_id: int, at: float | None) -> bool:
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute("UPDATE stickers SET starred_at = ? WHERE id = ?", (at, sticker_id))
+            return cursor.rowcount > 0
+
+    async def starred(self) -> list[dict[str, Any]]:
+        """收藏, the newest first."""
+        rows = await self.db.fetchall(
+            "SELECT * FROM stickers WHERE starred_at IS NOT NULL ORDER BY starred_at DESC, id DESC"
+        )
+        return [sticker_dict(row) for row in rows]
+
     async def ready(self) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
             "SELECT * FROM stickers WHERE status = 'ready' ORDER BY last_seen_at DESC, id DESC"
@@ -334,6 +348,15 @@ class StickerStore:
             (kind, external_id, *SENT_STATES, since),
         )
         return {row[0] for row in rows}
+
+    async def sent_lately(self, channel_id: int, bot_id: str, replies: int) -> bool:
+        """Whether one of the bot's last `replies` replies in this chat carried a sticker."""
+        rows = await self.db.fetchall(
+            """SELECT sticker_state FROM decisions WHERE channel_id = ? AND bot_id = ? AND outcome = 'replied'
+               ORDER BY id DESC LIMIT ?""",
+            (channel_id, bot_id, replies),
+        )
+        return any(row[0] in SENT_STATES for row in rows)
 
 
 def label(description: str, caption: str) -> str:

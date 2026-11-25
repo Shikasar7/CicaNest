@@ -25,6 +25,7 @@ from typing import Any
 from nest.adapters.base import parse_recipient
 from nest.adapters.registry import can, place_of
 from nest.llm.base import ChatMessage, ProviderError
+from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderUnavailable
 from nest.storage.bots import BotChannel, BotConfig
 from nest.storage.db import Database
@@ -225,6 +226,7 @@ class IssueKeeper:
             added += await self.review(bot, channel)
         return added
 
+    @for_purpose("upkeep")
     async def review(self, bot: BotConfig, channel: BotChannel) -> int:
         """Read the group's new messages; returns how many issues were written down."""
         async with self._lock:

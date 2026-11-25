@@ -6,6 +6,7 @@ Writes that change settings hold app.state.config_lock; 「测试看图」 calls
 
 from __future__ import annotations
 
+import time
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
@@ -36,6 +37,12 @@ class StickerPatch(BaseModel):
     tags: list[str] | None = None
     kept: bool | None = None
     status: Literal["ready", "unsuitable"] | None = None  # 「恢复」 / 「不适合」
+
+
+class Star(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    on: bool
 
 
 class StickerIds(BaseModel):
@@ -254,6 +261,16 @@ async def update_sticker(request: Request, sticker_id: StickerId, patch: Sticker
         raise HTTPException(status_code=404, detail=NOT_FOUND)
     state.broadcaster.publish("stickers", {"id": sticker_id, "change": "edited"})
     return await store.get(sticker_id)  # type: ignore[no-any-return]
+
+
+@router.put("/stickers/{sticker_id}/star")
+async def star_sticker(request: Request, sticker_id: StickerId, body: Star) -> dict[str, Any]:
+    """收藏: it shows under 「收藏」 in the desk chat's sticker picker, and is never cleaned away."""
+    state = request.app.state
+    if not await state.stickers.store.star(sticker_id, time.time() if body.on else None):
+        raise HTTPException(status_code=404, detail=NOT_FOUND)
+    state.broadcaster.publish("stickers", {"id": sticker_id, "change": "edited"})
+    return {"ok": True}
 
 
 @router.post("/stickers/{sticker_id}/describe")

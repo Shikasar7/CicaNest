@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:"
+    />
+    <title>电脑上做事</title>
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="executor.css" />
+    <script src="executor.js" defer></script>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>电脑上做事</h1>
+      <label class="switch">
+        <input type="checkbox" id="enabled" />
+        <span>让伙伴在这台电脑上做事</span>
+      </label>
+      <p id="status" class="status" role="status"></p>
+      <p class="hint">
+        还要在控制台的「插件」页把「电脑上做事」勾给哪个伙伴。授权的文件夹里她可以直接看；别的地方每一步都会弹窗问你。她用看、写、改、删、移动这些文件工具时，密钥、凭据、浏览器和密码管理器的数据、系统文件夹、QQ
+        的数据不让碰；跑命令不受这个限制，所以命令每一条都会给你看完整内容再问你。
+      </p>
+      <h2 class="loose-title">放开限制</h2>
+      <label class="switch">
+        <input type="checkbox" id="allow-all" />
+        <span>完全允许：看、写、改、删、移动文件、跑命令、打开文件都不再问我</span>
+      </label>
+      <label class="switch sub">
+        <input type="checkbox" id="open-forbidden" />
+        <span>连禁区也放开（密钥、凭据、浏览器和密码管理器、系统、QQ 的数据；重启桌面端后自动关上）</span>
+      </label>
+      <p id="loose" class="hint warn" hidden>
+        现在她用文件工具不会问你（跑命令、打开不常见的文件、定时任务里的事除外）。她会读群聊、网页和插件给的东西，里面有人写了指挥她的话，她也可能照做。
+      </p>
+      <div class="head">
+        <h2>授权的文件夹</h2>
+        <button class="btn ghost" type="button" id="add">添加文件夹…</button>
+      </div>
+      <ul id="folders" class="folders"></ul>
+      <p id="empty" class="hint">还没有。没有授权文件夹时，她在这台电脑上做任何事都要你点头。</p>
+    </main>
+  </body>
+</html>

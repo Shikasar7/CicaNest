@@ -10,6 +10,7 @@ from nest import app as nest_app
 from nest import docker, system
 from nest.app import create_app
 from nest.config import Settings
+from nest.core import real_dns
 from nest.watch import fetch as watch_fetch
 
 TOKEN = "test-token"
@@ -56,6 +57,13 @@ def no_internet(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         return httpx.MockTransport(handler)
 
     monkeypatch.setattr(watch_fetch, "network_transport", refuse)
+
+    def refuse_dns(url: str) -> bytes:
+        attempts.append(url)
+        raise AssertionError("测试不能访问网络")
+
+    # Looking a name up over HTTPS (nest.core.real_dns) is the network too.
+    monkeypatch.setattr(real_dns, "_get", refuse_dns)
     yield
     assert not attempts, f"有测试想访问网络：{attempts}"
 

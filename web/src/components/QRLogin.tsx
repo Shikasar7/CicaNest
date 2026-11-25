@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { getJson, type QQLoginView } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-/** A NapCat container's login QR code, read through nest: its own page is only reachable on the Mac, the
+/** A NapCat container's login QR code, read through nest: its own page is only reachable on nest's machine, the
  * console from the phone too. Asks again every 3 seconds, so a new code replaces an expired one, until the
  * account is connected. */
 export function QRLogin({ container, onClose }: { container: string; onClose: () => void }) {

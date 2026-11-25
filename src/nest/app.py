@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from functools import partial
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
@@ -19,41 +21,80 @@ from nest.api.auth import Access, LocalOnly
 from nest.api.console import mount_console
 from nest.api.errors import validation_handler
 from nest.api.routes_accounts import router as accounts_router
+from nest.api.routes_appearance import router as appearance_router
+from nest.api.routes_approvals import router as approvals_router
 from nest.api.routes_avatars import router as avatars_router
 from nest.api.routes_bot_admin import router as bot_admin_router
 from nest.api.routes_bots import router as bots_router
+from nest.api.routes_companion_packs import router as companion_packs_router
+from nest.api.routes_companions import router as companions_router
+from nest.api.routes_desk import router as desk_router
+from nest.api.routes_desk_groups import router as desk_groups_router
+from nest.api.routes_executor import router as executor_router
 from nest.api.routes_issues import digest_settings
 from nest.api.routes_issues import router as issues_router
 from nest.api.routes_knowledge import router as knowledge_router
+from nest.api.routes_life import router as life_router
 from nest.api.routes_live import router as live_router
 from nest.api.routes_memories import router as memories_router
 from nest.api.routes_models import router as models_router
+from nest.api.routes_persona_sets import router as persona_sets_router
 from nest.api.routes_personas import router as personas_router
+from nest.api.routes_plugins import router as plugins_router
 from nest.api.routes_qq_password import router as qq_password_router
+from nest.api.routes_reminders import router as reminders_router
 from nest.api.routes_remote import public as remote_public_router
 from nest.api.routes_remote import router as remote_router
+from nest.api.routes_routines import router as routines_router
 from nest.api.routes_slang import router as slang_router
 from nest.api.routes_speech import router as speech_router
+from nest.api.routes_sticker_packs import router as sticker_packs_router
 from nest.api.routes_stickers import router as stickers_router
 from nest.api.routes_system import router as system_router
 from nest.api.routes_system_admin import offline_alert_settings, storage_plan
 from nest.api.routes_system_admin import router as system_admin_router
+from nest.api.routes_tasks import router as tasks_router
 from nest.api.routes_tones import router as tones_router
 from nest.api.routes_usage import router as usage_router
 from nest.api.routes_watches import router as watches_router
+from nest.api.routes_workspaces import router as workspaces_router
 from nest.config import Settings
+from nest.core.approvals import ApprovalKeeper
 from nest.core.birthday import BirthdayKeeper
 from nest.core.brain import Brain, Policy
 from nest.core.broadcast import Broadcaster
+from nest.core.chatter import ChatterKeeper
 from nest.core.deaf import DeafWatch
+from nest.core.desk import Desk
+from nest.core.desk_media import DeskMedia
+from nest.core.drawing import Drawing
+from nest.core.egress import is_online
+from nest.core.executor import ExecutorHub
+from nest.core.groups import DeskGroups
 from nest.core.hub import AdapterFactory, Hub
+from nest.core.initiative import InitiativeKeeper, apply_to
 from nest.core.issues import IssueKeeper
+from nest.core.keepsake_drafts import KeepsakeDrafter
+from nest.core.keepsakes import KeepsakeKeeper
+from nest.core.life import LifeKeeper
+from nest.core.market import MarketWatch
+from nest.core.mcp_plugins import McpHub
 from nest.core.memory import MemoryKeeper
 from nest.core.offline_alert import OfflineAlert
+from nest.core.outreach import OutreachKeeper
+from nest.core.plugins import PluginManager
+from nest.core.reminders import ReminderKeeper
+from nest.core.routines import RoutineKeeper
+from nest.core.sandbox import Docker, Sandbox, Spawner
 from nest.core.screenshots import ScreenshotReader
 from nest.core.slang import SlangLearner
 from nest.core.speech import SpeechKeeper
+from nest.core.sticker_packs import PackKeeper
 from nest.core.stickers import StickerKeeper
+from nest.core.tasks import TaskKeeper
+from nest.core.tools import CompanionTools
+from nest.core.workspace import Workspace
+from nest.docker import cli as docker_cli
 from nest.housekeeping import Housekeeper
 from nest.knowledge.dense import EmbeddingModel
 from nest.knowledge.gaps import GapForwarder
@@ -83,6 +124,13 @@ log = logging.getLogger(__name__)
 SETTING_NAMES = frozenset(f"NEST_{name}".upper() for name in Settings.model_fields)
 
 
+async def _face(avatars: AvatarStore, bot_id: str) -> bytes | None:
+    """The picture a bot shows, to draw her from."""
+    chosen = (await avatars.views()).get(bot_id, {}).get("chosen")
+    picture = await avatars.get(bot_id, chosen) if chosen else None
+    return picture.data if picture else None
+
+
 def _secret_values(app: FastAPI) -> list[str]:
     """What the live log must never show: the console token and every secret in .env."""
     values = [app.state.token]
@@ -93,6 +141,11 @@ def _secret_values(app: FastAPI) -> list[str]:
 
 
 NAMES_REFRESH_SECONDS = 300.0
+
+
+async def _history_days(state: Any) -> float:
+    """How many days of chat the daily cleanup keeps (the 系统 page): her 回忆草稿 come before that."""
+    return float((await storage_plan(state)).history_days)
 
 
 async def learn_names(app: FastAPI) -> None:
@@ -138,6 +191,8 @@ def create_app(
     watch_policy: WatchPolicy | None = None,
     watch_transport: httpx.AsyncBaseTransport | None = None,  # tests: a MockTransport for every outside fetch
     knowledge_transport: httpx.AsyncBaseTransport | None = None,  # tests: the embedding and rerank servers
+    sandbox_docker: Docker | None = None,  # tests: a pretend `docker` for the workspace containers
+    sandbox_spawner: Spawner | None = None,  # tests: how an MCP server is started instead of `docker exec`
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -160,6 +215,10 @@ def create_app(
             app.state.remote = RemoteAccess(db)
             if settings.remote:
                 await _open_up(app)
+            # Plugins first: a trusted one's code may add kinds of model and platforms the rest is built with.
+            app.state.plugins = PluginManager(db, settings.data_dir / "plugins")
+            await app.state.plugins.load()
+            await app.state.plugins.load_code()
             app.state.providers = ProviderRegistry.build(
                 await repo.providers(), secrets, repo.record_llm_call, factory=app.state.provider_factory
             )
@@ -183,6 +242,75 @@ def create_app(
                 retention_days=settings.message_retention_days,
             )
             app.state.brain.adapters = app.state.hub.adapters  # filled by hub.start(), keyed by account id
+            app.state.desk = Desk(app.state.store, app.state.hub.emit)
+            app.state.desk_media = DeskMedia(settings.data_dir / "desk-media")
+            app.state.brain.desk_media = app.state.desk_media  # her voice in the desk chat
+            app.state.hub.desk_media = app.state.desk_media  # cleared with the messages
+            app.state.groups = DeskGroups(
+                db,
+                app.state.repo,
+                app.state.store,
+                app.state.broadcaster,
+                lambda: app.state.brain.bots,
+                app.state.brain.load,
+            )
+            app.state.desk.groups = app.state.groups
+            app.state.brain.groups = app.state.groups  # 她拉群 (nest.core.tools)
+            app.state.life = LifeKeeper(
+                db, app.state.brain, app.state.broadcaster, lambda: app.state.brain.bots
+            )
+            app.state.brain.life = app.state.life
+            await app.state.life.start()
+            app.state.brain.desk = app.state.desk
+            app.state.keepsakes = KeepsakeKeeper(db)
+            app.state.brain.keepsakes = app.state.keepsakes
+            app.state.reminders = ReminderKeeper(db, app.state.brain, app.state.desk, app.state.broadcaster)
+            app.state.brain.reminders = app.state.reminders
+            app.state.chatter = ChatterKeeper(db, app.state.brain, app.state.desk)
+            app.state.workspace = Workspace(settings.workspaces)
+            app.state.sandbox = (
+                Sandbox(
+                    app.state.workspace,
+                    docker_call=sandbox_docker,
+                    egress_log=settings.data_dir / "egress",
+                    online=partial(is_online, db),
+                    plugin_homes=settings.data_dir / "plugin-homes",
+                    spawner=sandbox_spawner,
+                )
+                if sandbox_docker is not None or docker_cli() is not None
+                else None
+            )
+            app.state.approvals = ApprovalKeeper(db, app.state.broadcaster)
+            app.state.executor = ExecutorHub(app.state.broadcaster, approvals=app.state.approvals)
+            await app.state.approvals.start()
+            app.state.mcp = McpHub(db, app.state.plugins, app.state.sandbox, secrets, app.state.broadcaster)
+            await app.state.mcp.load()
+            app.state.drawing = Drawing(
+                app.state.providers,
+                app.state.desk,
+                app.state.desk_media,
+                app.state.workspace,
+                app.state.broadcaster,
+                functools.partial(_face, app.state.avatars),
+            )
+            app.state.brain.tools = CompanionTools(
+                app.state.brain,
+                proxy=SettingsRepo(db).fetch_proxy,
+                transport=watch_transport,
+                workspace=app.state.workspace,
+                sandbox=app.state.sandbox,
+                broadcaster=app.state.broadcaster,
+                plugins=app.state.plugins,
+                mcp=app.state.mcp,
+                approvals=app.state.approvals,
+                executor=app.state.executor,
+                secrets=secrets,
+                drawing=app.state.drawing,
+            )
+            app.state.tasks = TaskKeeper(db, app.state.brain, app.state.broadcaster)
+            app.state.brain.tasks = app.state.tasks
+            app.state.routines = RoutineKeeper(db, app.state.brain, app.state.broadcaster)
+            app.state.brain.routines = app.state.routines
             app.state.stickers = StickerKeeper(
                 db,
                 app.state.providers,
@@ -194,6 +322,11 @@ def create_app(
             await app.state.stickers.start()
             app.state.stickers.adapters = app.state.hub.adapters
             app.state.brain.stickers = app.state.hub.stickers = app.state.stickers
+            app.state.sticker_packs = PackKeeper(
+                db, app.state.stickers, app.state.avatars, app.state.broadcaster, lambda: app.state.brain.bots
+            )
+            await app.state.sticker_packs.start()
+            app.state.brain.packs = app.state.sticker_packs
             app.state.speech = SpeechKeeper(db, app.state.secrets, transport=watch_transport)
             await app.state.speech.reload()
             app.state.brain.speech = app.state.speech
@@ -238,6 +371,7 @@ def create_app(
                 notes_per_hour=lambda: app.state.stickers.config.notes_per_hour,
                 adapters=app.state.hub.adapters,
             )
+            app.state.brain.screenshots.desk_media = app.state.desk_media
             app.state.started_at = time.time()
             app.state.backing_up = asyncio.Lock()
             await app.state.hub.start()
@@ -278,6 +412,36 @@ def create_app(
             await app.state.issues.start()
             app.state.birthdays = BirthdayKeeper(BirthdayStore(db), app.state.brain)
             await app.state.birthdays.start()
+            await app.state.reminders.start()
+            app.state.outreach = OutreachKeeper(
+                app.state.brain,
+                app.state.desk,
+                app.state.life,
+                app.state.groups,
+                desk_open=app.state.reminders.desk_open,
+            )
+            app.state.market = MarketWatch(
+                SettingsRepo(db), app.state.plugins, app.state.broadcaster, lambda: app.state.fetch_transport
+            )
+            await app.state.market.start()
+            app.state.initiative = InitiativeKeeper(
+                db,
+                lambda values: apply_to(values, app.state.chatter, app.state.outreach, app.state.brain),
+            )
+            app.state.outreach.rhythm = app.state.initiative.rhythm
+            await app.state.initiative.start()
+            await app.state.outreach.start()
+            app.state.keepsake_drafts = KeepsakeDrafter(
+                app.state.brain,
+                app.state.keepsakes,
+                app.state.broadcaster,
+                partial(_history_days, app.state),
+            )
+            await app.state.keepsake_drafts.start()
+            await app.state.tasks.start()
+            await app.state.routines.start()
+            if app.state.sandbox is not None:
+                await app.state.sandbox.start()
             log.info(
                 "nest 已启动，数据目录 %s，%d 个账号，%d 个 bot",
                 settings.data_dir,
@@ -290,6 +454,17 @@ def create_app(
                 learner = getattr(app.state, "name_learner", None)
                 if learner is not None:
                     learner.cancel()
+                await app.state.routines.stop()
+                await app.state.tasks.stop()
+                await app.state.drawing.stop()
+                await app.state.mcp.close()
+                if app.state.sandbox is not None:
+                    await app.state.sandbox.stop()
+                await app.state.keepsake_drafts.stop()
+                await app.state.outreach.stop()
+                await app.state.initiative.rhythm.save()
+                await app.state.market.stop()
+                await app.state.reminders.stop()
                 await app.state.birthdays.stop()
                 await app.state.issues.stop()
                 await app.state.offline_alert.stop()
@@ -302,6 +477,8 @@ def create_app(
                 await app.state.slang.stop()
                 await app.state.memory.stop()
                 await app.state.knowledge.stop()
+                await app.state.life.stop()
+                await app.state.sticker_packs.stop()
                 await app.state.stickers.stop()
                 await app.state.providers.aclose()
                 await db.close()
@@ -335,16 +512,31 @@ def create_app(
     app.include_router(accounts_router)
     app.include_router(live_router)
     app.include_router(bots_router)
+    app.include_router(desk_router)
+    app.include_router(desk_groups_router)
+    app.include_router(life_router)
+    app.include_router(companions_router)
+    app.include_router(reminders_router)
+    app.include_router(tasks_router)
+    app.include_router(routines_router)
+    app.include_router(plugins_router)
+    app.include_router(appearance_router)
+    app.include_router(approvals_router)
+    app.include_router(executor_router)
+    app.include_router(companion_packs_router)
+    app.include_router(workspaces_router)
     app.include_router(bot_admin_router)
     app.include_router(issues_router)
     app.include_router(speech_router)
     app.include_router(avatars_router)
     app.include_router(models_router)
     app.include_router(personas_router)
+    app.include_router(persona_sets_router)
     app.include_router(tones_router)
     app.include_router(usage_router)
     app.include_router(watches_router)
     app.include_router(stickers_router)
+    app.include_router(sticker_packs_router)
     app.include_router(slang_router)
     app.include_router(memories_router)
     app.include_router(knowledge_router)

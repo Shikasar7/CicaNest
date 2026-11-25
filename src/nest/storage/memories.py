@@ -152,14 +152,16 @@ class MemoryStore:
 
     async def overflow(self, limit: int, promise_limit: int) -> list[int]:
         """Learned memories past the limits, the least recently used or updated first to go: per person and
-        place, `limit` likes and facts together, and `promise_limit` 约定 per bot."""
+        place, `limit` likes and facts together, and `promise_limit` 约定 per bot. The ones the user added
+        (typed in the console, brought in with a companion) are never counted: however many there are, what
+        she learns since still has its room."""
         rows = await self.db.fetchall(
             """SELECT id FROM (
-                   SELECT id, source, row_number() OVER (
+                   SELECT id, row_number() OVER (
                        PARTITION BY place, person_id, kind = 'promise', coalesce(bot_id, '')
-                       ORDER BY source = 'manual' DESC, max(updated_at, coalesce(used_at, 0)) DESC, id DESC
-                   ) AS n, kind FROM memories)
-               WHERE source = 'learned' AND n > CASE WHEN kind = 'promise' THEN ? ELSE ? END""",
+                       ORDER BY max(updated_at, coalesce(used_at, 0)) DESC, id DESC
+                   ) AS n, kind FROM memories WHERE source = 'learned')
+               WHERE n > CASE WHEN kind = 'promise' THEN ? ELSE ? END""",
             (promise_limit, limit),
         )
         return [row["id"] for row in rows]

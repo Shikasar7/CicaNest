@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     knowledge_rerank_model: str = "bge-reranker-v2-m3"
     # Where the built console is, when not in <home>/web/dist (the Docker image keeps it apart from the data).
     web_dist_dir: Path | None = None
+    # 伙伴模式's workspaces (a folder per companion, nest.core.workspace), when not <home>/data/workspaces.
+    workspaces_dir: Path | None = None
 
     @field_validator("host")
     @classmethod
@@ -66,6 +68,10 @@ class Settings(BaseSettings):
     @property
     def data_dir(self) -> Path:
         return self.home / "data"
+
+    @property
+    def workspaces(self) -> Path:
+        return self.workspaces_dir or self.data_dir / "workspaces"
 
     @property
     def db_path(self) -> Path:

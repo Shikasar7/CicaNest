@@ -161,7 +161,7 @@ async def test_a_form_that_cannot_work_is_refused_before_any_connection(
 async def test_a_discord_bot_is_added_watching_and_its_token_stays_in_env(world: World) -> None:
     config = ProviderConfig(id="m", kind="openai_chat", base_url="http://x", model="m")
     await world.state.repo.upsert_provider(config)
-    response = await world.add_discord(aliases=["鲸鲸"], provider_id="m")
+    response = await world.add_discord(aliases=["豚豚"], provider_id="m")
     assert response.status_code == 201
     assert response.json() == {"bot_id": f"discord:{SNOWFLAKE}", "container": ""}
     [bot] = (await world.http.get("/api/bots")).json()
@@ -253,6 +253,21 @@ async def test_a_discord_channel_can_be_active(world: World) -> None:
         await world.http.patch(path, json={"activity": "active", "voice_mode": "trial"})
     ).status_code == 200
     assert (await world.http.patch(path, json={"sticker_mode": "trial"})).status_code == 200
+
+
+async def test_a_telegram_bot_is_added_and_its_groups_have_negative_ids(world: World) -> None:
+    world.answer = Probed(True, "900000001", "电鲸", "连上了")
+    token = "900000001:fixture-token-that-is-long-enough"
+    body = {"name": "电鲸", "platform": "telegram", "fields": {"token": token, "proxy": ""}}
+    assert (await world.http.post("/api/bots", json=body)).json()["bot_id"] == "telegram:900000001"
+    assert f"NEST_TELEGRAM_900000001_TOKEN={token}" in world.env().replace("'", "").replace('"', "")
+    path, _ = await joined(world, "telegram:900000001", "-1009000001")
+    assert (await world.http.patch(path, json={"activity": "active"})).status_code == 200
+    features = "/api/groups/telegram:group:-1009000001/features"
+    assert (await world.http.patch(features, json={"learn_slang": True})).status_code == 200
+    assert (await world.http.patch(features, json={"collect_stickers": True})).status_code == 400
+    short = body | {"name": "又一个", "fields": {"token": "abc"}}
+    assert (await world.http.post("/api/bots", json=short)).status_code == 422
 
 
 async def test_group_features_follow_the_platform(world: World) -> None:

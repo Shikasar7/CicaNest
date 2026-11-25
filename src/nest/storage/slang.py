@@ -15,7 +15,12 @@ from nest.storage.db import Database
 SOURCES = ("auto", "edited", "manual")
 
 
+DESK_GROUP = "desk-g"  # a 桌面群's id (nest.core.groups): its members are on any platform
+
+
 def group_key_of(channel: ChannelRef) -> str:
+    if channel.kind == "group" and channel.id.startswith(DESK_GROUP):
+        return f"desk:group:{channel.id}"  # one group, whichever account hears it
     return f"{channel.platform}:{channel.kind}:{channel.id}"
 
 
@@ -25,6 +30,11 @@ def split_group_key(key: str) -> tuple[str, str, str]:
     if not platform or kind not in ("group", "private") or not external_id:
         raise ValueError(key)
     return platform, kind, external_id
+
+
+def account_in(account_id: str, platform: str, external_id: str) -> bool:
+    """Whether an account's copy of a group is one of the group with this key's platform."""
+    return account_id.startswith(f"{platform}:") or external_id.startswith(DESK_GROUP)
 
 
 @dataclass(frozen=True, slots=True)

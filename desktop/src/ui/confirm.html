@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:"
+    />
+    <title>确认</title>
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="confirm.css" />
+    <script src="confirm.js" defer></script>
+  </head>
+  <body>
+    <main class="panel">
+      <h1 id="title">伙伴想帮你做一件事</h1>
+      <p class="action" id="action"></p>
+      <pre class="target" id="target"></pre>
+      <pre class="detail" id="detail" hidden></pre>
+      <p class="why" id="why"></p>
+      <p class="hint" id="hint"></p>
+      <div class="actions">
+        <button class="btn ghost" type="button" data-answer="deny">不允许</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" type="button" data-answer="kind" id="kind">这次同类不再问</button>
+        <button class="btn primary" type="button" data-answer="once">允许一次</button>
+      </div>
+    </main>
+  </body>
+</html>

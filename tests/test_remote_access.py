@@ -546,7 +546,7 @@ def test_only_reachable_addresses_are_offered(monkeypatch: pytest.MonkeyPatch) -
     ]
 
 
-# -- what the security review found --------------------------------------------------------------------
+# -- what must not be got round ------------------------------------------------------------------------
 
 
 async def test_writes_need_nest_s_own_page(world: World) -> None:

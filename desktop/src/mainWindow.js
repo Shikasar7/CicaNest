@@ -43,10 +43,10 @@ function writeJson(file, value) {
 }
 
 // Saved bounds are used only if they still land on a connected screen.
-function restoredBounds(saved) {
+function restoredBounds(saved, min = MIN_SIZE) {
   if (!saved || !Number.isFinite(saved.width) || !Number.isFinite(saved.height)) return null
-  const width = Math.max(MIN_SIZE.width, Math.round(saved.width))
-  const height = Math.max(MIN_SIZE.height, Math.round(saved.height))
+  const width = Math.max(min.width, Math.round(saved.width))
+  const height = Math.max(min.height, Math.round(saved.height))
   if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return { width, height }
   const bounds = { x: Math.round(saved.x), y: Math.round(saved.y), width, height }
   const area = screen.getDisplayMatching(bounds).workArea
@@ -56,14 +56,36 @@ function restoredBounds(saved) {
 }
 
 class MainWindow {
-  constructor({ config, title = 'nest', icon, version, stateFile, isQuitting, onHiddenToTray }) {
+  /**
+   * `page`: what to open on the nest origin ("/" the console, "/?view=chat#/chat" the chat window);
+   * `view`: told to the page (the console draws a chat window without its navigation).
+   */
+  constructor({
+    config,
+    title = 'nest',
+    icon,
+    version,
+    stateFile,
+    isQuitting,
+    onHiddenToTray,
+    onFocus = () => {},
+    page = '/',
+    view = 'console',
+    defaultSize = DEFAULT_SIZE,
+    minSize = MIN_SIZE,
+  }) {
     this.config = config
+    this.page = page
+    this.view = view
+    this.defaultSize = defaultSize
+    this.minSize = minSize
     this.title = title
     this.icon = icon
     this.version = version
     this.stateFile = stateFile
     this.isQuitting = isQuitting
     this.onHiddenToTray = onHiddenToTray
+    this.onFocus = onFocus
     this.win = null
     this.ready = false
     this.offline = false
@@ -94,15 +116,15 @@ class MainWindow {
   ensure() {
     if (this.alive()) return this.win
     const saved = readJson(this.stateFile) || {}
-    const bounds = restoredBounds(saved) || DEFAULT_SIZE
+    const bounds = restoredBounds(saved, this.minSize) || this.defaultSize
     this.savedBounds = saved.width ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height } : null
     this.ready = false
     const win = new BrowserWindow({
-      ...DEFAULT_SIZE,
+      ...this.defaultSize,
       ...bounds,
       center: bounds.x === undefined,
-      minWidth: MIN_SIZE.width,
-      minHeight: MIN_SIZE.height,
+      minWidth: this.minSize.width,
+      minHeight: this.minSize.height,
       show: false,
       title: this.title,
       icon: this.icon,
@@ -119,6 +141,8 @@ class MainWindow {
         additionalArguments: [
           `--nest-desktop-version=${this.version}`,
           `--nest-test-copy=${this.config.isTestCopy ? '1' : '0'}`,
+          `--nest-remote=${this.config.remote ? '1' : '0'}`,
+          `--nest-view=${this.view}`,
         ],
       },
     })
@@ -134,6 +158,7 @@ class MainWindow {
 
     // The taskbar title stays ours (it carries 「测试副本」 for a test copy).
     win.on('page-title-updated', (event) => event.preventDefault())
+    win.on('focus', () => this.onFocus())
 
     const contents = win.webContents
     contents.on('will-navigate', (event, url) => {
@@ -199,7 +224,7 @@ class MainWindow {
   loadConsole() {
     if (!this.alive()) return
     this.offline = false
-    this.win.loadURL(`${this.config.origin}/`).catch(() => {
+    this.win.loadURL(`${this.config.origin}${this.page}`).catch(() => {
       // did-fail-load shows the offline page
     })
   }
@@ -247,6 +272,11 @@ class MainWindow {
 
   isVisible() {
     return this.alive() && this.win.isVisible()
+  }
+
+  /** You are looking at it: shown, not minimized, in front. */
+  isWatched() {
+    return this.alive() && this.win.isVisible() && !this.win.isMinimized() && this.win.isFocused()
   }
 
   reload() {

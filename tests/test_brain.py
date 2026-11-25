@@ -487,12 +487,12 @@ async def test_an_at_cut_off_long_ago_is_left_alone(world: World) -> None:
 
 
 def test_a_bot_is_told_which_lines_are_its_own_and_not_to_repeat_them() -> None:
-    own = {"id": 1, "from_self": True, "sender_id": "1", "sender_name": "小马", "text": "今天也没干啥。"}
+    own = {"id": 1, "from_self": True, "sender_id": "1", "sender_name": "小鹿", "text": "今天也没干啥。"}
     new = {"id": 2, "from_self": False, "sender_id": "7", "sender_name": "小明", "text": "哈哈"}
     system, user = build_prompt(
-        persona="", bot_name="小马", context=[own], batch=[new], called=set(), peers={}
+        persona="", bot_name="小鹿", context=[own], batch=[new], called=set(), peers={}
     )
-    assert "你（小马）：今天也没干啥。" in user.content
+    assert "你（小鹿）：今天也没干啥。" in user.content
     assert "记录里写着「你」的是你自己说过的" in system.content
 
 

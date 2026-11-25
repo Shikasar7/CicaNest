@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from nest.api.routes_avatars import QQ_AVATAR
+from nest.api.routes_avatars import ME, QQ_AVATAR
 from nest.storage.avatars import MAX_BYTES, image_type
 from tests.test_watches import PONY, QUIET, WHALE, World, running
 
@@ -63,7 +63,7 @@ def test_image_type_reads_the_first_bytes() -> None:
 
 
 async def test_every_bot_starts_with_its_brush_character(world: World) -> None:
-    assert await views(world) == {WHALE: NOTHING, PONY: NOTHING}
+    assert await views(world) == {WHALE: NOTHING, PONY: NOTHING, ME: NOTHING}
     response = await world.http.get(path(WHALE, "/qq"))
     assert response.status_code == 404
     assert response.json()["detail"] == "还没有 QQ 头像，先获取一次"
@@ -203,3 +203,27 @@ async def test_pictures_need_the_session(world: World) -> None:
     assert response.status_code == 403
     picture = await world.http.get(path(WHALE, "/custom"))
     assert picture.content == PNG
+
+
+async def test_your_own_picture_sits_beside_the_bots(world: World) -> None:
+    """The user's picture (聊天窗口里你的头像) is uploaded, shown, replaced and removed like a bot's upload,
+    but it is a file of its own: there is no bot called "me"."""
+    assert (await world.http.get(path(ME, "/custom"))).status_code == 404
+    response = await world.http.put(path(ME, "/custom"), content=PNG)
+    assert response.status_code == 200, response.text
+    assert response.json()["chosen"] == "custom" and response.json()["custom"] is not None
+    assert (await views(world))[ME]["chosen"] == "custom"
+    picture = await world.http.get(path(ME, "/custom"))
+    assert picture.content == PNG and picture.headers["content-type"] == "image/png"
+
+    await world.http.put(path(ME, "/custom"), content=JPEG)
+    picture = await world.http.get(path(ME, "/custom"))
+    assert picture.content == JPEG and picture.headers["content-type"] == "image/jpeg"
+    assert (await world.http.put(path(ME, "/custom"), content=SVG)).status_code == 415
+    assert (await world.http.get(path(ME, "/qq"))).status_code == 404
+
+    response = await world.http.delete(path(ME, "/custom"))
+    assert response.status_code == 200 and response.json() == NOTHING
+    assert (await views(world))[ME] == NOTHING
+    assert (await world.http.get(path(ME, "/custom"))).status_code == 404
+    assert [event["bot_id"] for event in avatar_events(world)] == [ME, ME, ME]

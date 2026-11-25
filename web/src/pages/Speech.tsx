@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { AudioLines, Download, LoaderCircle, Play, Plus, Trash2 } from 'lucide-react'
+import { AudioLines, Download, LoaderCircle, Mic, Play, Plus, Trash2 } from 'lucide-react'
 
 import { useAction } from '@/components/bots/shared'
 import { FirstLoad, StaleNotice } from '@/components/Feedback'
@@ -187,7 +187,7 @@ function VoiceLibrary({
         <Input
           className="w-36"
           aria-label="音色名字"
-          placeholder="名字，比如 小马"
+          placeholder="名字，比如 阿豚"
           maxLength={40}
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -425,6 +425,49 @@ const LIMITS: { key: keyof SpeechSettings; label: string; unit: string; min: num
   { key: 'max_chars', label: '超过这么长就改发文字', unit: '字', min: 10, max: 300 },
 ]
 
+/** 语音输入 as /api/speech tells it (a nest from before it has none of these). */
+type Listening = {
+  listen?: { key_set: boolean; key_from_env: boolean; ready: boolean }
+  settings: { listen_url?: string; listen_model?: string }
+}
+
+/** 语音输入: what you say into the chat window becomes words, through a transcription service of yours. */
+function ListenCard({ view, patch }: { view: Listening; patch: (body: Record<string, unknown>) => Promise<boolean> }) {
+  if (!view.listen) return null
+  const key = { key_set: view.listen.key_set, key_from_env: view.listen.key_from_env } as SpeechService
+  return (
+    <section className="space-y-3 rounded-2xl border bg-card p-5">
+      <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+        <Mic className="size-4" />
+        语音输入
+        <span className={view.listen.ready ? 'text-xs font-normal text-ok' : 'text-xs font-normal text-muted-foreground'}>
+          {view.listen.ready ? '已可用' : '还没设置'}
+        </span>
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        在聊天窗口点麦克风说话，录音交给这里的转写服务变成文字，放进输入框，你看一眼再发。填一个 OpenAI 兼容接口（有
+        /audio/transcriptions 的，比如 OpenAI 的 whisper-1、SiliconFlow 的 FunAudioLLM/SenseVoiceSmall）。手机上要用 https
+        地址打开聊天页才能录音。
+      </p>
+      <div className="flex flex-wrap gap-4">
+        <TextField
+          label="接口地址"
+          value={view.settings.listen_url ?? ''}
+          placeholder="https://api.siliconflow.cn/v1"
+          save={(next) => void patch({ listen_url: next })}
+        />
+        <TextField
+          label="模型"
+          value={view.settings.listen_model ?? ''}
+          placeholder="FunAudioLLM/SenseVoiceSmall"
+          save={(next) => void patch({ listen_model: next })}
+        />
+      </div>
+      <KeyField service={key} save={(next) => patch({ listen_key: next })} />
+    </section>
+  )
+}
+
 /** 语音: the speech services (the user's own keys), each bot's voice, and the limits. */
 export function Speech() {
   const list = useLiveData<SpeechView>('/api/speech', [])
@@ -456,6 +499,7 @@ export function Speech() {
       {view.services.map((service) => (
         <ServiceCard key={service.id} service={service} view={view} patch={patch} />
       ))}
+      <ListenCard view={view as unknown as Listening} patch={patch} />
 
       <section className="space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-base font-semibold tracking-tight">给 bot 选音色</h2>

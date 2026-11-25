@@ -21,7 +21,7 @@ import os
 import re
 import time
 from collections import OrderedDict, deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,7 @@ from nest.core.broadcast import Broadcaster
 from nest.core.events import ChannelRef, MessageEvent, Segment
 from nest.core.segments import render_text
 from nest.llm.base import ChatMessage, ProviderError
+from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderRegistry, ProviderRuntime, ProviderUnavailable
 from nest.storage.accounts import account_id
 from nest.storage.db import Database
@@ -283,9 +284,9 @@ def shrink_png(data: bytes, side: int = DRAW_SIDE) -> bytes:
     return out.getvalue()
 
 
-def draw_prompt(idea: str, bot_name: str = "") -> str:
+def draw_prompt(idea: str, bot_name: str = "", style: str = DRAW_STYLE) -> str:
     character = f"主角是{bot_name}，长相、发型和衣服照参考图画，是同一个角色。\n" if bot_name else ""
-    return f"画一张聊天用的表情包：{idea}\n{character}{DRAW_STYLE}"
+    return f"画一张聊天用的表情包：{idea}\n{character}{style}"
 
 
 def data_url(png: bytes) -> str:
@@ -613,20 +614,29 @@ class StickerKeeper:
         assert row is not None
         return row, True
 
+    @for_purpose("draw")
     async def draw(
-        self, idea: str, *, bot_name: str = "", bot_id: str | None = None, avatar: bytes | None = None
+        self,
+        idea: str,
+        *,
+        bot_name: str = "",
+        bot_id: str | None = None,
+        avatar: bytes | None = None,
+        style: str = DRAW_STYLE,
+        wait: bool = False,
     ) -> dict[str, Any]:
         """Have a model draw a sticker and add it. With a bot, it is drawn as that character (`avatar`: the
-        reference picture) and only that bot sends it. StickerError, ProviderError or ProviderUnavailable
-        say why there is no picture."""
+        reference picture) and only that bot sends it; `style`: how it looks (a 表情包套装 has its own);
+        `wait`: while another picture is being drawn, wait for it rather than refuse. StickerError,
+        ProviderError or ProviderUnavailable say why there is no picture."""
         runtime = self.providers.drawing()
         if runtime is None:
             raise StickerError("没有能画图的模型：先在「模型」页加一个 Codex（ChatGPT 订阅）模型")
-        if self._drawing.locked():
+        if self._drawing.locked() and not wait:
             raise StickerError("正在画另一张，画完再来")
         async with self._drawing:
             images = (data_url(await asyncio.to_thread(preview_png, avatar)),) if avatar else ()
-            drawn = await runtime.draw(draw_prompt(idea, bot_name), images)
+            drawn = await runtime.draw(draw_prompt(idea, bot_name, style), images)
             try:
                 png = await asyncio.to_thread(shrink_png, drawn)
             except (OSError, ValueError) as exc:
@@ -745,6 +755,7 @@ class StickerKeeper:
             skip.add(sticker["id"])
             done += 1
 
+    @for_purpose("upkeep")
     async def describe(self, sticker: Mapping[str, Any], runtime: ProviderRuntime) -> bool:
         """Describe one sticker. False when the model could not be called (the sticker stays queued)."""
         try:
@@ -801,9 +812,19 @@ class StickerKeeper:
         return await self.store.labels(sorted(sticker_keys(rows)))
 
     async def candidates(
-        self, channel: ChannelRef, bot_id: str, text: str, exclude: set[str]
+        self,
+        channel: ChannelRef,
+        bot_id: str,
+        text: str,
+        exclude: set[str],
+        *,
+        only: Collection[int] | None = None,
+        hide: Collection[int] = (),
+        prefer: Collection[int] = (),
     ) -> tuple[list[dict[str, Any]], str]:
-        """(stickers the bot may pick from now, why there are none). Throttled: an empty list and a reason."""
+        """(stickers the bot may pick from now, why there are none). Throttled: an empty list and a reason.
+        `only`: just these (her 表情包套装 in the desk chat); `hide`: never these (the 套装 pictures, kept out
+        of the groups); `prefer`: these first (her 专属表情包 when she may use the collection too)."""
         config, now = self.config, time.time()
         if await self.store.sent_in_group(channel.kind, channel.id, now - config.group_gap):
             return [], f"{config.group_gap:.0f} 秒内群里刚发过表情"
@@ -814,12 +835,17 @@ class StickerKeeper:
         pool = [
             s
             for s in await self.store.ready()
-            if s["id"] not in recent and s["source_key"] not in exclude and s["bot_id"] in (None, bot_id)
+            if s["id"] not in recent
+            and s["source_key"] not in exclude
+            and s["bot_id"] in (None, bot_id)
+            and s["id"] not in hide
+            and (only is None or s["id"] in only)
         ]
         if not pool:
             return [], "没有能发的表情"
-        scored = sorted(pool, key=lambda s: -relevance(s, text))  # stable: ties stay newest-seen first
-        picked = [s for s in scored if relevance(s, text) > 0][: config.candidates]
+        # stable: ties stay newest-seen first
+        scored = sorted(pool, key=lambda s: (s["id"] not in prefer, -relevance(s, text)))
+        picked = [s for s in scored if s["id"] in prefer or relevance(s, text) > 0][: config.candidates]
         picked += [s for s in pool if s not in picked][: config.candidates - len(picked)]
         return picked, ""
 

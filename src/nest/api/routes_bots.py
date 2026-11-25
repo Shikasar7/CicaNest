@@ -11,8 +11,9 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from nest.adapters.registry import can, capabilities_of, check_user
+from nest.adapters.registry import DESK, can, capabilities_of, check_user
 from nest.api.auth import require_token
+from nest.api.routes_persona_sets import set_views
 from nest.api.text import has_bad_chars
 from nest.core.events import ChannelInfo, ChannelRef
 from nest.core.speech import split_ref
@@ -34,8 +35,8 @@ MAX_WELCOME_NOTE = 200
 
 
 class BotPatch(BaseModel):
-    """Every field optional; null means "not sent", except provider_id and backup_provider_id, where null
-    removes the model (told apart with model_fields_set)."""
+    """Every field optional; null means "not sent", except provider_id, backup_provider_id and
+    task_provider_id, where null removes the model (told apart with model_fields_set)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -44,6 +45,7 @@ class BotPatch(BaseModel):
     aliases: list[str] | None = None
     provider_id: str | None = None
     backup_provider_id: str | None = None
+    task_provider_id: str | None = None  # 做事模型
     voice: Annotated[str, Field(max_length=260)] | None = None  # "<service>:<voice id>"; "" removes it
 
 
@@ -147,6 +149,7 @@ async def bots(request: Request) -> list[dict[str, Any]]:
     state = request.app.state
     today = await state.repo.outcome_counts(_start_of_day())
     last_lines = await state.repo.last_lines()
+    persona_sets = await state.repo.persona_sets()
     # Group names arrive after the bots are loaded (when each account connects), so read them fresh.
     names = {c["id"]: c["name"] for c in await state.store.channels()}
     views = []
@@ -166,6 +169,7 @@ async def bots(request: Request) -> list[dict[str, Any]]:
                 "provider_id": bot.provider_id,
                 "provider": provider.health_view() if provider else None,
                 "backup_provider_id": bot.backup_provider_id,
+                "task_provider_id": bot.task_provider_id,
                 "today": today.get(bot.id, {}),
                 # The overview's speech bubble: the recent-activity feed may not reach back that far.
                 "last_line": last_lines.get(bot.id),
@@ -202,6 +206,7 @@ async def bots(request: Request) -> list[dict[str, Any]]:
                     }
                     for ch in sorted(bot.channels.values(), key=lambda c: names.get(c.channel_id) or c.name)
                 ],
+                "persona_sets": set_views(bot, persona_sets.get(bot.id, [])),
             }
         )
     return views
@@ -213,6 +218,7 @@ async def update_bot(request: Request, bot_id: str, patch: BotPatch) -> dict[str
     async with state.config_lock:
         provider_sent = "provider_id" in patch.model_fields_set
         backup_sent = "backup_provider_id" in patch.model_fields_set
+        task_sent = "task_provider_id" in patch.model_fields_set
         if (
             patch.mode is None
             and patch.name is None
@@ -220,6 +226,7 @@ async def update_bot(request: Request, bot_id: str, patch: BotPatch) -> dict[str
             and patch.voice is None
             and not provider_sent
             and not backup_sent
+            and not task_sent
         ):
             raise _invalid("没有要改的内容")
         bot = state.brain.bots.get(bot_id)
@@ -240,6 +247,13 @@ async def update_bot(request: Request, bot_id: str, patch: BotPatch) -> dict[str
                 raise HTTPException(status_code=400, detail="没有这个备用模型")
             if backup == provider_id:
                 raise _invalid("备用模型要选另一个模型")
+        worker = patch.task_provider_id
+        if (
+            task_sent
+            and worker is not None
+            and (has_bad_chars(worker) or await state.repo.get_provider(worker) is None)
+        ):
+            raise HTTPException(status_code=400, detail="没有这个做事模型")
         # Judged on the result: going live, or switching the model of a live bot, needs a model that
         # loaded. A name or alias edit of a live bot whose model is broken is still allowed.
         mode = patch.mode or bot.mode
@@ -252,6 +266,7 @@ async def update_bot(request: Request, bot_id: str, patch: BotPatch) -> dict[str
             aliases=aliases,
             provider_id=provider_id if provider_sent else UNSET,
             backup_provider_id=backup if backup_sent else UNSET,
+            task_provider_id=worker if task_sent else UNSET,
             mode=patch.mode,
             voice=_voice(patch.voice) if patch.voice is not None else None,
         )
@@ -455,6 +470,8 @@ async def add_private(request: Request, bot_id: str, body: PrivateCreate) -> dic
         bot = state.brain.bots.get(bot_id)
         if bot is None:
             raise HTTPException(status_code=404, detail="没有这个 bot")
+        if bot.account_id.partition(":")[0] == DESK:
+            raise HTTPException(status_code=400, detail=f"{bot.name} 只在桌面上，没有平台上的私聊")
         try:
             user = check_user(bot.account_id.partition(":")[0], body.user_id)
         except ValueError as exc:

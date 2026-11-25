@@ -7,6 +7,7 @@ it would send: nothing here reaches the network or QQ.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -257,6 +258,7 @@ async def test_create_list_and_view(world: World) -> None:
         "target_name": "Demo群",
         "provider_id": None,
         "instructions": "",
+        "task_goal": "",
         "use_proxy": False,
         "mode": "preview",  # 试运行 by default
         "enabled": False,
@@ -284,8 +286,16 @@ async def test_targets(world: World) -> None:
             "bot_id": WHALE,
             "bot_name": "阿鲸",
             "groups": [{"group_id": "42", "name": "Demo群"}, {"group_id": "77", "name": ""}],
+            "platform": True,
+            "desk": False,
         },
-        {"bot_id": PONY, "bot_name": "阿马", "groups": [{"group_id": "99", "name": "测试群三"}]},
+        {
+            "bot_id": PONY,
+            "bot_name": "阿马",
+            "groups": [{"group_id": "99", "name": "测试群三"}],
+            "platform": True,
+            "desk": False,
+        },
     ]
 
 
@@ -295,7 +305,7 @@ async def test_targets(world: World) -> None:
         ({"name": " "}, "名字要填 1–40 个字"),
         ({"name": "x" * 41}, "名字要填 1–40 个字"),
         ({"name": "a\nb"}, "名字里不能有换行或控制字符"),
-        ({"kind": "rss"}, "类型只能是订阅、网页变化或价格"),
+        ({"kind": "rss"}, "类型只能是订阅、网页变化、价格或 Discord 开放"),
         ({"url": "news.example/feed"}, "地址要写成 http:// 或 https:// 开头的完整网址"),
         ({"url": "ftp://news.example/feed"}, "地址要写成 http:// 或 https:// 开头的完整网址"),
         ({"url": "https://news.example/a b"}, "地址要写成 http:// 或 https:// 开头的完整网址"),
@@ -311,9 +321,17 @@ async def test_targets(world: World) -> None:
         ({"kind": "price", "selector": ".p", "threshold": True}, "提醒价格格式不对"),
         ({"interval_minutes": 4}, "检查间隔要在 5–1440 分钟之间"),
         ({"interval_minutes": 1441}, "检查间隔要在 5–1440 分钟之间"),
+        (
+            {"kind": "discord", "url": "https://example.com/x"},
+            "填 Discord 邀请链接，例如 https://discord.gg/abc123，或者只填邀请码",
+        ),
+        (
+            {"kind": "discord", "url": "https://discord.gg/demo", "interval_minutes": 0},
+            "检查间隔要在 1–1440 分钟之间",
+        ),
         ({"interval_minutes": 30.0}, "检查间隔格式不对"),
         ({"bot_id": "qq:404"}, "没有这个 bot"),
-        ({"target_kind": "channel"}, "推送到只能选群或私聊"),
+        ({"target_kind": "channel"}, "推送到只能选群、私聊或桌面聊天"),
         ({"target_id": "12345"}, "阿鲸 的号不在这个群里"),
         ({"target_id": "99"}, "阿鲸 的号不在这个群里"),  # 阿马's group
         ({"bot_id": PONY}, "阿马 的号不在这个群里"),
@@ -412,6 +430,17 @@ def _body(**fields: Any) -> dict[str, Any]:
         "target_id": "42",
         "enabled": False,
     } | fields
+
+
+async def test_discord_watches_keep_one_link_form_and_may_check_every_minute(world: World) -> None:
+    watch = await world.add(
+        kind="discord", url=" discord.com/invite/demo ", selector=".x", interval_minutes=1
+    )
+    assert (watch["url"], watch["selector"], watch["interval_minutes"]) == ("https://discord.gg/demo", "", 1)
+    response = await world.patch(watch["id"], {"kind": "page"})
+    assert response.json() == {"detail": "检查间隔要在 5–1440 分钟之间"}
+    response = await world.patch(watch["id"], {"kind": "page", "url": PAGE, "interval_minutes": 10})
+    assert response.status_code == 200 and response.json()["url"] == PAGE
 
 
 # -- runs -------------------------------------------------------------------------------------------------
@@ -945,3 +974,155 @@ async def test_shutdown_during_a_send_leaves_an_honest_record(tmp_path: Path) ->
         assert tuple(row) == ("unknown", "有 1 条新内容；推送时 nest 停止了，不确定是否已发出\n标题b")
     finally:
         await db.close()
+
+
+async def test_discord_pushes_privately_when_a_server_opens_and_says_when_a_link_is_gone(
+    world: World,
+) -> None:
+    api = "https://discord.com/api/v10/invites/demo?with_counts=true"
+
+    def server(*features: str) -> tuple[str, str]:
+        body = {"guild": {"name": "Demo 服务器", "features": list(features)}, "approximate_member_count": 3}
+        return json.dumps(body), "application/json"
+
+    world.web.pages[api] = server("INVITES_DISABLED")
+    watch = await world.add(
+        name="Demo",
+        kind="discord",
+        url="https://discord.gg/demo",
+        interval_minutes=1,
+        mode="push",
+        target_kind="private",
+        target_id="10086",
+    )
+    assert (await world.run(watch["id"]))["delivered"] is None
+    world.web.pages[api] = server()
+    run = await world.run(watch["id"])
+    assert (run["outcome"], run["delivered"], run["detail"]) == (
+        "changed",
+        "sent",
+        "开放加入了，3 人；已推送",
+    )
+    [action] = world.sent()
+    assert action.channel == ChannelRef("qq", "10001", "private", "10086")
+    assert run["message"].endswith("\nhttps://discord.gg/demo")
+    view = (await world.http.get("/api/watches")).json()[0]
+    assert view["next_run_at"] == pytest.approx(run["started_at"] + 60)
+
+    del world.web.pages[api]  # Discord answers 404 for an invite that is gone
+    gone = await world.run(watch["id"])
+    assert gone["outcome"] == "error" and gone["error"].startswith("邀请链接失效了")
+    assert len(world.sent()) == 1
+
+
+async def test_a_private_push_the_bot_cannot_send_goes_out_from_another_bot(world: World) -> None:
+    world.web.pages[FEED] = (rss("a"), "application/rss+xml")
+    watch = await world.add(mode="push", target_kind="private", target_id="10086")
+    await world.run(watch["id"])
+    world.adapters[WHALE].result = ActionResult("failed", error="网络连接异常")
+    world.web.pages[FEED] = (rss("b", "a"), "application/rss+xml")
+    run = await world.run(watch["id"])
+    assert (run["delivered"], run["error"]) == ("sent", None)
+    assert run["detail"] == "有 1 条新内容；已推送（阿鲸 发不出去，由阿马代发）\n标题b"
+    [passed_on] = world.sent(PONY)
+    assert passed_on.channel == ChannelRef("qq", "10002", "private", "10086")
+    assert passed_on.segments == world.sent()[-1].segments
+
+    # A group push stays with its bot: the other one may not be in that group.
+    group = await world.add(mode="push")
+    await world.run(group["id"])
+    world.web.pages[FEED] = (rss("c", "b", "a"), "application/rss+xml")
+    assert (await world.run(group["id"]))["delivered"] == "failed"
+    assert len(world.sent(PONY)) == 1
+
+
+async def test_no_stand_in_when_the_other_bot_is_paused_down_or_unsure(world: World) -> None:
+    world.web.pages[FEED] = (rss("a"), "application/rss+xml")
+    watch = await world.add(mode="push", target_kind="private", target_id="10086")
+    await world.run(watch["id"])
+    whale, pony = world.adapters[WHALE], world.adapters[PONY]
+    whale.result = ActionResult("failed", error="网络连接异常")
+    pony.status = lambda: AdapterStatus("reconnecting", "", 0.0)  # type: ignore[method-assign]
+    world.web.pages[FEED] = (rss("b", "a"), "application/rss+xml")
+    assert (await world.run(watch["id"]))["delivered"] == "failed" and pony.actions == []
+
+    pony.status = lambda: AdapterStatus("connected", "", 0.0)  # type: ignore[method-assign]
+    pony.result = ActionResult("unknown", error="超时")
+    world.web.pages[FEED] = (rss("c", "b", "a"), "application/rss+xml")
+    unsure = await world.run(watch["id"])
+    assert unsure["delivered"] == "unknown" and len(pony.actions) == 1
+
+    assert (await world.http.patch(f"/api/bots/{PONY}", json={"mode": "paused"})).status_code == 200
+    world.web.pages[FEED] = (rss("d", "c", "b", "a"), "application/rss+xml")
+    await world.run(watch["id"])
+    assert len(pony.actions) == 1  # a paused bot passes nothing on
+
+
+async def test_a_discord_push_is_retried_after_a_minute_by_whoever_can_send(world: World) -> None:
+    api = "https://discord.com/api/v10/invites/demo?with_counts=true"
+    paused = json.dumps({"guild": {"name": "Demo", "features": ["INVITES_DISABLED"]}}), "application/json"
+    world.web.pages[api] = paused
+    watch = await world.add(
+        name="Demo",
+        kind="discord",
+        url="https://discord.gg/demo",
+        interval_minutes=1,
+        mode="push",
+        target_kind="private",
+        target_id="10086",
+    )
+    await world.run(watch["id"])
+    whale, pony = world.adapters[WHALE], world.adapters[PONY]
+    whale.result = pony.result = ActionResult("failed", error="网络连接异常")
+    world.web.pages[api] = json.dumps({"guild": {"name": "Demo", "features": []}}), "application/json"
+    run = await world.run(watch["id"])
+    assert run["delivered"] == "failed" and len(pony.actions) == 1
+    await world.sql("UPDATE watches SET enabled = 1")
+    watcher = world.state.watcher
+    await watcher.stop()
+    whale.status = lambda: AdapterStatus("reconnecting", "", 0.0)  # type: ignore[method-assign]
+    pony.result = ActionResult("succeeded", message_id="902")
+    await watcher._resend()
+    assert len(pony.actions) == 1  # not a minute yet
+    watcher._resends[run["id"]] = (0, time.time() - 61)
+    await watcher._resend()
+    assert len(pony.actions) == 2
+    done = (await world.store.runs(watch["id"]))[0]
+    assert done["delivered"] == "sent"
+    assert done["detail"] == "开放加入了；已补发（阿鲸 发不出去，由阿马代发）"
+
+
+async def test_a_companion_only_on_the_desk_can_keep_watch(world: World) -> None:
+    """Her chat in the app is the target: no account, no connection; her words there, and her task with it."""
+    made = await world.http.post("/api/companions", json={"name": "阿月", "provider_id": "ark"})
+    assert made.status_code == 201, made.text
+    moon, chat = made.json()["bot_id"], made.json()["channel_id"]
+    where = {t["bot_id"]: t for t in (await world.http.get("/api/watches/targets")).json()}
+    assert (where[moon]["platform"], where[moon]["desk"], where[moon]["groups"]) == (False, True, [])
+    assert where[WHALE]["platform"] and not where[WHALE]["desk"]
+
+    body = {"name": "新闻", "kind": "feed", "url": FEED, "target_id": "", "mode": "push", "enabled": False}
+    refused = await world.http.post("/api/watches", json=body | {"bot_id": WHALE, "target_kind": "desk"})
+    assert refused.status_code == 422 and "桌面聊天" in refused.json()["detail"]
+    refused = await world.http.post(
+        "/api/watches", json=body | {"bot_id": moon, "target_kind": "private", "target_id": "10086"}
+    )
+    assert refused.status_code == 422 and "不能主动发消息" in refused.json()["detail"]
+
+    world.web.pages[FEED] = (rss("a"), "application/rss+xml")
+    watch = await world.add(bot_id=moon, target_kind="desk", target_id="", mode="push", task_goal="挑要紧的")
+    assert (watch["target_kind"], watch["target_id"], watch["target_name"]) == ("desk", "", "桌面聊天")
+    await world.run(watch["id"])  # the first check only remembers
+    world.web.pages[FEED] = (rss("a", "b"), "application/rss+xml")
+    run = await world.run(watch["id"])
+    assert (run["outcome"], run["delivered"]) == ("changed", "sent")
+    rows = (await world.http.get(f"/api/channels/{chat}/messages")).json()
+    assert rows[0]["from_self"] and "标题b" in rows[0]["text"] and rows[0]["external_id"].startswith("app:n:")
+    assert all(not adapter.actions for adapter in world.adapters.values())
+
+    async def started() -> bool:
+        return bool(await world.state.tasks.store.of_bot(moon))
+
+    await eventually(started)
+    moved = await world.patch(watch["id"], {"bot_id": WHALE, "target_kind": "group", "target_id": "42"})
+    assert moved.status_code == 200 and moved.json()["target_kind"] == "group"

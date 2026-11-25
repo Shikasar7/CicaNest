@@ -26,18 +26,26 @@ import logging
 import random
 import re
 import time
+import unicodedata
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from nest.adapters.base import Adapter, parse_recipient
-from nest.adapters.registry import can, capabilities_of, place_of
+from nest.adapters.registry import DESK, DESK_PLACE, can, capabilities_of, place_of
 from nest.core import birthday, welcome
 from nest.core.broadcast import Broadcaster
+from nest.core.desk import Desk, bubbles, from_app, sticker_segment, voice_segment
+from nest.core.desk_files import with_files
+from nest.core.desk_stream import DeskStream
 from nest.core.events import CaughtUp, ChannelRef, MemberJoined, MessageEvent, Segment, SendMessage
+from nest.core.groups import GROUP_MARK_HINT, create_group_tool, is_desk_group, split_group
 from nest.core.issues import RECORDER_HINT
+from nest.core.keepsakes import KeepsakeKeeper
 from nest.core.memory import MemoryKeeper
+from nest.core.outreach import games_hint
 from nest.core.prompt import (
+    AGAIN,
     MEMORY_CHARS,
     UNSURE,
     ProjectContext,
@@ -60,10 +68,12 @@ from nest.core.prompt import (
 from nest.core.screenshots import ScreenshotReader, pictures
 from nest.core.slang import SlangLearner
 from nest.core.speech import SpeechKeeper
+from nest.core.sticker_packs import PackKeeper
 from nest.core.stickers import StickerKeeper, relabel, sticker_keys
 from nest.core.tones import DEFAULT_ANSWER, DEFAULT_CHAT, Tone, resolve
 from nest.knowledge.service import KnowledgeService, LoadedBase
-from nest.llm.base import ChatMessage, Completion, ProviderError
+from nest.llm.base import ChatMessage, Completion, ProviderError, TextSink, Tool, ToolRunner
+from nest.llm.purpose import begin, current, for_purpose
 from nest.llm.runtime import ProviderRegistry, ProviderRuntime, ProviderUnavailable
 from nest.llm.speech import SpeechError
 from nest.storage.accounts import list_accounts
@@ -73,6 +83,8 @@ from nest.storage.slang import group_key_of
 from nest.storage.tones import ToneRepo
 
 log = logging.getLogger(__name__)
+# 桌面聊天: no sticker when one of her last this many replies there carried one (at most one in four).
+DESK_STICKER_EVERY = 3
 
 
 SONG_LINES = 3  # SING_HINT asks for three lines of lyrics
@@ -157,6 +169,7 @@ class ChannelState:
     evaluating: bool = False
     retrigger: bool = False
     task: asyncio.Task | None = None
+    again: str = ""  # 重说: what she had answered, which the user took back
 
 
 @dataclass
@@ -183,6 +196,7 @@ class Draft:
     sorted_as: str = ""  # 答题: what the call was taken for, for the decision's reason
     gap: dict[str, Any] | None = None  # 项目资料: a project question the docs did not answer (base_id, …)
     project: ProjectContext | None = None  # 项目资料: what the docs gave the answer (for 看源码)
+    streamed: bool = False  # 逐字流式: seen being written, so its messages come without typing pauses
 
 
 class Brain:
@@ -211,12 +225,26 @@ class Brain:
         # tell nest's own messages from ones another program sent with the same account.
         self.adapters: Mapping[str, Adapter] = {}
         self.foreign_at: dict[str, float] = {}  # bot id -> last time another program spoke as this bot
+        # What small talk and day plans are written with (nest.core.initiative): purpose -> model id.
+        self.small: dict[str, str | None] = {}
         # Optional modules, set by the app: 表情包 and 黑话. Off per bot and group by default.
         self.stickers: StickerKeeper | None = None
+        self.packs: PackKeeper | None = None  # 表情包套装: what she sends in the desk chat
+        self.desk_media: Any = None  # 桌面聊天的图片和语音 (nest.core.desk_media.DeskMedia)
+        self.groups: Any = None  # 桌面群 (nest.core.groups.DeskGroups): 她拉群
+        self.life: Any = (
+            None  # 小窝 (nest.core.life.LifeKeeper): what she is doing, in the chats with the user
+        )
         self.speech: SpeechKeeper | None = None
         self.chance = random.random  # 语音频率's dice
         self.slang: SlangLearner | None = None
         self.memory: MemoryKeeper | None = None  # 长期记忆
+        self.desk: Desk | None = None  # 桌面聊天: where answers to messages typed in the app go
+        self.keepsakes: KeepsakeKeeper | None = None  # 回忆档案 (伙伴模式)
+        self.reminders: Any = None  # 提醒 (伙伴模式, nest.core.reminders.ReminderKeeper)
+        self.tools: Any = None  # 做事 (伙伴模式, nest.core.tools.CompanionTools)
+        self.tasks: Any = None  # 任务 (伙伴模式, nest.core.tasks.TaskKeeper)
+        self.routines: Any = None  # 定时任务 (伙伴模式, nest.core.routines.RoutineKeeper)
         self.knowledge: KnowledgeService | None = None
         self.screenshots: ScreenshotReader | None = None
         self._foreign_logged: dict[str, float] = {}
@@ -267,14 +295,15 @@ class Brain:
             return channel.persona
         return (channel.persona.strip() or f"你是群里的{bot.name}。") + "\n" + RECORDER_HINT
 
-    def peers_of(self, bot: BotConfig) -> dict[str, str]:
-        """Our other accounts on this bot's platform: one in a QQ group cannot meet a Discord bot there."""
+    def peers_of(self, bot: BotConfig, anywhere: bool = False) -> dict[str, str]:
+        """Our other accounts on this bot's platform: one in a QQ group cannot meet a Discord bot there.
+        `anywhere`: in a 桌面群, where every companion can be, whatever her platform."""
         names = {b.self_id: b.name for b in self.bots.values()}
         platform = bot.account_id.partition(":")[0]
         return {
             uin: names.get(uin, uin)
             for uin in self._our_accounts
-            if uin != bot.self_id and self._platform_of.get(uin, platform) == platform
+            if uin != bot.self_id and (anywhere or self._platform_of.get(uin, platform) == platform)
         }
 
     # -- intake ------------------------------------------------------------------------------------
@@ -290,6 +319,8 @@ class Brain:
         now = time.time()
         if event.from_self:
             state.last_spoke_at = max(state.last_spoke_at, now)  # also counts messages sent by other programs
+            if from_app(event.message_id):
+                return  # 桌面聊天: our own answer, shown in the app
             adapter = self.adapters.get(bot.account_id)
             if adapter is None or not adapter.sent_by_us(event.message_id):
                 self._foreign(bot, now)
@@ -301,11 +332,32 @@ class Brain:
         state.last_message_at = now
         state.new_since_eval += 1
         mention = await self._mentions(bot, channel, event)
-        if event.sender_id in self._our_accounts and not mention:
-            return  # other bots' chatter is context, not a trigger
+        if event.sender_id in self._our_accounts and not mention and not is_desk_group(channel.channel):
+            return  # other bots' chatter is context, not a trigger (in a 桌面群 they talk with each other)
         if not (mention or self._wants_to_chime_in(channel, state, now, event)):
             return
         state.mention = state.mention or mention
+        self._wake(bot, channel, state, now)
+
+    def on_recall(self, row: dict[str, Any]) -> None:
+        """Taken back before it was answered: nothing to answer. (One taken back while the answer is being
+        written is noticed in _generate.)"""
+        for (_, channel_id), state in self._states.items():
+            if channel_id == row["channel_id"]:
+                state.pending = [p for p in state.pending if p["id"] != row["id"]]
+
+    def busy(self, bot_id: str, channel_id: int) -> bool:
+        """Whether an answer in this chat is being thought of or on its way out."""
+        state = self._states.get((bot_id, channel_id))
+        return state is not None and state.task is not None and not state.task.done()
+
+    def again(self, bot: BotConfig, channel: BotChannel, rows: list[dict[str, Any]], said: str) -> None:
+        """重说: answer these messages of a private chat once more, not with what was `said`."""
+        state = self._states.setdefault((bot.id, channel.channel_id), ChannelState())
+        now = time.time()
+        state.pending = [*rows, *state.pending]
+        state.last_message_at = now
+        state.mention, state.again = True, said
         self._wake(bot, channel, state, now)
 
     def _wake(self, bot: BotConfig, channel: BotChannel, state: ChannelState, now: float) -> None:
@@ -387,6 +439,7 @@ class Brain:
             and group_key_of(channel.channel) == key
         ]
 
+    @for_purpose("group")
     async def _welcome(self, key: str, event: MemberJoined, row: dict[str, Any]) -> None:
         pool = self._welcomers(key)
         if not pool:
@@ -443,6 +496,7 @@ class Brain:
                     found.setdefault(group_key_of(channel.channel), []).append((bot, channel))
         return found
 
+    @for_purpose("group")
     async def wish_birthday(
         self, bot: BotConfig, channel: BotChannel, user_id: str, name: str, said: Sequence[str] = ()
     ) -> tuple[str, str]:
@@ -522,6 +576,11 @@ class Brain:
 
     async def _run(self, bot_id: str, channel_id: int) -> None:
         state = self._states[(bot_id, channel_id)]
+        bot = self.bots.get(bot_id)
+        channel = bot.channels.get(channel_id) if bot else None
+        if channel is not None:
+            desk = is_desk_group(channel.channel)
+            begin("chat" if _private(channel) else "desk_group" if desk else "group")
         try:
             while True:
                 await self._collect(state)
@@ -569,6 +628,7 @@ class Brain:
                 return
         batch = state.pending[-self.policy.batch_limit :]
         state.pending, state.mention, state.new_since_eval = [], False, 0
+        again, state.again = state.again, ""
         state.last_eval_at = time.time()
         if not batch:
             return
@@ -578,7 +638,7 @@ class Brain:
 
         draft = await self._gate(bot, channel, state, target, mention)
         if draft is None:
-            draft = await self._generate(bot, channel, batch, called, target)
+            draft = await self._generate(bot, channel, batch, called, target, again=again)
         if draft.outcome == "would_reply" and bot.mode == "live":
             draft = await self._send(bot, channel, draft)
         elif draft.outcome == "would_reply" and draft.sticker is not None:
@@ -586,7 +646,7 @@ class Brain:
         if draft.outcome == "would_reply" and draft.voice:
             draft = replace(draft, voice_state="trial", reason=draft.reason + "，会用语音说")
         if not mention and draft.outcome in ("skipped", "failed") and not draft.maybe_sent:
-            self.arbiter.release(self._round(bot, channel), bot.id)
+            self.arbiter.release(self._round(bot, channel, draft.target), bot.id)
         searched = f"联网查了 {draft.searches} 次" if draft.searches else ""
         if notes := [note for note in (draft.sorted_as, searched) if note]:
             draft = replace(draft, reason=f"{draft.reason}（{'；'.join(notes)}）")
@@ -761,7 +821,7 @@ class Brain:
             wait = runtime.health.open_until - now
             return Draft("failed", f"模型 {bot.provider_id} 连续失败，暂停中，{wait:.0f} 秒后再试")
         if not mention:
-            holder = self.arbiter.claim(self._round(bot, channel), bot.id, now)
+            holder = self.arbiter.claim(self._round(bot, channel, target), bot.id, now)
             if holder is not None:
                 name = self.bots[holder].name if holder in self.bots else holder
                 return Draft("suppressed", f"这轮由 {name} 插话")
@@ -772,13 +832,24 @@ class Brain:
         time: a model may have been edited, or the bot switched to another one, while it was waiting."""
         live = self.bots.get(bot.id) or bot
         own = self.providers.get(live.provider_id)
+        small = self.providers.get(self.small.get(current()))
+        if small is not None and small.health.open_until <= time.time():
+            return small  # 闲聊、排日程 on a cheaper model, when one was chosen for them
         backup = self.providers.get(live.backup_provider_id)
         if backup is None or (own is not None and own.health.open_until <= time.time()):
             return own
         return backup if backup.health.open_until <= time.time() else own
 
     async def _complete(
-        self, bot: BotConfig, messages: list[ChatMessage], *, max_tokens: int, search: bool = False
+        self,
+        bot: BotConfig,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int,
+        search: bool = False,
+        tools: Sequence[Tool] = (),
+        run: ToolRunner | None = None,
+        on_text: TextSink | None = None,
     ) -> tuple[Completion, int, ProviderRuntime]:
         """One model call, on the backup when the bot's own model fails. Raises what the last one raised;
         ProviderUnavailable when neither is there."""
@@ -787,24 +858,44 @@ class Brain:
             raise ProviderUnavailable("这个 bot 的模型刚被移除")
         try:
             completion, call_id = await runtime.complete(
-                messages, bot_id=bot.id, max_tokens=max_tokens, search=search and runtime.can_search
+                messages,
+                bot_id=bot.id,
+                max_tokens=max_tokens,
+                search=search and runtime.can_search,
+                tools=tools,
+                run=run,
+                on_text=on_text,
             )
         except (ProviderUnavailable, ProviderError) as exc:
-            backup = self.providers.get((self.bots.get(bot.id) or bot).backup_provider_id)
+            live = self.bots.get(bot.id) or bot
+            backup = self.providers.get(live.backup_provider_id)
+            if runtime is self.providers.get(self.small.get(current())):
+                backup = self.providers.get(live.provider_id)  # the cheaper one failed: her own
             if backup is None or backup is runtime or backup.health.open_until > time.time():
                 raise
             log.info("%s 的模型失败（%s），改用备用模型 %s", bot.name, exc, backup.config.id)
             runtime = backup
             completion, call_id = await runtime.complete(
-                messages, bot_id=bot.id, max_tokens=max_tokens, search=search and runtime.can_search
+                messages,
+                bot_id=bot.id,
+                max_tokens=max_tokens,
+                search=search and runtime.can_search,
+                tools=tools,
+                run=run,
+                on_text=on_text,
             )
         return completion, call_id, runtime
 
     @staticmethod
-    def _round(bot: BotConfig, channel: BotChannel) -> str:
+    def _round(bot: BotConfig, channel: BotChannel, target: dict[str, Any] | None = None) -> str:
         """Who competes for a chime-in round: bots of the same group that really speak, or that only
-        observe. An observing bot says nothing in the group, so it must never silence a live one."""
+        observe. An observing bot says nothing in the group, so it must never silence a live one. In a 桌面群
+        a round is one message (the members come from any platform, and each message, the user's or a
+        companion's, is picked up by one of them; the bot chain limit ends it)."""
         side = "live" if bot.mode == "live" else "observe"
+        if is_desk_group(channel.channel):
+            said = (target or {}).get("external_id") or ""
+            return f"desk:group:{channel.channel.id}:{said}:{side}"
         return f"{channel.channel.platform}:{channel.channel.kind}:{channel.channel.id}:{side}"
 
     async def _bot_chain(self, channel_id: int) -> int:
@@ -829,6 +920,7 @@ class Brain:
             for row in rows
         ]
 
+    @for_purpose("memory")
     async def _remember(self, bot: BotConfig, channel: BotChannel) -> None:
         """A private chat outlives the context window: what falls out of it is folded into a note, some at a
         time and after the reply, so nothing waits for it. Group chats move on and have no such note."""
@@ -881,14 +973,20 @@ class Brain:
         batch: list[dict[str, Any]],
         called: set[int],
         target: dict[str, Any],
+        *,
+        again: str = "",
     ) -> Draft:
         regenerated = False
+        made_group = False  # 她拉群 by a mark: once, even when the answer is written again
+        kit: tuple[Any, Any] = ((), None)  # her tools in the chat with the user (nest.core.tools)
         private = _private(channel)
         lines = channel.reply_lines if self.chance() * 100 < channel.split_rate else 1  # 分条频率
         while True:
             history = await self.store.recent(
                 channel.channel_id, limit=self.policy.context_messages + len(batch), before=batch[0]["id"]
             )
+            # Taken back in the desk chat: gone, not a message marked as taken back.
+            history = [r for r in history if not (r["recalled_at"] and from_app(r["external_id"]))]
             context = await self._heard(bot, channel.channel_id, history[-self.policy.context_messages :])
             shown = batch
             # 答题: only when someone called the bot (in a private chat every message does), and only for
@@ -931,23 +1029,41 @@ class Brain:
                 sorted_as = f"读了 {read} 张截图；{sorted_as}" if sorted_as else f"读了 {read} 张截图"
             choices: list[dict[str, Any]] = []
             capable = capabilities_of(channel.channel.platform)
-            if (
-                self.stickers is not None
-                and channel.sticker_mode != "off"
-                and "send_image" in capable
-                and not private
-                and not answering
-            ):
+            desk_group = is_desk_group(channel.channel)
+            in_group = (
+                channel.sticker_mode != "off" and "send_image" in capable and not private and not desk_group
+            )
+            # 桌面聊天: her own 表情包套装 when she has one in use, else the collection;
+            # never in her QQ private chat.
+            at_desk = (
+                (private or desk_group) and self.desk is not None and from_app(target.get("external_id"))
+            )
+            if at_desk and self.packs is not None and self.stickers is not None and not answering:
+                at_desk = await self.packs.desk_on(bot.id) and not await self.stickers.store.sent_lately(
+                    channel.channel_id, bot.id, DESK_STICKER_EVERY
+                )
+            else:
+                at_desk = False
+            if self.stickers is not None and (in_group or at_desk) and not answering:
                 labels = await self.stickers.labels([*context, *batch])
                 context, shown = relabel(context, labels), relabel(batch, labels)
+                packs = self.packs
+                own = await packs.own(bot.id) if at_desk and packs else []
+                own_only = at_desk and packs is not None and await packs.own_only(bot.id)
                 choices, _ = await self.stickers.candidates(
                     channel.channel,
                     bot.id,
                     "\n".join(row["text"] for row in shown),
                     exclude=sticker_keys(batch),
+                    # 「只用专属表情包」 (the default): hers only, none when she has none.
+                    only=own if own_only else None,
+                    prefer=own,
+                    hide=await packs.all_pictures() if in_group and packs else (),
                 )
             if self.screenshots is not None and not answering:
                 context, shown = await self.screenshots.noted(context, shown, bot.account_id)
+            if desk_group:
+                context, shown = with_files(context, shown)
             context = await self._quoted(bot, channel.channel_id, context)
             shown = await self._quoted(bot, channel.channel_id, shown)
             voice_asked = sing or _voice_asked(batch, called)
@@ -971,6 +1087,38 @@ class Brain:
                 and provider.can_search
                 and self._may_search(bot.id)
             )
+            # A model that cannot search by itself: searched for it first (Tavily, when set up).
+            searched = ""
+            if (
+                answering
+                and not search
+                and records is None
+                and project is None
+                and self.tools is not None
+                and self.tools.search_key()
+                and self._may_search(bot.id)
+            ):
+                topic = (
+                    sorting.topic
+                    if sorting is not None and sorting.topic
+                    else str(shown[-1].get("text") or "")
+                )
+                searched = await self.tools.search_material(topic)
+                if searched:
+                    self._searched.setdefault(bot.id, []).append(time.time())
+            # Her tools in her chat with the user, whichever way the message is answered: a request that
+            # reads as a question (答题) still gets them, or "can you look at that folder?" never could.
+            kit, note = ((), None), ""
+            if private and self.tools is not None and await self.tools.available(bot, channel):
+                await self.tools.prepare(bot)
+                kit = self.tools.for_chat(bot, channel)
+                note = self.tools.hint(bot)
+            # 她拉群 without tools: a mark in her reply (nest.core.groups.split_group).
+            mark_groups = private and kit[1] is None and self.groups is not None and len(self.bots) >= 2
+            if mark_groups:
+                note = f"{note}\n{GROUP_MARK_HINT}" if note else GROUP_MARK_HINT
+            if again:
+                note = "\n".join(x for x in (note, AGAIN.format(said=again)) if x)
             if answering:
                 messages = build_answer_prompt(
                     persona=self._persona(bot, channel),
@@ -978,7 +1126,7 @@ class Brain:
                     context=context,
                     batch=shown,
                     called=called,
-                    peers=self.peers_of(bot),
+                    peers=self.peers_of(bot, anywhere=is_desk_group(channel.channel)),
                     private=private,
                     search=search,
                     now=time.time(),
@@ -986,11 +1134,19 @@ class Brain:
                     records=records,
                     project=project,
                     tone=self.tone(channel.answer_tone, DEFAULT_ANSWER),
-                    place=place_of(channel.channel.platform),
+                    place=_place_of(channel),
                     people=people,
+                    note=note,
+                    searched=searched,
                 )
             elif private:
                 memory, _ = await self.store.memory(channel.channel_id)
+                keepsake = await self.keepsakes.recall(bot, channel, shown) if self.keepsakes else ""
+                if kit[1] is None and not again:
+                    # Without tools a reminder she is asked for is read from the request here; with them she
+                    # sets it herself.
+                    asked = await self.reminders.from_chat(bot, channel, shown) if self.reminders else ""
+                    note = "\n".join(x for x in (asked, GROUP_MARK_HINT if mark_groups else "") if x)
                 messages = build_private_prompt(
                     persona=self._persona(bot, channel),
                     bot_name=bot.name,
@@ -1000,8 +1156,15 @@ class Brain:
                     voice=speakable,
                     sing=sing and speakable,
                     memory=memory,
-                    place=place_of(channel.channel.platform)[1],
+                    place=_place_of(channel)[1],
                     people=people,
+                    keepsake=keepsake,
+                    note=note,
+                    now=time.time(),
+                    stickers=[self.stickers.describe_choice(s) for s in choices] if self.stickers else None,
+                    life=(await self.life.line(bot) if self.life is not None else "")
+                    + games_hint([*context, *shown]),
+                    bubbles=self.desk is not None and from_app(target.get("external_id")),
                 )
             else:
                 messages = build_prompt(
@@ -1010,7 +1173,7 @@ class Brain:
                     context=context,
                     batch=shown,
                     called=called,
-                    peers=self.peers_of(bot),
+                    peers=self.peers_of(bot, anywhere=is_desk_group(channel.channel)),
                     stickers=[self.stickers.describe_choice(s) for s in choices] if self.stickers else None,
                     sticker_battle=bool(sticker_keys(batch)),
                     glossary=glossary,
@@ -1018,17 +1181,31 @@ class Brain:
                     voice=speakable,
                     sing=sing and speakable,
                     reply_lines=SONG_LINES if sing and speakable else lines,
-                    place=place_of(channel.channel.platform)[0],
+                    place=_place_of(channel)[0],
                     people=people,
+                    life=(await self.life.line(bot) if self.life is not None else "")
+                    + games_hint([*context, *shown])
+                    if is_desk_group(channel.channel)
+                    else "",
+                    for_all=is_desk_group(channel.channel)
+                    and target["sender_id"] not in self._our_accounts
+                    and not target.get("from_self"),
                 )
             terms = [term for term, _ in glossary]
             if answering:
                 max_tokens = self.policy.answer_max_tokens
             else:
                 max_tokens = self.policy.private_max_tokens if private else self.policy.max_tokens
+            stream = self._desk_stream(bot, channel, target, answer=answering)
             try:
                 completion, call_id, used = await self._complete(
-                    bot, messages, max_tokens=max_tokens, search=search
+                    bot,
+                    messages,
+                    max_tokens=max_tokens,
+                    search=search,
+                    tools=kit[0],
+                    run=kit[1],
+                    on_text=stream.feed if stream is not None else None,
                 )
             except ProviderUnavailable as exc:
                 return Draft("failed", str(exc), target=target)
@@ -1036,6 +1213,9 @@ class Brain:
                 return Draft("failed", f"模型调用失败：{exc}", target=target)
             if completion.searches:
                 self._searched.setdefault(bot.id, []).append(time.time())
+            if completion.tools_used:
+                note = "用了工具：" + "、".join(name for name, _ in completion.tools_used)
+                sorted_as = f"{sorted_as}；{note}" if sorted_as else note
             own = (self.bots.get(bot.id) or bot).provider_id
             if used.config.id != own:
                 note = f"{own} 用不了，用了备用模型 {used.config.id}"
@@ -1045,6 +1225,12 @@ class Brain:
                 note = "模型把盘算也写进了回复，只取「输出：」后面的话"
                 sorted_as = f"{sorted_as}；{note}" if sorted_as else note
             raw, spoken = split_voice(text)
+            if mark_groups and not made_group:
+                raw, group_asked = split_group(raw)
+                if group_asked is not None:
+                    made_group = True
+                    made = await create_group_tool(self.groups, bot, group_asked)
+                    sorted_as = f"{sorted_as}；拉群：{made}" if sorted_as else f"拉群：{made}"
             offered = [self.stickers.describe_choice(s) for s in choices] if self.stickers else []
             raw, number = split_sticker(raw, offered)
             sticker = choices[number - 1] if number else None
@@ -1096,9 +1282,16 @@ class Brain:
             current = await self.store.message(target["id"])
             recalled = bool(current and current["recalled_at"])
             followed_up = any(r["sender_id"] == target["sender_id"] and not r["from_self"] for r in later)
+            if recalled and len(batch) == 1 and not followed_up:
+                regenerated = True  # nothing else to answer
             if not regenerated and (recalled or followed_up):
                 regenerated = True
+                if stream is not None:
+                    stream.clear()
                 fresh = [r for r in later if not r["from_self"]]
+                if recalled:
+                    batch = [r for r in batch if r["id"] != target["id"]]
+                    called = called - {target["id"]}
                 batch = (batch + fresh)[-self.policy.batch_limit :]
                 called = called | {r["id"] for r in fresh if await self._row_mentions(bot, channel, r)}
                 target = next(
@@ -1137,7 +1330,22 @@ class Brain:
                 sorted_as=sorted_as,
                 gap=gap,
                 project=project,
+                streamed=stream is not None and bool(stream.shown),
             )
+
+    def _desk_stream(
+        self, bot: BotConfig, channel: BotChannel, target: dict[str, Any], *, answer: bool
+    ) -> DeskStream | None:
+        """逐字流式: an answer to something typed in the app is shown there while it is written. The chat
+        window drops what it shows when the answer (or the decision that there is none) comes."""
+        if self.desk is None or not _private(channel) or not from_app(target.get("external_id")):
+            return None
+        if bot.mode != "live":
+            return None
+        about = {"bot_id": bot.id, "channel_id": channel.channel_id}
+        return DeskStream(
+            lambda text: self.broadcaster.publish("desk_delta", {**about, "text": text}), answer=answer
+        )
 
     async def _read_screenshots(
         self, bot: BotConfig, channel: BotChannel, batch: list[dict[str, Any]], called: set[int]
@@ -1154,7 +1362,7 @@ class Brain:
                 if found is not None:
                     quoted.append(found)
         urls = pictures([*asked, *quoted])
-        place = place_of(channel.channel.platform)[0]
+        place = _place_of(channel)[0]
         texts = await self.screenshots.read(urls, place=place, account=bot.account_id) if urls else []
         if not texts:
             return batch, 0
@@ -1235,10 +1443,10 @@ class Brain:
             context=context[-self.policy.sort_context :],
             batch=batch,
             called=called,
-            peers=self.peers_of(bot),
+            peers=self.peers_of(bot, anywhere=is_desk_group(channel.channel)),
             private=_private(channel),
             project=project,
-            place=place_of(channel.channel.platform),
+            place=_place_of(channel),
         )
         try:
             completion, _, _ = await self._complete(bot, messages, max_tokens=self.policy.sort_max_tokens)
@@ -1269,7 +1477,10 @@ class Brain:
         return (
             self.speech is not None
             and channel.voice_mode != "off"
-            and "send_voice" in capabilities_of(channel.channel.platform)
+            # 桌面上的伙伴 speaks in the desk chat (her voice shown beside the words).
+            and (
+                channel.channel.platform == DESK or "send_voice" in capabilities_of(channel.channel.platform)
+            )
             and self.speech.ready(bot.voice)
         )
 
@@ -1310,6 +1521,32 @@ class Brain:
             return replace(sent, voice_state="unknown"), True
         return replace(draft, voice_state="failed", voice_note=f"语音{sent.reason}"), False
 
+    async def _desk_voice(
+        self, bot: BotConfig, channel: BotChannel, current: BotConfig, draft: Draft
+    ) -> tuple[Draft, list[Segment]]:
+        """In the desk chat a [语音] reply is shown as its words with her voice beside them, played there.
+        The same settings and limits as a voice message on the platform."""
+        if self.speech is None or self.desk_media is None or not draft.reply:
+            return draft, []
+        mode = (current.channels.get(channel.channel_id) or channel).voice_mode
+        if mode != "on":
+            return draft, []
+        text = "，".join(draft.reply.split("\n"))
+        if len(text) > self.speech.config.max_chars:
+            return replace(draft, voice_note=f"太长（{len(text)} 字），没用语音"), []
+        blocked = await self.speech.blocked(channel.channel, bot.id, time.time(), asked=draft.voice_asked)
+        if blocked:
+            return replace(draft, voice_note=f"没用语音：{blocked}"), []
+        try:
+            audio = await self.speech.say(current.voice, text)
+        except SpeechError as exc:
+            log.warning("%s 的语音没合成出来：%s", bot.name, exc)
+            return replace(draft, voice_note=f"语音没合成出来：{exc}"), []
+        name = await asyncio.to_thread(self.desk_media.save_audio, audio)
+        if name is None:
+            return replace(draft, voice_note="语音服务给的不是认得的音频"), []
+        return replace(draft, voice_state="sent"), [voice_segment(name)]
+
     async def _send(self, bot: BotConfig, channel: BotChannel, draft: Draft) -> Draft:
         """_deliver, with a note in the reason when a reply meant to be spoken went out as text."""
         sent = await self._deliver(bot, channel, draft)
@@ -1326,16 +1563,33 @@ class Brain:
         current = self.bots.get(bot.id)
         if current is None or current.mode != "live":
             return replace(draft, reason="发送前被切回了只看不说，没有发出")
-        if self.adapters.get(bot.account_id) is None:
+        at_desk = self._at_desk(draft)  # shown in the app: needs no connection, and comes as text
+        if not at_desk and self.adapters.get(bot.account_id) is None:
             return replace(draft, outcome="failed", reason="这个账号没有在运行，没有发出")
         said = False
         capable = capabilities_of(channel.channel.platform)
-        if draft.reply and draft.voice and self.speech is not None:
+        if draft.reply and draft.voice and self.speech is not None and not at_desk:
             draft, said = await self._speak(bot, channel, current, draft)
-        if draft.reply and not said and (draft.answer or _private(channel)):  # reads best in one piece
+        lines: list[str] = []
+        if at_desk and draft.reply and _private(channel) and not draft.answer and not draft.voice:
+            lines = bubbles(draft.reply)
+        if draft.reply and len(lines) > 1:  # 分条: short talk in the desk chat
+            first, *rest = lines
+            draft = await self._perform(bot, channel, draft, [Segment("text", {"text": first})])
+            if draft.outcome == "replied":
+                draft = await self._follow_up(bot, channel, draft, rest)
+            if draft.outcome != "replied" or draft.sticker is None:
+                return draft
+        elif draft.reply and not said and (draft.answer or _private(channel)):  # reads best in one piece
             segments = [*_opening(draft, capable), Segment("text", {"text": draft.reply})]
-            return await self._perform(bot, channel, draft, segments)
-        if draft.reply:
+            if at_desk and draft.voice and _private(channel):
+                draft, voice = await self._desk_voice(bot, channel, current, draft)
+                segments += voice
+            draft = await self._perform(bot, channel, draft, segments)
+            # In the desk chat a sticker may follow the words.
+            if draft.outcome != "replied" or draft.sticker is None or not at_desk:
+                return draft
+        elif draft.reply:
             if not said:
                 first, *rest = draft.reply.split("\n")
                 segments = [*_opening(draft, capable), Segment("text", {"text": first})]
@@ -1348,7 +1602,8 @@ class Brain:
             return draft
         if draft.reply:
             await asyncio.sleep(self._typing(""))
-        mode = (current.channels.get(channel.channel_id) or channel).sticker_mode
+        # The desk chat was let send one when the reply was written (its own switch, not the group's).
+        mode = "on" if at_desk else (current.channels.get(channel.channel_id) or channel).sticker_mode
         words = bool(draft.reply)
         if mode != "on":
             if words:
@@ -1360,7 +1615,10 @@ class Brain:
                 return replace(draft, reason=f"已发送；表情没有发：{blocked}")
             return replace(draft, outcome="skipped", reason=f"只想发表情，但{blocked}")
         try:
-            picture = await self.stickers.segment(draft.sticker)
+            if at_desk:
+                picture = sticker_segment(draft.sticker["id"], self.stickers.describe_choice(draft.sticker))
+            else:
+                picture = await self.stickers.segment(draft.sticker)
         except OSError:
             if words:
                 return replace(draft, reason="已发送；表情的图片文件不见了，没有发")
@@ -1384,7 +1642,8 @@ class Brain:
         """The second and later lines of a sent reply, each its own message after a typing pause. The
         reply stays sent when one of them fails; the lines after it are dropped, never retried."""
         for number, line in enumerate(lines, 2):
-            await asyncio.sleep(self._typing(line))
+            if not draft.streamed:
+                await asyncio.sleep(self._typing(line))
             current = self.bots.get(bot.id)
             if current is None or current.mode != "live":
                 return replace(draft, reason=f"已发送前 {number - 1} 条；后面的没发，被切回了只看不说")
@@ -1435,6 +1694,14 @@ class Brain:
     async def _perform(
         self, bot: BotConfig, channel: BotChannel, draft: Draft, segments: list[Segment]
     ) -> Draft:
+        if self._at_desk(draft):
+            assert self.desk is not None
+            shown = await self.desk.deliver(bot, channel, segments)
+            if shown.state == "succeeded":
+                return replace(
+                    draft, outcome="replied", reason="已在桌面聊天里回复", reply_message_id=shown.message_id
+                )
+            return replace(draft, outcome="failed", reason=f"发送失败：{shown.error}")
         adapter = self.adapters.get(bot.account_id)
         if adapter is None:  # e.g. its connection settings were just changed
             return replace(draft, outcome="failed", reason="这个账号没有在运行，没有发出")
@@ -1449,6 +1716,10 @@ class Brain:
             reason = f"发送结果不确定，没有重发：{result.error}"
             return replace(draft, outcome="failed", reason=reason, maybe_sent=True)
         return replace(draft, outcome="failed", reason=f"发送失败：{result.error}")
+
+    def _at_desk(self, draft: Draft) -> bool:
+        """桌面聊天: the answer to a message typed in the app is shown there, not sent to the platform."""
+        return self.desk is not None and from_app((draft.target or {}).get("external_id"))
 
     def _foreign(self, bot: BotConfig, now: float) -> None:
         """Our account spoke, but not through nest: another program is using it."""
@@ -1487,7 +1758,7 @@ def _voice_asked(batch: list[dict[str, Any]], called: set[int]) -> bool:
 
 
 def typed_text(segments: Any, fallback: str = "") -> str:
-    """What the sender typed or said, without @-names: "@小鲸鱼粉" @-s a person; it does not call 小鲸鱼."""
+    """What the sender typed or said, without @-names: "@小海豚粉" @-s a person; it does not call 小海豚."""
     if not segments:
         return fallback
     parts = []
@@ -1530,6 +1801,11 @@ def _private(channel: BotChannel) -> bool:
     return channel.channel.kind == "private"
 
 
+def _place_of(channel: BotChannel) -> tuple[str, str]:
+    """(what a group is called, what a private chat is called) here: 桌面小群 for a 桌面群."""
+    return DESK_PLACE if is_desk_group(channel.channel) else place_of(channel.channel.platform)
+
+
 def _opening(draft: Draft, capable: Collection[str] = ("mention", "reply")) -> list[Segment]:
     """What a reply starts with: the quote, or an @ when this account never received the message (it has
     no id of its own to quote). Whichever the platform cannot do is left out."""
@@ -1564,4 +1840,30 @@ def _missed(
 
 
 def _named(bot: BotConfig, text: str) -> bool:
-    return any(alias and alias in text for alias in (bot.name, *bot.aliases))
+    return any(alias and calls(alias, text) for alias in (bot.name, *bot.aliases))
+
+
+# What may follow a one-character name when it is said to her: 「星你看看」「星在吗」「星帮我」.
+CALL_NEXT = frozenset("你在帮来呀啊呢")
+
+
+def calls(name: str, text: str) -> bool:
+    """Whether the text calls her by this name. A name of two or more characters anywhere in it does. One
+    character is usually part of a word (星 in 星期, 明星, 火星), so it counts only when said to
+    her: right after an @, or standing on its own (nothing word-like before it, and after it nothing, a
+    pause, or a word like 你/在/帮 as in 「星你看看」)."""
+    if len(name) > 1:
+        return name in text
+    at = text.find(name)
+    while at != -1:
+        before = text[at - 1] if at else ""
+        after = text[at + 1] if at + 1 < len(text) else ""
+        if before == "@" or (not _wordlike(before) and (not _wordlike(after) or after in CALL_NEXT)):
+            return True
+        at = text.find(name, at + 1)
+    return False
+
+
+def _wordlike(char: str) -> bool:
+    """A letter (Chinese characters included) or a digit: part of a word, not a pause or the edge."""
+    return bool(char) and unicodedata.category(char)[0] in "LN"

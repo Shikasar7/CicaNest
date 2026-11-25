@@ -70,6 +70,7 @@ class DiscordAdapter:
     platform = PLATFORM
     capabilities = frozenset(
         {
+            "comparable",
             "fetch_history",
             "list_channels",
             "mention",

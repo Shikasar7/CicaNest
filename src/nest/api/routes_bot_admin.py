@@ -25,11 +25,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from nest import docker, housekeeping, napcat, system
+from nest import backup, docker, housekeeping, napcat, system
 from nest.api.auth import require_token
 from nest.api.routes_accounts import check_fields, platform_spec, stored_config
 from nest.api.routes_bots import _aliases, _name
 from nest.api.routes_system_admin import MAX_CONTAINERS, container_names, machine_settings
+from nest.core import move_in
+from nest.core.workspace import WorkspaceError
 from nest.storage.accounts import account_id as make_account_id
 from nest.storage.accounts import get_account, upsert_account
 from nest.storage.settings import SettingsRepo
@@ -198,6 +200,50 @@ async def _add_platform_bot(state: Any, body: BotCreate, name: str, aliases: lis
     state.broadcaster.publish("bots", {"bot_id": account})
     state.broadcaster.publish("system", {"change": "bot_added"})
     return {"bot_id": account, "container": ""}
+
+
+class MoveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    companion: str  # the bot id of one who lives only on the desk
+
+
+@router.post("/bots/{bot_id}/move-in")
+async def take_in(request: Request, bot_id: str, body: MoveIn) -> dict[str, Any]:
+    """接上平台账号: the companion moves into this bot, added for her just before, with everything of hers
+    (nest.core.move_in). A copy of the database is made first."""
+    state = request.app.state
+    async with state.config_lock:
+        bot, companion = state.brain.bots.get(bot_id), state.brain.bots.get(body.companion)
+        if bot is None or companion is None:
+            raise HTTPException(status_code=404, detail="没有这个 bot")
+        if why := await move_in.problem(state.db, companion, bot):
+            raise HTTPException(status_code=409, detail=why)
+        if any(state.brain.busy(b.id, channel) for b in (bot, companion) for channel in b.channels):
+            raise HTTPException(status_code=409, detail=f"{companion.name}正在想怎么回，等她说完")
+        settings = state.settings
+        copy = await asyncio.to_thread(backup.before, settings.data_dir, settings.db_path, "move-in")
+        if state.sandbox is not None:
+            await state.sandbox.forget(companion.id)
+        try:
+            await asyncio.to_thread(state.workspace.move, companion.id, bot.id)
+        except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=f"她的文件夹搬不过去：{exc}") from None
+        try:
+            await move_in.move_in(state.db, companion, bot)
+        except BaseException as exc:
+            await asyncio.to_thread(state.workspace.move, bot.id, companion.id)
+            if isinstance(exc, move_in.MoveError):
+                raise HTTPException(status_code=409, detail=str(exc)) from None
+            raise
+        await state.hub.forget(companion.account_id)
+        await state.brain.load()
+        state.keepsakes.changed(companion.id)
+        state.keepsakes.changed(bot.id)
+        await state.hub.reconnect(bot.account_id)
+    log.info("%s 搬进了 %s，搬之前的数据库在 %s", companion.name, bot.account_id, copy.name)
+    state.broadcaster.publish("bots", {"bot_id": bot.id, "was": companion.id})
+    return {"bot_id": bot.id, "backup": copy.name}
 
 
 @router.delete("/bots/{bot_id}")

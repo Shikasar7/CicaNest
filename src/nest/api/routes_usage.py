@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from nest.api.auth import require_token
+from nest.llm.purpose import PURPOSES
 from nest.storage.usage import UsageRepo
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
@@ -78,6 +79,11 @@ async def usage(request: Request, days: int = Query(7)) -> dict[str, Any]:
         "days": days,
         "providers": providers,
         "bots": await repo.by_bot(since),
+        "tasks": await repo.tasks(since),
+        "purposes": [
+            row | {"label": PURPOSES.get(row["purpose"], row["purpose"])}
+            for row in await repo.by_purpose(since)
+        ],
         "daily": daily,
         "recent_errors": await repo.recent_errors(since),
     }

@@ -91,12 +91,12 @@ async def test_a_bot_is_added_with_its_own_container(
     http: httpx.AsyncClient, box: FakeDocker, tmp_path: Path
 ) -> None:
     for body, status in (
-        ({"name": "小鲸鱼", "self_id": "12ab"}, 422),
+        ({"name": "小海豚", "self_id": "12ab"}, 422),
         ({"name": " ", "self_id": "123456789"}, 422),
     ):
         assert (await http.post("/api/bots", json=body)).status_code == status
     response = await http.post(
-        "/api/bots", json={"name": "小鲸鱼", "self_id": "123456789", "aliases": ["鲸鲸"]}
+        "/api/bots", json={"name": "小海豚", "self_id": "123456789", "aliases": ["豚豚"]}
     )
     assert response.status_code == 201, response.text
     assert response.json() == {"bot_id": "qq:123456789", "container": "napcat-123456789"}
@@ -122,19 +122,19 @@ async def test_a_bot_is_added_with_its_own_container(
     assert len(secrets.get("NEST_QQ_123456789_HTTP_TOKEN")) >= 24
 
     [bot] = (await http.get("/api/bots")).json()
-    assert (bot["name"], bot["mode"], bot["aliases"]) == ("小鲸鱼", "observe", ["小鲸鱼", "鲸鲸"])
+    assert (bot["name"], bot["mode"], bot["aliases"]) == ("小海豚", "observe", ["小海豚", "豚豚"])
     [conn] = (await http.get("/api/accounts/connections")).json()
     assert (conn["http_url"], conn["ws_url"]) == ("http://127.0.0.1:3046", "ws://127.0.0.1:3047")
     system = (await http.get("/api/system")).json()
     assert [c["name"] for c in system["containers"]] == ["napcat-bot1", "napcat-123456789"]
-    again = await http.post("/api/bots", json={"name": "小鲸鱼", "self_id": "123456789"})
+    again = await http.post("/api/bots", json={"name": "小海豚", "self_id": "123456789"})
     assert again.status_code == 409
 
 
 async def test_a_removed_bot_keeps_its_data_and_comes_back(
     http: httpx.AsyncClient, box: FakeDocker, tmp_path: Path
 ) -> None:
-    await http.post("/api/bots", json={"name": "小鲸鱼", "self_id": "123456789"})
+    await http.post("/api/bots", json={"name": "小海豚", "self_id": "123456789"})
     response = await http.delete("/api/bots/qq:123456789")
     assert response.json() == {"ok": True, "container": "napcat-123456789", "problem": ""}
     assert box.removed == ["napcat-123456789"]

@@ -384,7 +384,9 @@ async def test_a_private_message_needs_no_name_and_gets_one_long_answer(world: W
     assert action.segments[0].data["text"] == answer
     system, user = world.providers["10001"].requests[0]
     assert "现在是 QQ 私聊" in system.content and "要接的是「新消息」" not in system.content
-    assert user.content.endswith("新消息：\n小明：今天的模型新闻能讲讲吗\n\n只输出你要回的话，或 SKIP。")
+    # She is told the time.
+    assert "新消息：\n小明：今天的模型新闻能讲讲吗\n\n现在是 " in user.content
+    assert user.content.endswith("。\n\n只输出你要回的话，或 SKIP。")
     assert "【点到你】" not in user.content
 
 

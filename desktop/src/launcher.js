@@ -14,37 +14,19 @@ const QQ_WAIT_MS = 20_000
 const POLL_MS = 1000
 const POLL_WAITING_MS = 1500
 
-// The three bots, in this order. An account is matched to a glyph by its name.
-const KNOWN_BOTS = [
-  { char: '鲸', hue: '#2F7FD0' },
-  { char: '马', hue: '#E2557F' },
-  { char: '龙', hue: '#1E9C82' },
-]
+const HUES = ['#2F7FD0', '#E2557F', '#1E9C82', '#8A63D2', '#D9822B']
 
 const isOnline = (account) => account?.status?.state === 'connected'
 
 function glyphsFor(accounts) {
-  const used = new Set()
-  const glyphs = []
-  for (const bot of KNOWN_BOTS) {
-    const match = accounts.find((a) => !used.has(a.id) && String(a.name || '').includes(bot.char))
-    if (!match) continue
-    used.add(match.id)
-    glyphs.push({ key: match.id, char: bot.char, hue: bot.hue, name: match.name || match.self_id, online: isOnline(match) })
-  }
-  const freeHues = KNOWN_BOTS.map((b) => b.hue).filter((h) => !glyphs.some((g) => g.hue === h))
-  let n = 0
-  for (const account of accounts) {
-    if (used.has(account.id)) continue
+  return accounts.slice(0, HUES.length).map((account, n) => {
     const name = String(account.name || account.self_id || '?')
-    const hue = freeHues[n] ?? KNOWN_BOTS[n % KNOWN_BOTS.length].hue
-    n += 1
-    glyphs.push({ key: account.id, char: Array.from(name)[0], hue, name, online: isOnline(account) })
-  }
-  return glyphs.slice(0, 5)
+    const han = Array.from(name).filter((c) => /\p{Script=Han}/u.test(c))
+    return { key: account.id, char: han.at(-1) ?? Array.from(name)[0], hue: HUES[n], name, online: isOnline(account) }
+  })
 }
 
-const PLACEHOLDER_GLYPHS = KNOWN_BOTS.map((b) => ({ key: b.char, char: b.char, hue: b.hue, name: '', online: false }))
+const PLACEHOLDER_GLYPHS = HUES.slice(0, 3).map((hue) => ({ key: hue, char: '·', hue, name: '', online: false }))
 
 const STEP_LABELS = {
   stop: '停止 nest 后台',
@@ -315,4 +297,4 @@ class Launch extends EventEmitter {
   }
 }
 
-module.exports = { Launch, glyphsFor, KNOWN_BOTS }
+module.exports = { Launch, glyphsFor }

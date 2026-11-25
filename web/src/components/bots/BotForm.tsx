@@ -85,6 +85,8 @@ export function BotForm({
   const providerChanged = providerId !== bot.provider_id
   const backupId = form.backupId || null
   const backupChanged = backupId !== (bot.backup_provider_id ?? null)
+  const taskId = form.taskId || null
+  const taskChanged = taskId !== (bot.task_provider_id ?? null)
   // Only what is sent is checked, so an old value set from the command line never blocks another change.
   const nameError = nameChanged ? nameProblem(form.name) : null
   const aliasErrors = aliasesTouched ? aliases.map(aliasProblem) : []
@@ -108,6 +110,7 @@ export function BotForm({
     if (aliasesChanged) body.aliases = aliases
     if (providerChanged) body.provider_id = providerId
     if (backupChanged) body.backup_provider_id = backupId
+    if (taskChanged) body.task_provider_id = taskId
     if (Object.keys(body).length === 0) {
       draft.clear()
       return
@@ -185,7 +188,7 @@ export function BotForm({
               {...control}
               rows={2}
               value={form.aliases}
-              placeholder="例如 鲸鲸、胖鲸"
+              placeholder="例如 豚豚、小豚"
               onChange={(e) => update({ aliases: e.target.value })}
             />
           )}
@@ -245,6 +248,26 @@ export function BotForm({
                   {`${p.id}（${kindLabel(p.kind)}）${p.build_error !== null ? '（配置有误）' : ''}`}
                 </option>
               ))}
+          </NativeSelect>
+        )}
+      </Field>
+      <Field
+        label="做事模型"
+        hint="后台任务和定时任务用它。要选会用工具的：Claude、ChatGPT 订阅（Codex），或打开了「工具调用」的兼容接口"
+      >
+        {(control) => (
+          <NativeSelect
+            {...control}
+            className="w-full"
+            value={form.taskId}
+            onChange={(e) => update({ taskId: e.target.value })}
+          >
+            <option value="">和聊天用同一个模型</option>
+            {models.map((p) => (
+              <option key={p.id} value={p.id} disabled={p.build_error !== null}>
+                {`${p.id}（${kindLabel(p.kind)}）${p.build_error !== null ? '（配置有误）' : ''}`}
+              </option>
+            ))}
           </NativeSelect>
         )}
       </Field>

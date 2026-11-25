@@ -71,6 +71,7 @@ export function AvatarCropper({
   onPickAnother,
   onConfirm,
   onError,
+  themed = false,
 }: {
   /** A data: URL (the console's CSP allows data: pictures, not blob:). */
   src: string
@@ -79,6 +80,8 @@ export function AvatarCropper({
   onPickAnother: () => void
   onConfirm: (picture: Blob) => void
   onError: (message: string) => void
+  /** The theme's own button colours rather than the bot's (your own picture has no bot colour). */
+  themed?: boolean
 }) {
   const [image, setImage] = useState<{ element: HTMLImageElement; size: Size } | null>(null)
   const [crop, setCrop] = useState<Crop>({ zoom: 1, x: 0, y: 0 })
@@ -184,7 +187,7 @@ export function AvatarCropper({
           onPointerCancel={onPointerUp}
           onKeyDown={onKeyDown}
           style={{ width: STAGE, height: STAGE }}
-          className="relative cursor-grab touch-none overflow-hidden rounded-xl bg-muted outline-none select-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-[var(--hue)] focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          className="relative cursor-grab touch-none overflow-hidden rounded-xl bg-muted outline-none select-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-[var(--hue,var(--primary))] focus-visible:ring-offset-2 focus-visible:ring-offset-card"
         >
           <img src={src} alt="" draggable={false} style={placed(size, crop, STAGE)} className="pointer-events-none absolute max-w-none" />
           <div className="pointer-events-none absolute inset-0 rounded-full shadow-[0_0_0_999px_rgb(15_20_26/0.5)] ring-1 ring-white/70" />
@@ -199,7 +202,7 @@ export function AvatarCropper({
             value={crop.zoom}
             aria-label="缩放"
             onChange={(e) => setCrop((c) => zoomAt(c, size, Number(e.target.value)))}
-            className="h-1 w-full cursor-pointer accent-[var(--hue)]"
+            className="h-1 w-full cursor-pointer accent-[var(--hue,var(--primary))]"
           />
           <ZoomIn className="size-4 shrink-0" aria-hidden />
         </label>
@@ -212,7 +215,7 @@ export function AvatarCropper({
               <span
                 key={box}
                 style={{ width: box, height: box }}
-                className="relative shrink-0 overflow-hidden rounded-full bg-muted ring-1 ring-[color-mix(in_oklch,var(--hue)_30%,transparent)]"
+                className="relative shrink-0 overflow-hidden rounded-full bg-muted ring-1 ring-[color-mix(in_oklch,var(--hue,var(--primary))_30%,transparent)]"
               >
                 <img src={src} alt="" draggable={false} style={placed(size, crop, box)} className="absolute max-w-none" />
               </span>
@@ -224,10 +227,14 @@ export function AvatarCropper({
             size="sm"
             disabled={working}
             onClick={() => void confirm()}
-            className={cn('bg-[var(--hue)] text-white hover:bg-[color-mix(in_srgb,var(--hue)_88%,black)]')}
+            className={cn(
+              themed
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'bg-[var(--hue)] text-white hover:bg-[color-mix(in_srgb,var(--hue)_88%,black)]',
+            )}
           >
             {working && <LoaderCircle className="size-3.5 animate-spin" />}
-            用这张
+            确定
           </Button>
           <Button size="sm" variant="outline" disabled={working} onClick={onPickAnother}>
             换一张

@@ -20,7 +20,9 @@ from selectolax.lexbor import LexborHTMLParser, SelectolaxError
 from nest.adapters.registry import can, check_user
 from nest.api.auth import require_token
 from nest.api.text import has_bad_chars
-from nest.storage.watches import KINDS, MODES, TARGET_KINDS, Watch
+from nest.core.desk import chat_of, chosen_chats
+from nest.storage.watches import DESK_TARGET, KINDS, MODES, TARGET_KINDS, Watch, min_interval
+from nest.watch.check import invite_code, invite_link
 from nest.watch.watcher import Busy
 
 log = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ NAME_LIMIT = 40
 URL_LIMIT = 1000
 SELECTOR_LIMIT = 300
 INSTRUCTIONS_LIMIT = 500
-INTERVAL_MIN, INTERVAL_MAX = 5, 1440
+INTERVAL_MAX = 1440
 WEEK = 7 * 86400.0
 NOT_FOUND = "没有这个监控"
 NO_COUNTS = {"runs_7d": 0, "changes_7d": 0, "errors_7d": 0}
@@ -56,6 +58,7 @@ class WatchCreate(BaseModel):
     target_id: str
     provider_id: str | None = None
     instructions: str = ""
+    task_goal: str = ""  # 「发现变化就让她去做」
     use_proxy: bool = False
     mode: str = "preview"
     enabled: bool = True
@@ -78,6 +81,7 @@ class WatchPatch(BaseModel):
     target_id: str | None = None
     provider_id: str | None = None
     instructions: str | None = None
+    task_goal: str | None = None
     use_proxy: bool | None = None
     mode: str | None = None
     enabled: bool | None = None
@@ -105,14 +109,19 @@ def _name(value: str) -> str:
 
 def _kind(value: str) -> str:
     if value not in KINDS:
-        raise _invalid("类型只能是订阅、网页变化或价格")
+        raise _invalid("类型只能是订阅、网页变化、价格或 Discord 开放")
     return value
 
 
-def _url(value: str) -> str:
+def _url(value: str, kind: str) -> str:
     text = value.strip()
     if not text:
         raise _invalid("请填写地址")
+    if kind == "discord":  # kept as one form: https://discord.gg/<code>
+        code = invite_code(text)
+        if code is None:
+            raise _invalid("填 Discord 邀请链接，例如 https://discord.gg/abc123，或者只填邀请码")
+        return invite_link(code)
     if len(text) > URL_LIMIT:
         raise _invalid(f"地址最多 {URL_LIMIT} 个字")
     hint = "地址要写成 http:// 或 https:// 开头的完整网址"
@@ -146,9 +155,10 @@ def _selector(value: str) -> str:
     return text
 
 
-def _interval(value: int) -> int:
-    if not INTERVAL_MIN <= value <= INTERVAL_MAX:
-        raise _invalid(f"检查间隔要在 {INTERVAL_MIN}–{INTERVAL_MAX} 分钟之间")
+def _interval(value: int, kind: str) -> int:
+    least = min_interval(kind)
+    if not least <= value <= INTERVAL_MAX:
+        raise _invalid(f"检查间隔要在 {least}–{INTERVAL_MAX} 分钟之间")
     return value
 
 
@@ -158,6 +168,15 @@ def _instructions(value: str) -> str:
         raise _invalid(f"额外要求最多 {INSTRUCTIONS_LIMIT} 字")
     if has_bad_chars(text, allow="\n\r\t"):
         raise _invalid("额外要求里有不能保存的字符")
+    return text
+
+
+def _task_goal(value: str) -> str:
+    text = value.strip()
+    if len(text) > INSTRUCTIONS_LIMIT:
+        raise _invalid(f"要她做的事最多 {INSTRUCTIONS_LIMIT} 字")
+    if has_bad_chars(text, allow="\n\r\t"):
+        raise _invalid("要她做的事里有不能保存的字符")
     return text
 
 
@@ -172,7 +191,11 @@ async def _target(state: Any, bot_id: str, target_kind: str, target_id: str) -> 
     if bot is None:
         raise _invalid("没有这个 bot")
     if target_kind not in TARGET_KINDS:
-        raise _invalid("推送到只能选群或私聊")
+        raise _invalid("推送到只能选群、私聊或桌面聊天")
+    if target_kind == DESK_TARGET:
+        if chat_of(bot, (await chosen_chats(state.db)).get(bot.id)) is None:
+            raise _invalid(f"还没有和 {bot.name} 的桌面聊天，先在聊天页开一个")
+        return {"bot_id": bot.id, "target_kind": DESK_TARGET, "target_id": ""}
     if not can(bot.account_id, "proactive"):
         raise _invalid(f"{bot.name} 的平台不能主动发消息")
     target = target_id.strip()
@@ -212,10 +235,10 @@ async def _columns(state: Any, body: WatchCreate | WatchPatch, current: Watch | 
     kind = _kind(data["kind"]) if "kind" in sent else value("kind")
     if "kind" in sent:
         columns["kind"] = kind
-    if "url" in sent:
-        columns["url"] = _url(data["url"])
+    if "url" in sent or "kind" in sent:
+        columns["url"] = _url(value("url"), kind)
     if "selector" in sent or "kind" in sent:
-        selector = "" if kind == "feed" else _selector(value("selector"))
+        selector = "" if kind in ("feed", "discord") else _selector(value("selector"))
         if kind == "price" and not selector:
             raise _invalid("价格监控要填选择器（价格在网页上的位置）")
         columns["selector"] = selector
@@ -228,8 +251,8 @@ async def _columns(state: Any, body: WatchCreate | WatchPatch, current: Watch | 
         elif threshold is not None and not threshold > 0:
             raise _invalid("提醒价格要大于 0")
         columns["threshold"] = threshold
-    if "interval_minutes" in sent:
-        columns["interval_minutes"] = _interval(data["interval_minutes"])
+    if "interval_minutes" in sent or "kind" in sent:
+        columns["interval_minutes"] = _interval(value("interval_minutes"), kind)
     if sent & {"bot_id", "target_kind", "target_id"}:
         columns |= await _target(state, value("bot_id"), value("target_kind"), value("target_id"))
     if "provider_id" in sent:
@@ -241,6 +264,8 @@ async def _columns(state: Any, body: WatchCreate | WatchPatch, current: Watch | 
         columns["provider_id"] = provider_id
     if "instructions" in sent:
         columns["instructions"] = _instructions(data["instructions"])
+    if "task_goal" in sent:
+        columns["task_goal"] = _task_goal(data["task_goal"])
     if "use_proxy" in sent:
         columns["use_proxy"] = data["use_proxy"]
     if "mode" in sent:
@@ -284,6 +309,8 @@ async def _views(state: Any, watches: list[Watch]) -> list[dict[str, Any]]:
         account = bot.account_id if bot else watch.bot_id
         if watch.target_kind == "group":
             target_name = group_names.get((account, watch.target_id)) or f"群 {watch.target_id}"
+        elif watch.target_kind == DESK_TARGET:
+            target_name = "桌面聊天"
         else:
             target_name = f"私聊 {watch.target_id}"
         views.append(
@@ -302,6 +329,7 @@ async def _views(state: Any, watches: list[Watch]) -> list[dict[str, Any]]:
                 "target_name": target_name,
                 "provider_id": watch.provider_id,
                 "instructions": watch.instructions,
+                "task_goal": watch.task_goal,
                 "use_proxy": watch.use_proxy,
                 "mode": watch.mode,
                 "enabled": watch.enabled,
@@ -335,9 +363,11 @@ async def list_watches(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/watches/targets")
 async def targets(request: Request) -> list[dict[str, Any]]:
-    """Every bot and the QQ groups its account is in (as stored), for the 推送给 picker."""
+    """Every bot, the groups its account is in (as stored), whether it can message people on its platform, and
+    whether there is a chat with it in the app: for the 推送给 picker."""
     state = request.app.state
     channels = await state.store.channels()
+    chosen = await chosen_chats(state.db)
     result = []
     for bot in state.brain.bots.values():
         groups = [
@@ -346,7 +376,15 @@ async def targets(request: Request) -> list[dict[str, Any]]:
             if c["account_id"] == bot.account_id and c["kind"] == "group"
         ]
         groups.sort(key=lambda g: (g["name"] or "~", g["group_id"]))
-        result.append({"bot_id": bot.id, "bot_name": bot.name, "groups": groups})
+        result.append(
+            {
+                "bot_id": bot.id,
+                "bot_name": bot.name,
+                "groups": groups,
+                "platform": can(bot.account_id, "proactive"),
+                "desk": chat_of(bot, chosen.get(bot.id)) is not None,
+            }
+        )
     return result
 
 

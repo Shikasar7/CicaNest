@@ -1,4 +1,4 @@
-import { FileDiff, Rss, Tag, type LucideIcon } from 'lucide-react'
+import { DoorOpen, FileDiff, Rss, Tag, type LucideIcon } from 'lucide-react'
 
 import type { Tone } from '@/components/StatusDot'
 import type {
@@ -35,6 +35,13 @@ export const KINDS: { kind: WatchKind; label: string; Icon: LucideIcon; hint: st
     hint: '网页上的价格变了时推送',
     urlHint: '商品页面的地址',
   },
+  {
+    kind: 'discord',
+    label: 'Discord',
+    Icon: DoorOpen,
+    hint: 'Discord 服务器暂停邀请后，重新开放加入时推送',
+    urlHint: '服务器的邀请链接，例如 https://discord.gg/abc123，也可以只填邀请码',
+  },
 ]
 
 export const kindOf = (kind: WatchKind) => KINDS.find((k) => k.kind === kind) ?? KINDS[0]
@@ -44,7 +51,8 @@ export const MODES: { value: WatchMode; label: string; hint: string }[] = [
   { value: 'push', label: '推送', hint: '有新内容时真的发出去' },
 ]
 
-export const INTERVAL_MIN = 5
+/** Discord's invite API is cheap and a server may stay open for only half an hour: it may be checked every minute. */
+export const intervalMin = (kind: WatchKind) => (kind === 'discord' ? 1 : 5)
 export const INTERVAL_MAX = 1440
 export const CUSTOM = 'custom'
 export const INTERVALS: { minutes: number; label: string }[] = [
@@ -55,6 +63,19 @@ export const INTERVALS: { minutes: number; label: string }[] = [
   { minutes: 360, label: '6 小时' },
   { minutes: 1440, label: '每天' },
 ]
+const QUICK_INTERVALS: { minutes: number; label: string }[] = [
+  { minutes: 1, label: '1 分钟' },
+  { minutes: 2, label: '2 分钟' },
+  { minutes: 5, label: '5 分钟' },
+  { minutes: 10, label: '10 分钟' },
+  { minutes: 30, label: '30 分钟' },
+]
+export const intervalsFor = (kind: WatchKind) => (kind === 'discord' ? QUICK_INTERVALS : INTERVALS)
+/** The choice a kind starts with when the current one is not among its presets. */
+export const defaultInterval = (kind: WatchKind) => (kind === 'discord' ? '1' : '60')
+
+const DISCORD_INVITE =
+  /^(?:(?:https?:\/\/)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com\/invite)\/)?[A-Za-z0-9-]{2,64}\/?$/
 
 export function intervalText(minutes: number): string {
   if (minutes === 1440) return '每天'
@@ -93,6 +114,7 @@ export function runSummary(run: WatchRun, kind: WatchKind): string {
       return '没有变化'
     case 'changed':
       if (kind === 'feed') return `有 ${run.changes} 条新内容`
+      if (kind === 'discord') return run.message ? '开放加入了' : '又暂停邀请了'
       return kind === 'price' ? '价格变了' : '有变化'
     case 'error':
       return `出错：${run.error || run.detail || '原因不明'}`
@@ -134,6 +156,7 @@ export function deliveryText(run: WatchRun, target: string, botName: string): { 
 // ---- The form ----
 
 export const PRIVATE = 'private'
+export const DESK = 'desk'
 export const groupTarget = (groupId: string) => `group:${groupId}`
 
 /** Everything the form edits, as typed. `botId` / `target` '' = the first one offered. */
@@ -147,12 +170,13 @@ export type WatchFormState = {
   interval: string
   customMinutes: string
   botId: string
-  /** groupTarget(id), PRIVATE, or '' (the bot's first group). */
+  /** groupTarget(id), PRIVATE, DESK, or '' (the bot's first group). */
   target: string
   privateId: string
   /** '' = 不用，直接列出. */
   providerId: string
   instructions: string
+  taskGoal: string
   useProxy: boolean
   mode: WatchMode
 }
@@ -170,12 +194,13 @@ export const EMPTY_FORM: WatchFormState = {
   privateId: '',
   providerId: '',
   instructions: '',
+  taskGoal: '',
   useProxy: false,
   mode: 'preview',
 }
 
 export function watchForm(watch: WatchView): WatchFormState {
-  const preset = INTERVALS.some((i) => i.minutes === watch.interval_minutes)
+  const preset = intervalsFor(watch.kind).some((i) => i.minutes === watch.interval_minutes)
   return {
     name: watch.name,
     kind: watch.kind,
@@ -185,10 +210,11 @@ export function watchForm(watch: WatchView): WatchFormState {
     interval: preset ? String(watch.interval_minutes) : CUSTOM,
     customMinutes: preset ? '' : String(watch.interval_minutes),
     botId: watch.bot_id,
-    target: watch.target_kind === 'group' ? groupTarget(watch.target_id) : PRIVATE,
+    target: watch.target_kind === 'group' ? groupTarget(watch.target_id) : watch.target_kind === 'desk' ? DESK : PRIVATE,
     privateId: watch.target_kind === 'private' ? watch.target_id : '',
     providerId: watch.provider_id ?? '',
     instructions: watch.instructions,
+    taskGoal: watch.task_goal ?? '',
     useProxy: Boolean(watch.use_proxy),
     mode: watch.mode,
   }
@@ -205,6 +231,7 @@ export type WatchFormField =
   | 'privateId'
   | 'provider'
   | 'instructions'
+  | 'taskGoal'
   | 'proxy'
 export type WatchFormErrors = Partial<Record<WatchFormField, string>>
 
@@ -221,6 +248,7 @@ export type WatchValues = {
   target_id: string
   provider_id: string | null
   instructions: string
+  task_goal: string
   use_proxy: boolean
   mode: WatchMode
 }
@@ -246,9 +274,11 @@ export function checkForm(form: WatchFormState, resolved: { botId: string; targe
   const url = form.url.trim()
   if (!url) errors.url = '填要检查的地址'
   else if (charCount(url) > 1000) errors.url = '地址最多 1000 个字符'
-  else if (!isHttpUrl(url)) errors.url = '地址要以 http:// 或 https:// 开头'
+  else if (form.kind === 'discord') {
+    if (!DISCORD_INVITE.test(url)) errors.url = '填 Discord 邀请链接，例如 https://discord.gg/abc123，或者只填邀请码'
+  } else if (!isHttpUrl(url)) errors.url = '地址要以 http:// 或 https:// 开头'
 
-  const selector = form.kind === 'feed' ? '' : form.selector.trim()
+  const selector = form.kind === 'feed' || form.kind === 'discord' ? '' : form.selector.trim()
   if (form.kind === 'price' && !selector) errors.selector = '价格要填选择器，告诉 nest 价格在页面上的哪个位置'
   else if (charCount(selector) > 300) errors.selector = '选择器最多 300 个字符'
 
@@ -259,12 +289,13 @@ export function checkForm(form: WatchFormState, resolved: { botId: string; targe
     else threshold = parsed.value
   }
 
+  const least = intervalMin(form.kind)
   const minutes = parseNumber(form.interval === CUSTOM ? form.customMinutes : form.interval, {
-    min: INTERVAL_MIN,
+    min: least,
     max: INTERVAL_MAX,
     integer: true,
   })
-  if (!minutes.ok || minutes.value === null) errors.interval = `填 ${INTERVAL_MIN}–${INTERVAL_MAX} 之间的整数分钟`
+  if (!minutes.ok || minutes.value === null) errors.interval = `填 ${least}–${INTERVAL_MAX} 之间的整数分钟`
 
   if (!resolved.botId) errors.bot = '选一个 bot'
   let targetKind: WatchTargetKind = 'group'
@@ -275,15 +306,19 @@ export function checkForm(form: WatchFormState, resolved: { botId: string; targe
     // Other platforms' ids are for the server to judge: it knows their forms.
     if (resolved.botId.startsWith('qq:') && !/^\d{5,12}$/.test(targetId)) errors.privateId = 'QQ 号是 5–12 位数字'
     if (!targetId) errors.privateId = '填对方的 ID'
+  } else if (resolved.target === DESK) {
+    targetKind = 'desk'
   } else if (resolved.target.startsWith('group:')) {
     targetId = resolved.target.slice('group:'.length)
   } else {
-    errors.target = '选一个群，或者选私聊'
+    errors.target = '选一个群、私聊或者桌面聊天'
   }
 
   const providerId = form.providerId || null
   const instructions = form.instructions.trim()
   if (providerId && charCount(instructions) > 500) errors.instructions = '额外要求最多 500 字'
+  const taskGoal = form.taskGoal.trim()
+  if (charCount(taskGoal) > 500) errors.taskGoal = '要她做的事最多 500 字'
 
   if (Object.keys(errors).length || !minutes.ok || minutes.value === null) return { ok: false, errors }
   return {
@@ -300,6 +335,7 @@ export function checkForm(form: WatchFormState, resolved: { botId: string; targe
       target_id: targetId,
       provider_id: providerId,
       instructions,
+      task_goal: taskGoal,
       use_proxy: form.useProxy,
       mode: form.mode,
     },
@@ -319,6 +355,7 @@ export function createBody(v: WatchValues): WatchCreate {
     target_id: v.target_id,
     provider_id: v.provider_id,
     instructions: v.provider_id ? v.instructions : '',
+    task_goal: v.task_goal,
     use_proxy: v.use_proxy,
     mode: v.mode,
     enabled: true,
@@ -341,6 +378,7 @@ export function patchBody(v: WatchValues, w: WatchView): WatchPatch {
   }
   if (v.provider_id !== w.provider_id) body.provider_id = v.provider_id
   if (v.provider_id && v.instructions !== w.instructions) body.instructions = v.instructions
+  if (v.task_goal !== (w.task_goal ?? '')) body.task_goal = v.task_goal
   if (v.use_proxy !== Boolean(w.use_proxy)) body.use_proxy = v.use_proxy
   if (v.mode !== w.mode) body.mode = v.mode
   return body
@@ -352,6 +390,7 @@ export const startsOver = (v: WatchValues, w: WatchView) => v.kind !== w.kind ||
 /** Where to show one of the backend's Chinese 4xx sentences: next to the field it names, if it names one. */
 const ERROR_FIELDS: [RegExp, WatchFormField][] = [
   [/额外要求/, 'instructions'],
+  [/要她做的事/, 'taskGoal'],
   [/选择器/, 'selector'],
   [/低于|门槛|价格/, 'threshold'],
   [/地址|网址/, 'url'],

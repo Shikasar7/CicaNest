@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:"
+    />
+    <title>连接设置</title>
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="connect.css" />
+    <script src="connect.js" defer></script>
+  </head>
+  <body>
+    <div class="drag" aria-hidden="true"></div>
+    <main class="panel">
+      <h1>连接到哪个 nest</h1>
+      <p id="now" class="now"></p>
+      <label for="address">nest 的地址</label>
+      <input id="address" type="text" spellcheck="false" placeholder="My-Mac.local:18800" autocomplete="off" />
+      <label for="other">备用地址（可以不填）</label>
+      <input id="other" type="text" spellcheck="false" placeholder="局域网里的名字或 IP" autocomplete="off" />
+      <p class="hint">
+        两个都填时，打开应用先试第一个，没有回应再用备用的：比如第一个填 Tailscale 名字，备用填局域网名字。两个地址要各登录一次。
+      </p>
+      <p class="hint">
+        nest 在另一台电脑上（比如 Mac）时填它的地址，局域网名字、IP 或 Tailscale 名字都行。连上后在聊天窗口里输入远程访问密码登录。局域网里是明文
+        HTTP；在外面用 Tailscale 的名字更安全。
+      </p>
+      <p id="result" class="result" role="status"></p>
+      <div class="actions">
+        <button class="btn ghost" type="button" id="local">改用这台电脑上的 nest</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" type="button" id="test">试一下</button>
+        <button class="btn primary" type="button" id="save">保存并重新打开</button>
+      </div>
+    </main>
+  </body>
+</html>

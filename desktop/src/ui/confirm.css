@@ -1,0 +1,94 @@
+/* 确认: a companion's step on this PC, shown exactly, waiting for the user's answer. */
+
+body {
+  background: var(--bg);
+  padding: 22px 24px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: calc(100vh - 44px);
+}
+
+h1 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.action {
+  font-size: 14px;
+}
+
+.target {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-height: 140px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.detail {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 0;
+  flex: 1;
+  min-height: 80px;
+  overflow: auto;
+  user-select: text;
+}
+
+.detail .line {
+  display: block;
+  padding: 0 12px;
+}
+
+.detail .add {
+  background: rgba(46, 160, 67, 0.16);
+}
+
+.detail .del {
+  background: rgba(218, 54, 51, 0.16);
+}
+
+.detail .at {
+  color: var(--muted);
+}
+
+.detail.command {
+  padding: 10px 0;
+}
+
+.why {
+  color: var(--warn-text);
+  font-size: 12.5px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: auto;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}

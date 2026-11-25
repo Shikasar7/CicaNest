@@ -6,10 +6,12 @@ import { Segmented } from '@/components/Segmented'
 import {
   CUSTOM,
   INTERVAL_MAX,
-  INTERVAL_MIN,
-  INTERVALS,
+  defaultInterval,
+  intervalMin,
+  intervalsFor,
   KINDS,
   MODES,
+  DESK,
   PRIVATE,
   checkForm,
   createBody,
@@ -148,7 +150,10 @@ export function WatchForm({
   const botName = botOptions.find((b) => b.id === botId)?.name ?? ''
   /** null: not known (the list has not loaded or failed). */
   const groups = targets ? (targets.find((t) => t.bot_id === botId)?.groups ?? []) : null
-  const target = form.target || (groups?.[0] ? groupTarget(groups[0].group_id) : groups ? PRIVATE : '')
+  const known = targets?.find((t) => t.bot_id === botId)
+  const onPlatform = known?.platform !== false
+  const onDesk = Boolean(known?.desk) || (watch?.target_kind === 'desk' && watch.bot_id === botId)
+  const target = form.target || (groups?.[0] ? groupTarget(groups[0].group_id) : groups ? (onPlatform ? PRIVATE : DESK) : '')
   const userWord = platforms?.find((p) => p.key === botId.split(':')[0])?.user_label ?? QQ_LABEL
   const groupOptions = [...(groups ?? [])]
   // The saved group stays selectable even when the list does not have it (any more, or not yet).
@@ -159,7 +164,9 @@ export function WatchForm({
     !groupOptions.some((g) => g.group_id === watch.target_id)
   if (savedGroupMissing) groupOptions.unshift({ group_id: watch.target_id, name: watch.target_name })
   const targetName =
-    target === PRIVATE
+    target === DESK
+      ? '桌面聊天'
+      : target === PRIVATE
       ? `私聊 ${form.privateId.trim() || `（还没填${userWord}）`}`
       : groupOptions.find((g) => groupTarget(g.group_id) === target)?.name || `群 ${target.slice('group:'.length)}`
 
@@ -168,8 +175,8 @@ export function WatchForm({
   const errorFor = (field: WatchFormField) =>
     errors[field] ?? (serverError?.field === field ? serverError.text : undefined)
   // Fields on screen right now: a server error naming any other one is shown above the buttons instead.
-  const visible = new Set<WatchFormField>(['name', 'url', 'interval', 'proxy', 'bot', 'target', 'provider'])
-  if (form.kind !== 'feed') visible.add('selector')
+  const visible = new Set<WatchFormField>(['name', 'url', 'interval', 'proxy', 'bot', 'target', 'provider', 'taskGoal'])
+  if (form.kind !== 'feed' && form.kind !== 'discord') visible.add('selector')
   if (form.kind === 'price') visible.add('threshold')
   if (target === PRIVATE) visible.add('privateId')
   if (form.providerId) visible.add('instructions')
@@ -184,8 +191,11 @@ export function WatchForm({
   }
 
   const chooseBot = (id: string) => {
-    const next = targets?.find((t) => t.bot_id === id)?.groups ?? []
-    const keep = target === PRIVATE || next.some((g) => groupTarget(g.group_id) === target)
+    const chosen = targets?.find((t) => t.bot_id === id)
+    const keep =
+      (target === PRIVATE && chosen?.platform !== false) ||
+      (target === DESK && Boolean(chosen?.desk)) ||
+      (chosen?.groups ?? []).some((g) => groupTarget(g.group_id) === target)
     update({ botId: id, target: keep ? target : '' })
   }
 
@@ -193,8 +203,8 @@ export function WatchForm({
   const chooseMode = (mode: WatchMode) => {
     if (mode === 'push') {
       if (!confirmPush(targetName)) return
-      const kind = target === PRIVATE ? 'private' : 'group'
-      const id = target === PRIVATE ? form.privateId.trim() : target.slice('group:'.length)
+      const kind = target === PRIVATE ? 'private' : target === DESK ? 'desk' : 'group'
+      const id = target === PRIVATE ? form.privateId.trim() : target === DESK ? '' : target.slice('group:'.length)
       setConfirmedFor(targetKey(botId, kind, id))
     }
     update({ mode })
@@ -280,7 +290,13 @@ export function WatchForm({
               describedBy={ids.kindHint}
               options={KINDS.map((k) => ({ value: k.kind, label: k.label, Icon: k.Icon }))}
               value={form.kind}
-              onChange={(next) => update({ kind: next })}
+              onChange={(next) =>
+                update(
+                  form.interval === CUSTOM || intervalsFor(next).some((i) => String(i.minutes) === form.interval)
+                    ? { kind: next }
+                    : { kind: next, interval: defaultInterval(next) },
+                )
+              }
             />
             <p id={ids.kindHint} className="text-xs text-muted-foreground">
               {kind.hint}
@@ -291,7 +307,7 @@ export function WatchForm({
               <Input
                 {...control}
                 value={form.url}
-                placeholder="https://"
+                placeholder={form.kind === 'discord' ? 'https://discord.gg/' : 'https://'}
                 inputMode="url"
                 autoComplete="off"
                 spellCheck={false}
@@ -299,7 +315,7 @@ export function WatchForm({
               />
             )}
           </Field>
-          {form.kind !== 'feed' && (
+          {form.kind !== 'feed' && form.kind !== 'discord' && (
             <Field
               label={form.kind === 'price' ? '价格在哪里（选择器）' : '看哪一块（选择器）'}
               hint={
@@ -338,7 +354,13 @@ export function WatchForm({
           )}
           <Field
             label="多久检查一次"
-            hint={custom ? `${INTERVAL_MIN}–${INTERVAL_MAX} 分钟` : '查得太勤，有的网站会拦下来'}
+            hint={
+              custom
+                ? `${intervalMin(form.kind)}–${INTERVAL_MAX} 分钟`
+                : form.kind === 'discord'
+                  ? '读的是 Discord 公开的邀请信息，每分钟查一次也没关系'
+                  : '查得太勤，有的网站会拦下来'
+            }
             error={intervalError}
           >
             {(control) => (
@@ -357,7 +379,7 @@ export function WatchForm({
                     if (next === CUSTOM) setFocusCustom((n) => n + 1)
                   }}
                 >
-                  {INTERVALS.map((i) => (
+                  {intervalsFor(form.kind).map((i) => (
                     <option key={i.minutes} value={String(i.minutes)}>
                       {i.label}
                     </option>
@@ -486,6 +508,8 @@ export function WatchForm({
             hint={
               targetsError && botOptions.length > 0
                 ? '群列表没读到，只能留在原来的群或改成私聊'
+                : target === DESK
+                  ? '像她自己说的一句话，显示在你们的聊天窗口里'
                 : groups && groups.length === 0
                   ? `没找到 ${botName} 所在的群，可以先发私聊`
                   : '群列表来自这个号收到过消息的群'
@@ -505,7 +529,9 @@ export function WatchForm({
                     {targetLabel(g)}
                   </option>
                 ))}
-                <option value={PRIVATE}>私聊（填{userWord}）</option>
+                {onPlatform && <option value={PRIVATE}>私聊（填{userWord}）</option>}
+                {onDesk && <option value={DESK}>和她的桌面聊天</option>}
+                {!onPlatform && !onDesk && <option value={DESK}>还没有和她的桌面聊天，先在聊天页开一个</option>}
               </NativeSelect>
             )}
           </Field>
@@ -570,6 +596,22 @@ export function WatchForm({
               )}
             </Field>
           )}
+          <Field
+            label="发现变化就让她去做"
+            className="sm:col-span-2"
+            hint="可以不填。填了的话，推送的同时给她开一个后台任务，变化的内容会一起给她，做完在和你的私聊里汇报（要你点头的步骤做不了）"
+            error={errorFor('taskGoal')}
+          >
+            {(control) => (
+              <Textarea
+                {...control}
+                rows={2}
+                value={form.taskGoal}
+                placeholder="例如：读一下新文章，挑和我有关的整理成三条"
+                onChange={(e) => update({ taskGoal: e.target.value })}
+              />
+            )}
+          </Field>
           <div className="grid content-start gap-1.5 sm:col-span-2">
             <GroupLabel id={ids.mode}>模式</GroupLabel>
             <Segmented

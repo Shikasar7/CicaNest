@@ -84,6 +84,7 @@ function OptionRows({ provider }: { provider: ProviderView }) {
       )}
       {provider.kind === 'anthropic' && <Row label="思考档">{EFFORT_LABEL[effortOf(options.effort)]}</Row>}
       {provider.kind === 'anthropic' && <Row label="联网搜索">{options.web_search === true ? '开' : '关'}</Row>}
+      {provider.kind === 'openai_chat' && <Row label="工具调用">{options.tools === true ? '开' : '关'}</Row>}
       {extra !== undefined && extra !== null && (
         <Row label="额外参数">
           <code className="text-xs break-all">{JSON.stringify(extra)}</code>

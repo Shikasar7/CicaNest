@@ -1,0 +1,82 @@
+/* 连接设置: which nest this app opens. */
+
+body {
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 32px;
+  -webkit-app-region: drag;
+}
+
+.panel {
+  width: min(460px, calc(100vw - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+h1 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.now,
+.hint {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+label {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+input {
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+input:focus-visible {
+  border-color: var(--accent);
+}
+
+.result {
+  min-height: 1.5em;
+  font-size: 13px;
+}
+
+.result.ok {
+  color: #1e9c82;
+}
+
+.result.bad {
+  color: var(--bad-text);
+}
+
+.actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.btn[hidden] {
+  display: none;
+}

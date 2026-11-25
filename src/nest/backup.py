@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import tempfile
@@ -38,6 +39,18 @@ def _copy_database(source: Path, target: Path) -> None:
         closing(sqlite3.connect(target)) as copy,
     ):
         live.backup(copy)
+
+
+def before(data_dir: Path, database: Path, what: str) -> Path:
+    """Blocking. A copy of the database alone, made before something that cannot be undone and never thrown
+    away by nest (make() keeps its latest few); returns its path."""
+    folder = data_dir / FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / time.strftime(f"nest-before-{what}-%Y%m%d-%H%M%S.db")
+    _copy_database(database, target)
+    if os.name == "posix":
+        target.chmod(0o600)
+    return target
 
 
 def _files(data_dir: Path) -> Iterator[Path]:

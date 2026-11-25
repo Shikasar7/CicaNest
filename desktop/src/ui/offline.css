@@ -56,10 +56,3 @@ p {
     transform: none;
   }
 }
-
-@media (prefers-color-scheme: dark) {
-  .mark rect {
-    stroke: rgba(231, 235, 238, 0.1);
-    stroke-width: 1;
-  }
-}

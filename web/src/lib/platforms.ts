@@ -2,7 +2,7 @@ import type { Bot, PlatformView } from '@/lib/api'
 
 export const QQ_LABEL = 'QQ 号'
 
-const NAMES: Record<string, string> = { qq: 'QQ', discord: 'Discord', wecom: '企业微信' }
+const NAMES: Record<string, string> = { qq: 'QQ', discord: 'Discord', telegram: 'Telegram', slack: 'Slack', wecom: '企业微信' }
 
 /** A platform's name, without asking the server. */
 export const platformName = (key: string) => NAMES[key] ?? key
@@ -24,4 +24,4 @@ export function userProblem(user: string, bot: Bot, platforms: PlatformView[] | 
 }
 
 /** A hint for fields that say who gets told something: QQ by number, anything else with its platform. */
-export const RECIPIENT_HINT = 'QQ 号直接填；别的平台写成 discord:用户 ID、wecom:userid'
+export const RECIPIENT_HINT = 'QQ 号直接填；别的平台写成 discord:用户 ID、telegram:用户 ID、slack:成员 ID、wecom:userid'

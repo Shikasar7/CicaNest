@@ -13,8 +13,11 @@ from nest.storage.db import Database
 
 log = logging.getLogger(__name__)
 
-KINDS = ("feed", "page", "price")
-TARGET_KINDS = ("group", "private")
+KINDS = ("feed", "page", "price", "discord")
+MIN_INTERVAL = 5  # minutes between two checks of a web page
+DISCORD_MIN_INTERVAL = 1  # Discord's invite API is cheap, and a server may be open for only half an hour
+DESK_TARGET = "desk"  # her chat with the user in the app; no target id
+TARGET_KINDS = ("group", "private", DESK_TARGET)
 MODES = ("preview", "push")
 OUTCOMES = ("baseline", "unchanged", "changed", "error")
 DELIVERIES = ("sent", "preview", "paused", "failed", "unknown")
@@ -23,7 +26,7 @@ PUSHED = ("sent", "unknown")  # deliveries that went out, or may have: they coun
 COLUMNS = (
     "id, name, kind, url, selector, threshold, interval_minutes, bot_id, target_kind, target_id, "
     "provider_id, instructions, use_proxy, mode, enabled, state, last_run_at, next_run_at, created_at, "
-    "updated_at"
+    "updated_at, task_goal"
 )
 RUN_COLUMNS = "id, watch_id, started_at, duration_ms, outcome, changes, detail, message, delivered, error"
 EDITABLE = (
@@ -38,12 +41,17 @@ EDITABLE = (
     "target_id",
     "provider_id",
     "instructions",
+    "task_goal",
     "use_proxy",
     "mode",
     "enabled",
     "state",
     "next_run_at",
 )
+
+
+def min_interval(kind: str) -> int:
+    return DISCORD_MIN_INTERVAL if kind == "discord" else MIN_INTERVAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +76,7 @@ class Watch:
     next_run_at: float | None = None
     created_at: float = 0.0
     updated_at: float = 0.0
+    task_goal: str = ""  # what its bot does in the background with what was found ("": nothing)
 
     @property
     def source(self) -> tuple[str, str, str]:

@@ -11,6 +11,7 @@ from nest.core.prompt import build_answer_prompt, build_private_prompt, build_pr
 def test_qq_keeps_every_capability_it_had() -> None:
     assert capabilities_of("qq") == {
         "birthdays",
+        "comparable",
         "fetch_history",
         "list_channels",
         "member_joins",

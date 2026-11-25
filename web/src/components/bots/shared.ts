@@ -79,13 +79,20 @@ export function useJustSaved<T>(server: T) {
 // ---- The bot form (显示名 · 别名 · 模型) ----
 
 /** What the bot form edits, as typed. `providerId` '' = no model. */
-export type BotFormState = { name: string; aliases: string; providerId: string; backupId: string }
+export type BotFormState = {
+  name: string
+  aliases: string
+  providerId: string
+  backupId: string
+  taskId: string
+}
 
 export const botForm = (bot: Bot): BotFormState => ({
   name: bot.name,
   aliases: bot.aliases.join('、'),
   providerId: bot.provider_id ?? '',
   backupId: bot.backup_provider_id ?? '',
+  taskId: bot.task_provider_id ?? '',
 })
 
 // ---- Names and aliases (the backend's limits: 1–20 code points, no control characters) ----

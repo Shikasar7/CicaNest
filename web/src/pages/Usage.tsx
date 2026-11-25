@@ -5,8 +5,9 @@ import { FirstLoad, StaleNotice } from '@/components/Feedback'
 import { ModelUsageCard } from '@/components/usage/ModelUsageCard'
 import { modelLabel, niceTicks } from '@/components/usage/helpers'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { getJson, type Usage as UsageData, type UsageBot, type UsageDay, type UsageDays, type UsageError } from '@/lib/api'
+import { getJson, type Usage as UsageData, type UsageBot, type UsageDay, type UsageDays, type UsageError, type UsagePurpose } from '@/lib/api'
 import { formatCount, formatTime } from '@/lib/format'
 import { useLive } from '@/lib/live'
 import { cn } from '@/lib/utils'
@@ -86,7 +87,58 @@ function useUsage(days: UsageDays) {
   return { data, error, pending: settled !== days, retry }
 }
 
-function BotTable({ bots }: { bots: UsageBot[] }) {
+/** 用在哪: what the calls were for, every bot's together or one's. */
+function PurposeTable({ rows, bots }: { rows: UsagePurpose[]; bots: UsageBot[] }) {
+  const [botId, setBotId] = useState('')
+  const sums = new Map<string, UsagePurpose>()
+  for (const row of rows) {
+    if (botId && row.bot_id !== botId) continue
+    const sum = sums.get(row.purpose)
+    sums.set(row.purpose, {
+      ...row,
+      calls: (sum?.calls ?? 0) + row.calls,
+      prompt_tokens: (sum?.prompt_tokens ?? 0) + row.prompt_tokens,
+      completion_tokens: (sum?.completion_tokens ?? 0) + row.completion_tokens,
+    })
+  }
+  const tokens = (r: UsagePurpose) => r.prompt_tokens + r.completion_tokens
+  const listed = [...sums.values()].sort((a, b) => tokens(b) - tokens(a) || b.calls - a.calls)
+  const most = Math.max(1, ...listed.map(tokens))
+  return (
+    <div className="space-y-3">
+      <NativeSelect aria-label="伙伴" value={botId} onChange={(e) => setBotId(e.target.value)}>
+        <option value="">所有 bot 加起来</option>
+        {bots.map((b) => (
+          <option key={b.bot_id} value={b.bot_id}>
+            {b.name}
+          </option>
+        ))}
+      </NativeSelect>
+      {listed.length === 0 ? (
+        <p className="text-sm text-muted-foreground">这段时间还没有调用过模型。</p>
+      ) : (
+        <ul className="space-y-2 text-sm tabular-nums">
+          {listed.map((row) => (
+            <li key={row.purpose}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span>{row.label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatCount(row.calls)} 次 · {formatCount(row.prompt_tokens)} / {formatCount(row.completion_tokens)}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${(tokens(row) / most) * 100}%` }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">右边是调用次数和用量（输入 / 输出）。更新前的调用分不出来，算在「其他」里。</p>
+    </div>
+  )
+}
+
+function BotTable({ bots, tasks }: { bots: UsageBot[]; tasks: UsageData['tasks'] }) {
   if (bots.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -107,7 +159,8 @@ function BotTable({ bots }: { bots: UsageBot[] }) {
                 </th>
               ))}
               <th className="py-2 pr-3 text-right font-normal">调用</th>
-              <th className="py-2 text-right font-normal whitespace-nowrap">用量（输入 / 输出）</th>
+              <th className="py-2 pr-3 text-right font-normal whitespace-nowrap">用量（输入 / 输出）</th>
+              <th className="py-2 text-right font-normal whitespace-nowrap">其中后台任务</th>
             </tr>
           </thead>
           <tbody>
@@ -126,8 +179,13 @@ function BotTable({ bots }: { bots: UsageBot[] }) {
                   </td>
                 ))}
                 <td className="py-2 pr-3 text-right">{formatCount(bot.calls)}</td>
-                <td className="py-2 text-right whitespace-nowrap">
+                <td className="py-2 pr-3 text-right whitespace-nowrap">
                   {formatCount(bot.prompt_tokens)} / {formatCount(bot.completion_tokens)}
+                </td>
+                <td className="py-2 text-right whitespace-nowrap text-muted-foreground">
+                  {tasks?.[bot.bot_id]
+                    ? `${formatCount(tasks[bot.bot_id].tasks)} 个 · ${formatCount(tasks[bot.bot_id].tokens)}`
+                    : '—'}
                 </td>
               </tr>
             ))}
@@ -136,6 +194,7 @@ function BotTable({ bots }: { bots: UsageBot[] }) {
       </div>
       <p className="text-xs text-muted-foreground">
         出错 也包括发送失败、模型暂停等，原因在「消息」页的判断卡片里。调用按每次请求算，含自动重试。
+        「其中后台任务」是这段时间开始的任务一共用的 token，已经算在左边的用量里；每个任务的明细在「任务」页。
       </p>
     </div>
   )
@@ -245,13 +304,24 @@ export function Usage() {
             </div>
           </>
         )}
+        {data.purposes && (
+          <Card>
+            <CardHeader>
+              <CardTitle>用在哪</CardTitle>
+              <CardDescription>聊天、碎碎念、主动找你、她们的日子、后台任务各用了多少</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <PurposeTable rows={data.purposes} bots={data.bots} />
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>每个 bot</CardTitle>
             <CardDescription>判断结果和它们调用模型的次数（{data.days === 1 ? '今天' : `最近 ${data.days} 天`}）</CardDescription>
           </CardHeader>
           <CardContent>
-            <BotTable bots={data.bots} />
+            <BotTable bots={data.bots} tasks={data.tasks} />
           </CardContent>
         </Card>
         <Card>

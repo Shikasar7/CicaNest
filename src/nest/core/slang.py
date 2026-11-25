@@ -21,11 +21,12 @@ from typing import Any
 from nest.adapters.registry import can, place_of
 from nest.core.broadcast import Broadcaster
 from nest.llm.base import ChatMessage, ProviderError
+from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderRegistry, ProviderUnavailable
 from nest.storage.db import Database
 from nest.storage.messages import MessageStore
 from nest.storage.settings import SettingsRepo
-from nest.storage.slang import GroupFeatureStore, SlangStore, split_group_key
+from nest.storage.slang import GroupFeatureStore, SlangStore, account_in, split_group_key
 
 log = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ class SlangLearner:
             for c in await self.messages.channels()
             if c["kind"] == kind
             and c["external_id"] == external_id
-            and c["account_id"].startswith(f"{platform}:")
+            and account_in(c["account_id"], platform, external_id)
         ]
         return max(members, key=lambda c: c["message_count"])["id"] if members else None
 
@@ -225,6 +226,7 @@ class SlangLearner:
                 due.append(key)
         return due
 
+    @for_purpose("upkeep")
     async def learn(self, group_key: str, *, force: bool = False) -> dict[str, Any]:
         """One learning run for a group; returns its slang_runs row. Never two at once for one group."""
         lock = self._locks.setdefault(group_key, asyncio.Lock())

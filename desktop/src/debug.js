@@ -3,17 +3,20 @@
 // Debug harness, loaded only when NEST_DESKTOP_DEBUG_DIR is set. Lines appended to
 // <dir>\commands.txt are run in order; screenshots and a log land in <dir>.
 //
-//   capture splash|main <name>             page pixels (webContents.capturePage)
+//   capture splash|main|chat <name>        page pixels (webContents.capturePage)
 //   shot splash|main <name>                the window itself via Windows capture (caption buttons; not the Mica backdrop)
 //   burst splash|main <name> <n> <ms>      n page captures, ms apart (motion)
 //   tray <label prefix>                    press a tray menu item
 //   confirm yes|no                         pre-answer the next confirmation dialog
 //   cancel-dialog                          dismiss an open confirmation dialog
 //   click-splash <action id>               press a splash button
-//   exec splash|main <js>                  run JS in the page, log the result
+//   exec splash|main|chat <js>             run JS in the page, log the result
 //   splash-state <json>                    draw an arbitrary state in the splash (visual checks)
 //   theme light|dark|system                force the colour scheme
 //   offline | console                      show the offline page / the console in the main window
+//   pet-skin <bot> <skin> | pet-acc <bot> <accessory> on|off   dress a pet as the tray would
+//   step-answer once|kind|deny             answer the oldest 电脑上做事 confirm window (logs what it showed)
+//   capture step <name>                    that window's page
 //   close-main | open | restart | refresh | status | quit | quit-stop
 
 const fs = require('node:fs')
@@ -40,7 +43,10 @@ function install({ config, get, confirmQueue, cancelDialog, startLaunch, quitApp
   }
 
   function target(which) {
-    const { mainWin, splash } = get()
+    const { mainWin, chatWin, splash, pets } = get()
+    if (which === 'chat') return chatWin?.win
+    if (which === 'pets') return pets?.win
+    if (which === 'step') return get().confirmations?.oldest()?.win
     return which === 'splash' ? splash?.win : mainWin?.win
   }
 
@@ -93,6 +99,10 @@ function install({ config, get, confirmQueue, cancelDialog, startLaunch, quitApp
         return capture(rest[0], rest[1] || 'page')
       case 'shot':
         return shot(rest[0], rest[1] || 'window')
+      case 'pet-skin':
+        return get().pets?.setSkin(rest[0], rest[1])
+      case 'pet-acc':
+        return get().pets?.setAccessory(rest[0], rest[1], rest[2] !== 'off')
       case 'offline':
         return mainWin?.showOffline()
       case 'console':
@@ -124,7 +134,7 @@ function install({ config, get, confirmQueue, cancelDialog, startLaunch, quitApp
       case 'exec': {
         const which = rest[0]
         const code = arg.slice(which.length).trim()
-        const wc = which === 'splash' ? splash?.webContents : mainWin?.webContents
+        const wc = target(which)?.webContents
         if (!wc) return log.info(`debug: no ${which}`)
         const result = await wc.executeJavaScript(code).catch((err) => `error: ${err.message}`)
         return log.info(`debug: exec ${which} -> ${JSON.stringify(result)}`)
@@ -155,6 +165,14 @@ function install({ config, get, confirmQueue, cancelDialog, startLaunch, quitApp
         return quitApp({ stopNest: false })
       case 'quit-stop':
         return quitApp({ stopNest: true })
+      case 'step-answer': {
+        const open = get().confirmations?.oldest()
+        if (!open) return log.info('debug: no confirm window')
+        const { action, target, detail } = open.data
+        log.info(`debug: step "${action}" ${JSON.stringify(target)} detail=${JSON.stringify((detail || '').slice(0, 400))}`)
+        open.settle(rest[0] || 'deny')
+        return
+      }
       case 'sleep':
         return sleep(Number(rest[0] || 500))
       default:

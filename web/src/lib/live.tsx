@@ -27,8 +27,16 @@ export type LiveState = 'connecting' | 'open' | 'login' | 'down'
 export type LiveItem =
   | { kind: 'message' | 'recall'; message: Message }
   | { kind: 'decision'; decision: Decision }
+  /** 逐字流式: what a companion's answer in the desk chat reads so far ('': nothing to show). */
+  | { kind: 'desk_delta'; channelId: number; text: string }
   | { kind: 'log'; line: LogLine }
   | { kind: 'watch'; watchId: number; run: WatchRun }
+  /** A companion's task changed (its status, or a step was added). */
+  | { kind: 'task'; botId: string; taskId: number }
+  /** Something in a companion's workspace folder changed. */
+  | { kind: 'workspace'; botId: string }
+  /** A step waiting for the user's nod appeared or was answered. */
+  | { kind: 'approval'; botId: string; approvalId: number; status: string }
 
 type Listener = (item: LiveItem) => void
 
@@ -63,6 +71,10 @@ type Live = {
 }
 
 const LiveContext = createContext<Live | null>(null)
+// Split out so that what changes often does not re-render what does not use it: every avatar on the page
+// reads the pictures, a chat reads the event stream; neither wants a re-render whenever a version moves.
+const AvatarContext = createContext<Record<string, AvatarView> | null>(null)
+const SubscribeContext = createContext<Live['subscribe'] | null>(null)
 const NO_AVATARS: Record<string, AvatarView> = {}
 // How long a tab may sit in the background before it lets go of its live connection.
 const IDLE_AFTER_MS = 30_000
@@ -165,6 +177,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         emit({ kind, message: json(event) as Message })
       })
     }
+    source.addEventListener('desk_delta', (event) => {
+      const update = json(event) as { channel_id: number; text: string }
+      emit({ kind: 'desk_delta', channelId: update.channel_id, text: update.text })
+    })
     source.addEventListener('system', () => setSystemVersion((v) => v + 1))
     source.addEventListener('avatars', () => setAvatarsVersion((v) => v + 1))
     source.addEventListener('stickers', () => setStickersVersion((v) => v + 1))
@@ -185,6 +201,19 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       setWatchesVersion((v) => v + 1)
       emit({ kind: 'watch', watchId: update.watch_id, run: update.run })
     })
+    source.addEventListener('approval', (event) => {
+      const update = json(event) as { id: number; bot_id: string; status: string }
+      emit({ kind: 'approval', botId: update.bot_id, approvalId: update.id, status: update.status })
+    })
+    source.addEventListener('workspace', (event) => {
+      emit({ kind: 'workspace', botId: (json(event) as { bot_id: string }).bot_id })
+    })
+    for (const name of ['task', 'task_step']) {
+      source.addEventListener(name, (event) => {
+        const update = json(event) as { bot_id: string; id: number }
+        emit({ kind: 'task', botId: update.bot_id, taskId: update.id })
+      })
+    }
     source.onerror = () => {
       // EventSource retries by itself; find out whether this is a login problem or the backend being down.
       getJson('/api/status').then(
@@ -205,35 +234,62 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setProvidersVersion((v) => v + 1)
   }, [])
 
-  return (
-    <LiveContext.Provider
-      value={{
-        state,
-        accounts,
-        channelsVersion,
-        botsVersion,
-        providersVersion,
-        systemVersion,
-        watchesVersion,
-        stickersVersion,
-        slangVersion,
-        memoriesVersion,
-        issuesVersion,
-        avatars,
-        setAvatar,
-        refreshConfig,
-        subscribe,
-      }}
-    >
-      {children}
-    </LiveContext.Provider>
+  const value = useMemo(
+    () => ({
+      state,
+      accounts,
+      channelsVersion,
+      botsVersion,
+      providersVersion,
+      systemVersion,
+      watchesVersion,
+      stickersVersion,
+      slangVersion,
+      memoriesVersion,
+      issuesVersion,
+      avatars,
+      setAvatar,
+      refreshConfig,
+      subscribe,
+    }),
+    [
+      state,
+      accounts,
+      channelsVersion,
+      botsVersion,
+      providersVersion,
+      systemVersion,
+      watchesVersion,
+      stickersVersion,
+      slangVersion,
+      memoriesVersion,
+      issuesVersion,
+      avatars,
+      setAvatar,
+      refreshConfig,
+      subscribe,
+    ],
   )
+  return (
+    <SubscribeContext.Provider value={subscribe}>
+      <AvatarContext.Provider value={avatars}>
+        <LiveContext.Provider value={value}>{children}</LiveContext.Provider>
+      </AvatarContext.Provider>
+    </SubscribeContext.Provider>
+  )
+}
+
+/** The live event stream alone (messages, decisions…): never re-renders the caller by itself. */
+export function useSubscribe(): Live['subscribe'] {
+  const subscribe = useContext(SubscribeContext)
+  if (!subscribe) throw new Error('useSubscribe must be used inside <LiveProvider>')
+  return subscribe
 }
 
 /** The address of the picture `botId` shows, or null for its brush character. Works outside the provider
  * too (no pictures there). */
 export function useAvatarUrl(botId: string | undefined): string | null {
-  const view = useContext(LiveContext)?.avatars[botId ?? '']
+  const view = useContext(AvatarContext)?.[botId ?? '']
   const source = view?.chosen
   const version = source ? view[source] : null
   return botId && source && version != null ? avatarUrl(botId, source, version) : null

@@ -6,6 +6,8 @@ Capabilities:
   send_image, send_voice
   sticker_source        its pictures can be collected as 表情包
   sees_all              it receives every message of a group, not only the ones calling it
+  comparable            two accounts in a group hear the same there (nest.core.deaf): not where bots do not
+                        see each other, or a setting of theirs decides what they hear
   self_echo             the platform sends the bot's own messages back; otherwise the adapter makes that event
   fetch_history, list_channels
   proactive             it can speak without being spoken to (监控, 掉线提醒, 汇总)
@@ -30,12 +32,22 @@ from nest.adapters.discord.adapter import DiscordAdapter
 from nest.adapters.discord.probe import check_proxy
 from nest.adapters.discord.probe import probe as probe_discord
 from nest.adapters.onebot11.adapter import OneBotAdapter
+from nest.adapters.slack.adapter import SlackAdapter
+from nest.adapters.slack.probe import check_tokens as check_slack_tokens
+from nest.adapters.slack.probe import probe as probe_slack
+from nest.adapters.telegram.adapter import TelegramAdapter
+from nest.adapters.telegram.api import TOKEN as TELEGRAM_TOKEN
+from nest.adapters.telegram.probe import probe as probe_telegram
 from nest.adapters.wecom.adapter import WecomAdapter
 from nest.adapters.wecom.probe import probe as probe_wecom
 from nest.secrets import SecretReader
 from nest.storage.accounts import Account
 
 QQ_NUMBER = re.compile(r"[1-9][0-9]{4,11}")
+# A companion that lives only in the console and the desktop app (伙伴模式): an account with no connection,
+# no adapter and nothing it can do on a platform. Not in PLATFORMS: nothing lists it as one to connect.
+DESK = "desk"
+DESK_PLACE = ("桌面小群", "桌面上的私聊")
 BOT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")  # the account's self id: never a colon
 
 Builder = Callable[[Account, SecretReader, StatusSink, BackfillSource], Adapter]
@@ -89,6 +101,43 @@ def _discord(
 
 def _clean_discord(fields: Mapping[str, str]) -> dict[str, str]:
     return {**fields, "token": fields.get("token", "").strip(), "proxy": check_proxy(fields.get("proxy", ""))}
+
+
+def _telegram(
+    account: Account, secrets: SecretReader, on_status: StatusSink, backfill: BackfillSource
+) -> Adapter:
+    return TelegramAdapter(
+        account=account.self_id,
+        token=secrets.get(account.refs.get("token", "")),
+        proxy=str(account.config.get("proxy") or ""),
+        on_status=on_status,
+    )
+
+
+def _clean_telegram(fields: Mapping[str, str]) -> dict[str, str]:
+    token = fields.get("token", "").strip()
+    if token and not TELEGRAM_TOKEN.fullmatch(token):
+        raise ValueError("Token 是「数字:一串字母数字」的样子，到 @BotFather 那里再复制一遍")
+    return {**fields, "token": token, "proxy": check_proxy(fields.get("proxy", ""))}
+
+
+def _slack(
+    account: Account, secrets: SecretReader, on_status: StatusSink, backfill: BackfillSource
+) -> Adapter:
+    return SlackAdapter(
+        account=account.self_id,
+        bot_token=secrets.get(account.refs.get("token", "")),
+        app_token=secrets.get(account.refs.get("app_token", "")),
+        proxy=str(account.config.get("proxy") or ""),
+        on_status=on_status,
+        backfill_source=backfill,
+    )
+
+
+def _clean_slack(fields: Mapping[str, str]) -> dict[str, str]:
+    token, app = fields.get("token", "").strip(), fields.get("app_token", "").strip()
+    check_slack_tokens(token, app)
+    return {**fields, "token": token, "app_token": app, "proxy": check_proxy(fields.get("proxy", ""))}
 
 
 def _wecom(
@@ -166,6 +215,73 @@ PLATFORMS: dict[str, PlatformSpec] = {
         refs=lambda self_id: {"token": f"NEST_DISCORD_{self_id}_TOKEN"},
         clean=_clean_discord,
     ),
+    "telegram": PlatformSpec(
+        key="telegram",
+        label="Telegram",
+        capabilities=TelegramAdapter.capabilities,
+        fields=(
+            FormField(
+                "token",
+                "Bot Token",
+                secret=True,
+                required=True,
+                hint="在 Telegram 里找 @BotFather，发 /newbot 建一个，它会给你",
+            ),
+            FormField(
+                "proxy",
+                "代理",
+                default="http://127.0.0.1:7890",
+                hint="这台机器访问 Telegram 用的 HTTP 代理，留空表示直连",
+            ),
+        ),
+        user_id=re.compile(r"[1-9][0-9]{4,15}"),
+        user_label="Telegram 用户 ID",
+        user_error="Telegram 用户 ID 是一串数字，不是 @ 开头的名字：对方给 bot 发过话以后，消息页能看到",
+        place=("Telegram 群", "Telegram 私聊"),
+        build=_telegram,
+        probe=probe_telegram,
+        refs=lambda self_id: {"token": f"NEST_TELEGRAM_{self_id}_TOKEN"},
+        clean=_clean_telegram,
+    ),
+    "slack": PlatformSpec(
+        key="slack",
+        label="Slack",
+        capabilities=SlackAdapter.capabilities,
+        fields=(
+            FormField(
+                "token",
+                "Bot Token",
+                secret=True,
+                required=True,
+                hint="api.slack.com/apps 里你的应用，OAuth & Permissions 页，xoxb- 开头",
+            ),
+            FormField(
+                "app_token",
+                "App Token",
+                secret=True,
+                required=True,
+                hint="Basic Information 页的 App-Level Tokens，权限选 connections:write，xapp- 开头；"
+                "还要打开 Socket Mode",
+            ),
+            FormField(
+                "proxy",
+                "代理",
+                default="http://127.0.0.1:7890",
+                hint="这台机器访问 Slack 用的 HTTP 代理，留空表示直连",
+            ),
+        ),
+        user_id=re.compile(r"[UW][A-Z0-9]{5,20}"),
+        user_label="Slack 成员 ID",
+        user_error="Slack 成员 ID 是 U 开头的一串：点对方头像，「⋮」里复制",
+        place=("Slack 频道", "Slack 私聊"),
+        build=_slack,
+        probe=probe_slack,
+        refs=lambda self_id: {
+            "token": f"NEST_SLACK_{self_id}_TOKEN",
+            "app_token": f"NEST_SLACK_{self_id}_APP_TOKEN",
+        },
+        clean=_clean_slack,
+    ),
     "wecom": PlatformSpec(
         key="wecom",
         label="企业微信",
@@ -232,10 +348,14 @@ def check_recipient(value: str) -> str:
 
 
 def label_of(platform: str) -> str:
+    if platform == DESK:
+        return "桌面"
     spec = PLATFORMS.get(platform)
     return spec.label if spec is not None else platform
 
 
 def place_of(platform: str) -> tuple[str, str]:
+    if platform == DESK:
+        return DESK_PLACE
     spec = PLATFORMS.get(platform)
     return spec.place if spec is not None else ("群", "私聊")

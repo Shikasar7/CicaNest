@@ -33,7 +33,7 @@ export function MessageBubble({
     <figure
       className={cn(
         'rounded-2xl rounded-tl-md',
-        animate && 'animate-in fade-in-0 zoom-in-95 duration-500',
+        animate && 'animate-in fade-in-0 zoom-in-95 duration-300',
         size === 'md' ? 'px-4 py-3' : 'px-3.5 py-2.5',
         sent
           ? 'bg-[color-mix(in_oklch,var(--hue)_10%,var(--card))]'

@@ -2,20 +2,44 @@
 
 // nest desktop shell: single instance, launch sequence in a splash, the console in a Mica window,
 // a tray icon that keeps the bots one click away. Configuration: see config.js.
+//
+// Remote mode (nest runs on another machine): no launch and no splash; the chat window and the console
+// open the nest there, which asks for the remote-access password once. A companion's reply that arrives
+// while the chat window is not in front becomes a Windows notification.
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { app, Menu, Notification, dialog, ipcMain, nativeImage, session, shell } = require('electron')
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeImage, powerMonitor, session, shell } = require('electron')
 
-const { loadConfig } = require('./config')
+const { loadConfig, readConnection, remoteOrigin } = require('./config')
 const log = require('./log')
 const { Nest, detailOf } = require('./nest')
 const { Launch } = require('./launcher')
 const { Splash } = require('./splash')
 const { MainWindow } = require('./mainWindow')
 const { TrayController } = require('./tray')
+const { Unread } = require('./unread')
+const { RemoteNest, pickOrigin, probe } = require('./remote')
+const { useDoor } = require('./local-name')
+const { Pets } = require('./pets')
+const { Executor } = require('./executor')
+const { ExecutorStore } = require('./executor/store')
+const { Confirmations } = require('./executor/confirm')
+const { Theme } = require('./theme')
+const { debugAllowed } = require('./debug-gate')
 
-const config = loadConfig()
+// The profile folder first: the saved connection (local or remote) lives in it.
+const startup = loadConfig()
+if (startup.profileDir) app.setPath('userData', startup.profileDir)
+const CONNECTION_FILE = path.join(app.getPath('userData'), 'connection.json')
+// A copy of its own: which of two addresses answers is found out once the app is ready (origin).
+const INSTALLED = app.isPackaged ? app.getPath('userData') : null
+const config = { ...loadConfig(process.env, readConnection(CONNECTION_FILE), INSTALLED) }
+const EXECUTOR_FILE = path.join(app.getPath('userData'), 'executor.json')
+// The debug harness only for a launch made for a test (debug-gate.js).
+if (INSTALLED) config.debugDir = null // not even in the installed app's files
+const DEBUG_REFUSED = config.debugDir ? debugAllowed(config.debugDir, EXECUTOR_FILE).why : ''
+if (DEBUG_REFUSED) config.debugDir = null
 const ICONS = path.join(__dirname, '..', 'assets', 'icons')
 const APP_ICON = path.join(ICONS, 'nest.ico')
 const COOKIE_NAME = 'nest_session'
@@ -24,8 +48,11 @@ const HIDDEN = process.argv.includes('--hidden') // started at login: stay in th
 const TEST_MARK = config.isTestCopy ? '测试副本' : ''
 const APP_TITLE = TEST_MARK ? `nest · ${TEST_MARK}` : 'nest'
 
-if (config.profileDir) app.setPath('userData', config.profileDir)
 app.setAppUserModelId('nest')
+// 语音输入 in the chat window: a nest on another machine is reached over plain http on the home network,
+// where Chromium offers no microphone; this one address is treated as a secure page (nothing else is).
+const PLAIN = config.origins.filter((origin) => origin.startsWith('http://'))
+if (PLAIN.length) app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', PLAIN.join(','))
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -35,16 +62,35 @@ if (!app.requestSingleInstanceLock()) {
 
 function run() {
   log.init(config.logsDir, config.debugDir)
-  log.info(`nest desktop ${app.getVersion()} (electron ${process.versions.electron}) home=${config.home} port=${config.port}`)
+  if (DEBUG_REFUSED) log.warn(`debug harness not started: ${DEBUG_REFUSED}`)
+  log.info(
+    `nest desktop ${app.getVersion()} (electron ${process.versions.electron}) ` +
+      (config.remote ? `remote=${config.origin}` : `home=${config.home} port=${config.port}`),
+  )
 
-  const nest = new Nest(config)
+  const nest = config.remote ? new RemoteNest(config) : new Nest(config)
   const prefsFile = path.join(app.getPath('userData'), 'prefs.json')
+  // Light/dark and the theme's colours from the console (loaded when ready, before the first window).
+  const theme = new Theme({ file: path.join(app.getPath('userData'), 'theme.json'), log })
   let quitting = false
   let launch = null
   let cookieToken = null
   let mainWin = null
+  let chatWin = null
+  // Her words in the chat app while you were not looking at the chat window: the tray shows how many.
+  const unread = new Unread({
+    watching: () => Boolean(chatWin?.isWatched()),
+    onChange: (count) => tray?.setUnread(count),
+  })
+  let connectWin = null
   let splash = null
   let tray = null
+  let pets = null
+  let executor = null
+  let presentNow = () => {} // tells nest at once that the user is here (and asked for quiet or not)
+  let executorStore = null
+  let executorWin = null
+  let confirmations = null
 
   // ---- small helpers ---------------------------------------------------------------------------
 
@@ -76,12 +122,13 @@ function run() {
     }
   }
 
-  function notify(title, body) {
+  function notify(title, body, onClick = openNest, { quiet = false } = {}) {
     if (TEST_MARK) title = `${title}（${TEST_MARK}）`
-    log.info(`notify: ${title} ${body}`)
+    // A companion's words are private: the log says that one came, not what it said.
+    log.info(quiet ? `notify: ${title}` : `notify: ${title} ${body}`)
     if (toastsWork()) {
       const toast = new Notification({ title, body, icon: path.join(ICONS, 'nest-64.png'), silent: true })
-      toast.on('click', () => openNest())
+      toast.on('click', () => onClick())
       toast.show()
       return
     }
@@ -161,11 +208,13 @@ function run() {
     // Load the console now, hidden, so it is painted by the time the splash is done.
     if (!mainWin.alive()) mainWin.ensure()
     else if (changed || mainWin.offline) mainWin.reload()
+    if (chatWin?.alive() && (changed || chatWin.offline)) chatWin.reload()
   }
 
   // ---- launch / restart --------------------------------------------------------------------------
 
   function startLaunch({ restart = false, visible = true } = {}) {
+    if (config.needsAddress) return void openConnection() // nothing here to start
     if (launch && !launch.finished) {
       if (visible) splash.show()
       return launch
@@ -214,12 +263,232 @@ function run() {
   }
 
   function openNest() {
+    if (config.needsAddress) return openConnection()
     if (launch && !launch.finished) {
       splash.show()
       return
     }
     mainWin.show()
   }
+
+  function openChat(botId = '') {
+    if (config.needsAddress) return openConnection()
+    if (launch && !launch.finished) {
+      splash.show()
+      return
+    }
+    chatWin.show().then(() => {
+      if (botId && chatWin.alive()) chatWin.webContents.send('nest:open-bot', botId)
+    })
+  }
+
+  // ---- 连接设置 ------------------------------------------------------------------------------------
+
+  // ---- 电脑上做事 (the Windows executor) ---------------------------------------------------------
+
+  function openExecutor() {
+    if (executorWin && !executorWin.isDestroyed()) {
+      executorWin.show()
+      executorWin.focus()
+      return
+    }
+    executorWin = new BrowserWindow({
+      width: 600,
+      height: 520,
+      resizable: true,
+      maximizable: false,
+      minimizable: false,
+      title: '电脑上做事',
+      icon: APP_ICON,
+      autoHideMenuBar: true,
+      backgroundColor: '#f2f4f5',
+      webPreferences: {
+        preload: path.join(__dirname, 'executor', 'settings-preload.js'),
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+        spellcheck: false,
+      },
+    })
+    executorWin.setMenu(null)
+    executorWin.webContents.on('will-navigate', (event) => event.preventDefault())
+    executorWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    executorWin.loadFile(path.join(__dirname, 'ui', 'executor.html'))
+  }
+
+  function fromExecutor(event) {
+    return executorWin && !executorWin.isDestroyed() && event.sender === executorWin.webContents
+  }
+
+  function executorChanged() {
+    executor?.changed()
+    tray?.render(true)
+  }
+
+  ipcMain.handle('executor:state', (event) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    const { key, ...shown } = executorStore.get()
+    return { ...shown, status: executor?.state ?? 'off' }
+  })
+
+  ipcMain.handle('executor:enabled', (event, on) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    executorStore.setEnabled(on)
+    executorChanged()
+  })
+
+  ipcMain.handle('executor:add', async (event) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    const picked = await dialog.showOpenDialog(executorWin, {
+      title: '授权一个文件夹',
+      properties: ['openDirectory'],
+    })
+    if (picked.canceled || !picked.filePaths[0]) return
+    executorStore.add(picked.filePaths[0])
+    executorChanged()
+  })
+
+  ipcMain.handle('executor:remove', (event, folder) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    executorStore.remove(folder)
+    executorChanged()
+  })
+
+  ipcMain.handle('executor:read-only', (event, folder, on) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    executorStore.setReadOnly(folder, on)
+    executorChanged()
+  })
+
+  // Loosening is asked once more in a window of this app (not the page's own), 取消 by default.
+  async function sure(message, detail) {
+    const { response } = await dialog.showMessageBox(executorWin, {
+      type: 'warning',
+      title: '电脑上做事',
+      message,
+      detail,
+      buttons: ['取消', '打开'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    return response === 1
+  }
+
+  ipcMain.handle('executor:allow-all', async (event, on) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    if (
+      on &&
+      !(await sure(
+        '打开「完全允许」？',
+        '伙伴在这台电脑上看、写、改、删、移动文件、跑命令、打开文件都不再弹窗问你，授权的文件夹以外也直接做。' +
+          '命令能做的事很多，禁区只挡得住文件操作，挡不住命令。' +
+          '程序和脚本仍然不能用「打开」来运行；定时任务不算在内（那时没人在，照样只做不用点头的事）。' +
+          '她会读群聊、网页和插件给的东西，里面有人写了指挥她的话，她也可能照做。',
+      ))
+    ) {
+      return
+    }
+    executorStore.setAllowAll(on)
+    log.info(`executor: allow all ${on ? 'on' : 'off'}`)
+    executorChanged()
+  })
+
+  ipcMain.handle('executor:open-forbidden', async (event, on) => {
+    if (!fromExecutor(event)) throw new Error('not allowed')
+    if (
+      on &&
+      !(await sure(
+        '连禁区也放开？',
+        '密钥、凭据、.env、浏览器和密码管理器的数据、系统文件夹、QQ 的数据、nest 自己的数据，她都能碰了。' +
+          '关掉「完全允许」或者重启桌面端时，禁区会自己恢复。',
+      ))
+    ) {
+      return
+    }
+    executorStore.setOpenForbidden(on)
+    log.info(`executor: never-list ${on ? 'open' : 'closed'}`)
+    executorChanged()
+  })
+
+  function openConnection() {
+    if (connectWin && !connectWin.isDestroyed()) {
+      connectWin.show()
+      connectWin.focus()
+      return
+    }
+    connectWin = new BrowserWindow({
+      width: 560,
+      height: 440,
+      resizable: false,
+      maximizable: false,
+      minimizable: false,
+      title: '连接设置',
+      icon: APP_ICON,
+      autoHideMenuBar: true,
+      backgroundColor: '#f2f4f5',
+      webPreferences: {
+        preload: path.join(__dirname, 'connect-preload.js'),
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+        spellcheck: false,
+      },
+    })
+    connectWin.setMenu(null)
+    connectWin.webContents.on('will-navigate', (event) => event.preventDefault())
+    connectWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    connectWin.loadFile(path.join(__dirname, 'ui', 'connect.html'))
+  }
+
+  function fromConnect(event) {
+    return connectWin && !connectWin.isDestroyed() && event.sender === connectWin.webContents
+  }
+
+  ipcMain.handle('connect:current', (event) => {
+    if (!fromConnect(event)) throw new Error('not allowed')
+    return {
+      remote: config.remote,
+      origin: config.origin,
+      saved: readConnection(CONNECTION_FILE).remote || '',
+      other: readConnection(CONNECTION_FILE).other || '',
+      fromEnv: Boolean(remoteOrigin(process.env.NEST_REMOTE_URL)),
+      installed: Boolean(INSTALLED), // there is no nest on this computer to go back to
+    }
+  })
+
+  ipcMain.handle('connect:test', async (event, address) => {
+    if (!fromConnect(event)) throw new Error('not allowed')
+    const origin = remoteOrigin(address)
+    if (!origin) return { ok: false, error: '这不像一个地址：写成 名字:端口 或 http://IP:端口' }
+    const health = await probe(origin)
+    if (!health) return { ok: false, error: `${origin} 没有回应，或者那不是 nest（远程访问打开了吗？）` }
+    return { ok: true, origin, version: health.version || '' }
+  })
+
+  ipcMain.handle('connect:save', async (event, address, second) => {
+    if (!fromConnect(event)) throw new Error('not allowed')
+    const text = String(address || '').trim()
+    const origin = text ? remoteOrigin(text) : null
+    if (text && !origin) return { ok: false, error: '这不像一个地址：写成 名字:端口 或 http://IP:端口' }
+    if (!text && config.needsAddress) return { ok: false, error: '先填 nest 的地址。' }
+    const otherText = String(second || '').trim()
+    const other = origin && otherText ? remoteOrigin(otherText) : null
+    if (origin && otherText && !other) return { ok: false, error: '备用地址不像一个地址：写成 名字:端口 或 http://IP:端口' }
+    try {
+      fs.mkdirSync(path.dirname(CONNECTION_FILE), { recursive: true })
+      fs.writeFileSync(CONNECTION_FILE, JSON.stringify(origin ? { remote: origin, ...(other ? { other } : {}) } : {}, null, 2), 'utf8')
+    } catch (err) {
+      return { ok: false, error: `保存失败：${err.message}` }
+    }
+    log.info(`connection saved: ${origin || 'local'}; relaunching`)
+    setTimeout(() => {
+      quitting = true
+      app.relaunch()
+      app.exit(0)
+    }, 100)
+    return { ok: true }
+  })
 
   async function openFolder(folder) {
     fs.mkdirSync(folder, { recursive: true })
@@ -281,7 +550,8 @@ function run() {
   function handle(channel, fn) {
     ipcMain.handle(channel, async (event, ...args) => {
       const frameUrl = event.senderFrame?.url || ''
-      if (event.sender !== mainWin.webContents || !mainWin.isTrustedPage(frameUrl)) {
+      const win = [mainWin, chatWin].find((w) => w && event.sender === w.webContents)
+      if (!win || !win.isTrustedPage(frameUrl)) {
         log.warn(`refused ${channel} from ${frameUrl}`)
         throw new Error('not allowed')
       }
@@ -290,16 +560,33 @@ function run() {
   }
 
   handle('nest:restart', () => {
+    if (config.remote) return false // the nest elsewhere is restarted there
     startLaunch({ restart: true, visible: true })
     return true
   })
+  handle('nest:notify', ({ title, body, botId }) => {
+    const words = String(body || '').replace(/\s+/g, ' ').slice(0, 200)
+    notify(String(title || 'nest').slice(0, 40), words, () => openChat(String(botId || '')), { quiet: true })
+    return true
+  })
+  handle('nest:pet-sprite', (botId) => pets?.spriteFor(String(botId || '')) ?? null)
+  handle('nest:open-chat', () => {
+    openChat()
+    return true
+  })
+  // The chat window's 「控制台」 button.
+  handle('nest:open-console', () => {
+    openNest()
+    return true
+  })
+  handle('nest:set-theme', (value) => theme.set(value))
   handle('nest:open-logs', () => openFolder(config.logsDir))
   handle('nest:open-data', () => openFolder(config.dataDir))
   handle('nest:get-autostart', () => getAutostart())
   handle('nest:set-autostart', (enabled) => setAutostart(Boolean(enabled)))
   handle('nest:quit', (options) => {
     // Answer first; quitting tears the page down.
-    setTimeout(() => quitApp({ stopNest: Boolean(options?.stopNest) }), 50)
+    setTimeout(() => quitApp({ stopNest: !config.remote && Boolean(options?.stopNest) }), 50)
     return true
   })
 
@@ -308,7 +595,8 @@ function run() {
   app.on('second-instance', (_event, argv) => {
     log.info('second instance: focusing')
     if (argv.includes('--hidden')) return
-    openNest()
+    if (config.remote) openChat()
+    else openNest()
   })
 
   app.on('before-quit', () => {
@@ -320,12 +608,33 @@ function run() {
 
   app.on('web-contents-created', (_event, contents) => {
     contents.on('will-attach-webview', (event) => event.preventDefault())
+    theme.attach(contents)
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    try {
+      // Before the first request: a .local name takes Windows about 11 seconds to look up.
+      await useDoor(session.defaultSession)
+    } catch (err) {
+      log.warn('local name: left to Windows:', err.message)
+    }
+    if (config.origins.length > 1) {
+      config.origin = await pickOrigin(config.origins)
+      log.info(`using ${config.origin}`)
+    }
+    theme.load()
     Menu.setApplicationMenu(null)
-    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      callback(permission === 'clipboard-sanitized-write')
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+      if (permission === 'clipboard-sanitized-write') return callback(true)
+      // The microphone, for 语音输入: only nest's own pages, and only sound (never the camera or the screen).
+      const types = details?.mediaTypes ?? []
+      let origin = ''
+      try {
+        origin = new URL(details?.requestingUrl || '').origin
+      } catch {
+        origin = ''
+      }
+      callback(permission === 'media' && origin === config.origin && types.length > 0 && types.every((t) => t === 'audio'))
     })
 
     mainWin = new MainWindow({
@@ -341,6 +650,20 @@ function run() {
         notify('nest 还在后台运行', 'nest 还在后台运行，bot 不受影响。点任务栏右下角的图标可以再打开。')
       },
     })
+    chatWin = new MainWindow({
+      config,
+      title: TEST_MARK ? `nest 聊天 · ${TEST_MARK}` : 'nest 聊天',
+      icon: APP_ICON,
+      version: app.getVersion(),
+      stateFile: path.join(app.getPath('userData'), 'chat-window.json'),
+      isQuitting: () => quitting,
+      onHiddenToTray: () => {},
+      page: '/?view=chat#/chat',
+      view: 'chat',
+      onFocus: () => unread.clear(),
+      defaultSize: { width: 920, height: 720 },
+      minSize: { width: 420, height: 480 },
+    })
     // Bottom-left of the splash: which nest this is (hover shows the folder).
     splash = new Splash({
       icon: APP_ICON,
@@ -353,7 +676,15 @@ function run() {
     tray = new TrayController({
       nest,
       name: TEST_MARK ? `nest ${TEST_MARK}` : 'nest',
+      remote: config.remote,
       onStatus: async (status) => {
+        if (status.kind !== 'down') pets?.refreshIfEmpty()
+        if (config.remote) {
+          // Back after nest's machine (or the network) was away: reload what showed the offline page.
+          if (status.kind === 'down') return
+          for (const win of [mainWin, chatWin]) if (win.offline) win.reload()
+          return
+        }
         // nest restarted by someone else (启动.bat, the console): pick up the new token.
         if (status.kind === 'down' || (launch && !launch.finished)) return
         const runtime = nest.readRuntime()
@@ -366,6 +697,41 @@ function run() {
       },
       actions: {
         open: () => openNest(),
+        openChat: () => openChat(),
+        openHome: () => openChat('@home'),
+        openConnection: () => openConnection(),
+        openExecutor: () => openExecutor(),
+        executorState: () => executor?.state ?? 'off',
+        pets: () => {
+          const until = pets?.quiet() ? new Date(pets.saved.quietUntil) : null
+          const quietUntil = until
+            ? `${until.getMonth() + 1}/${until.getDate()} ${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`
+            : ''
+          return {
+            items: pets?.menuItems() ?? [],
+            hidden: Boolean(pets?.hidden),
+            onTop: pets?.saved.onTop !== false,
+            stepAside: pets?.saved.stepAside !== false,
+            quietUntil,
+          }
+        },
+        quietPets: (ms) => {
+          if (ms === 'tomorrow') {
+            const morning = new Date()
+            morning.setDate(morning.getDate() + 1)
+            morning.setHours(8, 0, 0, 0)
+            pets?.quietFor(morning.getTime() - Date.now())
+          } else pets?.quietFor(ms)
+          presentNow() // nest hears of it now, not at the next minute
+        },
+        setPet: (botId, on) => pets?.setOn(botId, on),
+        setSkin: (botId, skinId) => pets?.setSkin(botId, skinId),
+        setAccessory: (botId, id, on) => pets?.setAccessory(botId, id, on),
+        hidePets: (hidden) => pets?.setHidden(hidden),
+        setPetsOnTop: (on) => pets?.setOnTop(on),
+        setPetsStepAside: (on) => pets?.setStepAside(on),
+        reloadPets: () => pets?.reloadPacks(),
+        openPets: () => openFolder(pets.petsDir),
         pauseAll: () => pauseAll(),
         restart: () => startLaunch({ restart: true, visible: true }),
         start: () => startLaunch({ restart: false, visible: true }),
@@ -377,12 +743,71 @@ function run() {
       },
     })
     tray.start()
-    startLaunch({ restart: false, visible: !HIDDEN })
+    pets = new Pets({
+      config,
+      nest,
+      petsDir: config.petsDir || path.join(app.getPath('userData'), 'pets'),
+      stateFile: path.join(app.getPath('userData'), 'pets.json'),
+      openChat: (botId) => openChat(botId),
+      onChange: () => tray?.render(),
+      onMessage: (message) => unread.heard(message),
+    })
+    pets.start()
+    executorStore = new ExecutorStore(EXECUTOR_FILE)
+    confirmations = new Confirmations({ icon: APP_ICON, debug: Boolean(config.debugDir) })
+    executor = new Executor({
+      api: (method, pathname, body, options) => nest.api(method, pathname, body, options),
+      ask: (data) => confirmations.ask(data),
+      settings: () => executorStore.get(),
+      // Deleting goes to the Recycle Bin; opening uses the default program (a page: the default browser).
+      system: {
+        trash: (target) => shell.trashItem(target),
+        open: async ({ path: target, url }) => {
+          if (url) {
+            await shell.openExternal(url)
+            return ''
+          }
+          return shell.openPath(target)
+        },
+      },
+      // This app's own data, and a nest running on this PC (its .env, its database), are never touched.
+      extraForbidden: [app.getPath('userData'), config.remote ? null : config.home].filter(Boolean),
+      // The steps taken, so one nest hands over again is not done twice (also after a restart of this app).
+      stepsFile: path.join(app.getPath('userData'), 'executor-steps.json'),
+      // Switched off: the windows still open are a no.
+      onStop: () => confirmations?.closeAll(),
+      onStatus: (state) => {
+        log.info(`executor: ${state}`)
+        tray?.render(true)
+        if (executorWin && !executorWin.isDestroyed()) executorWin.webContents.send('executor:changed')
+      },
+      log,
+    })
+    setTimeout(() => executor.start(), 3000)
+    // nest sends reminders here rather than to QQ while it hears from this app (about every minute).
+    // How long the user has been idle too: nest only comes to them (主动找你) while they are at the computer.
+    // And how long 安静一会儿 still holds: then nobody comes to them, not even with a message.
+    const present = () => {
+      const quiet = pets?.quiet() ? Math.max(0, Math.round((pets.saved.quietUntil - Date.now()) / 1000)) : 0
+      nest.api('POST', '/api/desk/presence', { idle: powerMonitor.getSystemIdleTime(), quiet }).catch(() => {})
+    }
+    presentNow = present
+    setTimeout(present, 5000)
+    setInterval(present, 60_000)
+    if (config.needsAddress) {
+      if (!HIDDEN) openConnection()
+    } else if (config.remote) {
+      // Loaded now even when started hidden: the chat window is what hears a companion speak.
+      chatWin.ensure()
+      if (!HIDDEN) openChat()
+    } else {
+      startLaunch({ restart: false, visible: !HIDDEN })
+    }
 
     if (config.debugDir) {
       require('./debug').install({
         config,
-        get: () => ({ mainWin, splash, tray, launch, nest }),
+        get: () => ({ mainWin, chatWin, splash, tray, launch, nest, pets, confirmations }),
         confirmQueue,
         cancelDialog: () => dialogAbort?.abort(),
         startLaunch,
@@ -392,6 +817,8 @@ function run() {
   })
 
   app.on('will-quit', () => {
+    executor?.stop()
+    pets?.stop()
     tray?.destroy()
   })
 }

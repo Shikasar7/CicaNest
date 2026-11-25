@@ -19,8 +19,9 @@ from typing import Any
 
 import httpx
 
-from nest.llm.base import ChatMessage, Completion, ProviderError
+from nest.llm.base import ChatMessage, Completion, ProviderError, TextSink, Tool, ToolCall, ToolRunner, Turn
 from nest.llm.http import client, status_error, transport_error
+from nest.llm.openai_chat import MAX_TOOL_ROUNDS, TOOL_RESULT_CHARS, arguments
 from nest.llm.openai_responses import output_text
 
 DEFAULT_URL = "https://chatgpt.com/backend-api/codex"
@@ -68,6 +69,37 @@ def parse_sse(raw: str) -> tuple[str, dict[str, Any], bool]:
     return (completed if completed else "".join(deltas)), usage, cut
 
 
+def text_delta(line: str) -> str:
+    try:
+        event = json.loads(line[5:].strip())
+    except ValueError:
+        return ""
+    found = isinstance(event, dict) and event.get("type") == "response.output_text.delta"
+    return str(event.get("delta") or "") if found else ""
+
+
+def completed_output(raw: str) -> list[dict[str, Any]]:
+    """The output items of the finished response in a Codex event stream (reasoning, function calls,
+    messages); [] when it did not finish. The ChatGPT subscription's endpoint sends the finished response
+    with an empty output list: the items are then the ones each `response.output_item.done` carried, in
+    order (without them a function call was dropped, and she answered nothing)."""
+    done: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if event.get("type") == "response.output_item.done" and isinstance(event.get("item"), dict):
+            done.append(event["item"])
+        elif event.get("type") in ("response.completed", "response.incomplete"):
+            output = (event.get("response") or {}).get("output")
+            items = [item for item in output if isinstance(item, dict)] if isinstance(output, list) else []
+            return items or done
+    return []
+
+
 def parse_search(raw: str) -> tuple[int, tuple[tuple[str, str], ...]]:
     """(searches and page visits, cited pages as (title, url) in order, each once) from a Codex event
     stream of a call with web search."""
@@ -108,6 +140,8 @@ def parse_image(raw: str) -> str | None:
 
 
 class Codex:
+    streams = True
+
     def __init__(
         self,
         *,
@@ -168,17 +202,21 @@ class Codex:
             os.replace(temp, self._auth_file)
             return tokens.get("access_token") or ""
 
-    async def _call(
-        self, body: dict[str, Any], access: str, account: str, seconds: float | None = None
-    ) -> httpx.Response:
-        """`seconds`: how long this request may take, instead of the client's timeout."""
-        headers = {
+    @staticmethod
+    def _headers(access: str, account: str) -> dict[str, str]:
+        return {
             "authorization": f"Bearer {access}",
             "chatgpt-account-id": account,
             "openai-beta": "responses=experimental",
             "originator": "codex_cli_rs",
             "accept": "text/event-stream",
         }
+
+    async def _call(
+        self, body: dict[str, Any], access: str, account: str, seconds: float | None = None
+    ) -> httpx.Response:
+        """`seconds`: how long this request may take, instead of the client's timeout."""
+        headers = self._headers(access, account)
         try:
             if seconds is None:
                 return await self._http.post(self._url, json=body, headers=headers)
@@ -197,6 +235,32 @@ class Codex:
             raise status_error(response, access)
         return response
 
+    async def _stream(self, body: dict[str, Any], seconds: float | None, on_text: TextSink) -> str:
+        """`_post`, read as it comes: the whole event stream at the end, its text told on the way."""
+        _, access, account = self._tokens()
+        for attempt in range(2):
+            headers = self._headers(access, account)
+            timeout = {} if seconds is None else {"timeout": seconds}
+            lines: list[str] = []
+            try:
+                async with self._http.stream(
+                    "POST", self._url, json=body, headers=headers, **timeout
+                ) as response:
+                    if response.status_code == 401 and attempt == 0:
+                        access = await self._refresh(access)
+                        continue
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise status_error(response, access)
+                    async for line in response.aiter_lines():
+                        lines.append(line)
+                        if line.startswith("data:") and "response.output_text.delta" in line:
+                            on_text(text_delta(line))
+            except httpx.HTTPError as exc:
+                raise transport_error(exc) from exc
+            break
+        return "\n".join(lines)
+
     async def complete(
         self,
         messages: Sequence[ChatMessage],
@@ -204,40 +268,91 @@ class Codex:
         max_tokens: int,
         temperature: float | None = None,
         search: bool = False,
+        tools: Sequence[Tool] = (),
+        run: ToolRunner | None = None,
+        on_text: TextSink | None = None,
     ) -> Completion:
         # The prompt's own system message (persona and rules) is the instructions. Merged into the input
         # under the fixed "one sentence of Chinese" instruction it lost: replies meant to be JSON (答题's
         # sorting) came back as a sentence.
         system = "\n\n".join(m.content for m in messages if m.role == "system")
         prompt = "\n\n".join(m.content for m in messages if m.role != "system")
-        tools: dict[str, Any] = {"tool_choice": "none"}
+        ours = (
+            [
+                {
+                    "type": "function",
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": dict(t.parameters),
+                }
+                for t in tools
+            ]
+            if run is not None
+            else []
+        )
+        offered: dict[str, Any] = {"tool_choice": "none"}
+        if search or ours:
+            offered = {"tools": ([{"type": "web_search"}] if search else []) + ours, "tool_choice": "auto"}
         if search:
-            tools = {"tools": [{"type": "web_search"}], "tool_choice": "auto"}
             instructions = f"{SEARCH_INSTRUCTIONS}\n\n{system}" if system else SEARCH_INSTRUCTIONS
         else:
             instructions = system or self._instructions
+        conversation: list[dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    *({"type": "input_image", "image_url": url} for m in messages for url in m.images),
+                ],
+            }
+        ]
         body = {
             "model": self.model,
             "instructions": instructions,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        *({"type": "input_image", "image_url": url} for m in messages for url in m.images),
-                    ],
-                }
-            ],
+            "input": conversation,
             "store": False,
             "stream": True,
             "max_output_tokens": max_tokens,
-            **tools,
+            **offered,
         }
-        seconds = SEARCH_TIMEOUT if search else None
+        if ours:
+            # Nothing is stored on their side: the reasoning comes back encrypted, to be sent along with the
+            # function calls it led to.
+            body["include"] = ["reasoning.encrypted_content"]
+        seconds = SEARCH_TIMEOUT if (search or ours) else None
         started = time.monotonic()
-        response = await self._post(body, seconds)
-        text, usage, cut = parse_sse(response.text)
-        searches, sources = parse_search(response.text) if search else (0, ())
+        used: list[tuple[str, str]] = []
+        searches, sources = 0, ()
+        # The last call may use no tool: it answers in words, saying how far it got. (Before, a sixth
+        # round that asked for one more tool ended the answer with no text at all.)
+        for round_ in range(MAX_TOOL_ROUNDS + 1):
+            if round_ == MAX_TOOL_ROUNDS and ours:
+                body["tool_choice"] = "none"
+            raw = (
+                await self._stream(body, seconds, on_text)
+                if on_text is not None
+                else (await self._post(body, seconds)).text
+            )
+            text, usage, cut = parse_sse(raw)
+            if search:
+                found, cited = parse_search(raw)
+                searches, sources = searches + found, sources + cited
+            output = completed_output(raw) if ours else []
+            calls = [item for item in output if item.get("type") == "function_call"]
+            if not calls or run is None or round_ == MAX_TOOL_ROUNDS:
+                break
+            if on_text is not None:
+                on_text(None)  # what it said before the tool is not the answer
+            conversation.extend(output)
+            for call in calls:
+                name = str(call.get("name") or "")
+                given = arguments(call.get("arguments"))
+                result = (await run(name, given))[:TOOL_RESULT_CHARS]
+                used.append((name, json.dumps(given, ensure_ascii=False)[:200]))
+                conversation.append(
+                    {"type": "function_call_output", "call_id": call.get("call_id"), "output": result}
+                )
+            body["input"] = conversation
         return Completion(
             text=text,
             latency_ms=(time.monotonic() - started) * 1000,
@@ -245,6 +360,79 @@ class Codex:
             completion_tokens=usage.get("output_tokens"),
             searches=searches,
             sources=sources,
+            cut=cut,
+            tools_used=tuple(used),
+        )
+
+    async def converse(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        tools: Sequence[Tool],
+        max_tokens: int,
+        state: Any = None,
+        results: Sequence[tuple[ToolCall, str]] = (),
+    ) -> Turn:
+        """One round with tools (任务). Nothing is stored on their side (store: false), so the state is the
+        whole input so far, the encrypted reasoning included."""
+        if state is None:
+            system = "\n\n".join(m.content for m in messages if m.role == "system")
+            prompt = "\n\n".join(m.content for m in messages if m.role != "system")
+            instructions = system or self._instructions
+            conversation: list[dict[str, Any]] = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        *({"type": "input_image", "image_url": url} for m in messages for url in m.images),
+                    ],
+                }
+            ]
+        else:
+            instructions, conversation = state["instructions"], list(state["input"])
+        conversation += [
+            {"type": "function_call_output", "call_id": call.id, "output": result[:TOOL_RESULT_CHARS]}
+            for call, result in results
+        ]
+        body: dict[str, Any] = {
+            "model": self.model,
+            "instructions": instructions,
+            "input": conversation,
+            "store": False,
+            "stream": True,
+            "max_output_tokens": max_tokens,
+            "tool_choice": "none",
+        }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": dict(t.parameters),
+                }
+                for t in tools
+            ]
+            body["tool_choice"] = "auto"
+            body["include"] = ["reasoning.encrypted_content"]
+        started = time.monotonic()
+        response = await self._post(body, SEARCH_TIMEOUT)
+        text, usage, cut = parse_sse(response.text)
+        output = completed_output(response.text)
+        calls = tuple(
+            ToolCall(
+                str(item.get("call_id") or ""), str(item.get("name") or ""), arguments(item.get("arguments"))
+            )
+            for item in output
+            if item.get("type") == "function_call"
+        )
+        return Turn(
+            text=text,
+            calls=calls,
+            state={"instructions": instructions, "input": [*conversation, *output]},
+            latency_ms=(time.monotonic() - started) * 1000,
+            prompt_tokens=usage.get("input_tokens"),
+            completion_tokens=usage.get("output_tokens"),
             cut=cut,
         )
 

@@ -5,14 +5,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import contextlib
 import getpass
+import hashlib
+import io
+import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
 import time
 import webbrowser
+import zipfile
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
 import uvicorn
@@ -21,6 +29,8 @@ from nest import __version__, hints, service
 from nest.api.auth import new_token
 from nest.app import create_app
 from nest.config import Settings
+from nest.core import ed25519
+from nest.core.market import signed_text
 from nest.logs import configure
 from nest.runtime import InstanceLock, RuntimeInfo, pid_alive, terminate
 
@@ -30,6 +40,7 @@ STOP_TIMEOUT = 15.0
 # cut and the app's shutdown (adapters, brain, database) runs. Without it a "stopped" process lingered
 # with its QQ connections alive.
 GRACEFUL_SECONDS = 5
+KEEP_ALIVE_SECONDS = 120
 
 
 def _client() -> httpx.Client:
@@ -75,6 +86,9 @@ def make_server(app) -> uvicorn.Server:  # type: ignore[no-untyped-def]
             access_log=False,
             lifespan="on",
             timeout_graceful_shutdown=GRACEFUL_SECONDS,
+            # Kept open between clicks: a new connection can cost the browser another look-up of this
+            # machine's name (about 11 seconds for a .local name on Windows with virtual adapters).
+            timeout_keep_alive=KEEP_ALIVE_SECONDS,
             # Who may connect is decided by the TCP peer's address (nest.api.auth). uvicorn would otherwise
             # take it from X-Forwarded-For whenever the peer is this machine: any local program could
             # then pose as a different address, e.g. to dodge the wrong-password lockout.
@@ -299,8 +313,17 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("set-password", help="设置从其他设备登录控制台的密码（已登录的设备都会退出）")
     service_args = sub.add_parser("service", help="macOS：把 nest 装成登录后自动启动、崩溃自动重启的后台服务")
     service_args.add_argument("action", choices=["install", "uninstall", "status"])
+    key_cmd = sub.add_parser("plugin-key", help="写插件的人：做一把签名用的钥匙，存进一个文件（自己收好）")
+    key_cmd.add_argument("file")
+    sign_cmd = sub.add_parser("plugin-sign", help="写插件的人：给一个插件 zip 签名，打印市场清单里要写的两行")
+    sign_cmd.add_argument("zip")
+    sign_cmd.add_argument("--key", required=True, help="plugin-key 做的文件")
     args = parser.parse_args(argv)
 
+    if args.command == "plugin-key":
+        return plugin_key(Path(args.file))
+    if args.command == "plugin-sign":
+        return plugin_sign(Path(args.zip), Path(args.key))
     settings = Settings()
     if args.command == "serve":
         return serve(settings, console=not args.quiet)
@@ -315,6 +338,36 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("provider-add", "bot-add"):
         return configure_cmd(settings, args)
     return status(settings)
+
+
+def plugin_key(file: Path) -> int:
+    if file.exists():
+        print(f"{file} 已经有了，没有动它（换一把钥匙，装过你插件的人就升不了级）")
+        return 1
+    file.parent.mkdir(parents=True, exist_ok=True)
+    seed = secrets.token_bytes(32)
+    file.write_text(base64.b64encode(seed).decode("ascii") + "\n", encoding="ascii")
+    with contextlib.suppress(OSError):
+        file.chmod(0o600)
+    print(f"写好了：{file}。这是你的私钥，别给任何人，也别放进仓库；丢了就没法再用这个作者身份升级插件。")
+    return 0
+
+
+def plugin_sign(zip_file: Path, key_file: Path) -> int:
+    try:
+        seed = base64.b64decode(key_file.read_text(encoding="ascii").strip(), validate=True)
+        data = zip_file.read_bytes()
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            name = next(n for n in archive.namelist() if n.split("/")[-1] == "plugin.json")
+            meta = json.loads(archive.read(name))
+        text = signed_text(str(meta["id"]), str(meta["version"]), hashlib.sha256(data).hexdigest())
+        signature = ed25519.sign(seed, text)
+    except (OSError, ValueError, KeyError, StopIteration, zipfile.BadZipFile) as exc:
+        print(f"没签成：{exc}")
+        return 1
+    print(f'"author_key": "{base64.b64encode(ed25519.public_key(seed)).decode("ascii")}",')
+    print(f'"signature": "{base64.b64encode(signature).decode("ascii")}"')
+    return 0
 
 
 def service_cmd(settings: Settings, action: str) -> int:

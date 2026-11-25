@@ -1,0 +1,346 @@
+/* The 桌宠 overlay: transparent everywhere except the pets and their bubbles. */
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+  user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+}
+
+.pet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.pet canvas {
+  display: block;
+  cursor: grab;
+}
+
+.pet.dragging canvas {
+  cursor: grabbing;
+}
+
+.pet.pixel canvas {
+  image-rendering: pixelated;
+}
+
+.bubble {
+  position: absolute;
+  bottom: calc(100% - 18px);
+  left: 50%;
+  width: max-content;
+  max-width: 260px;
+  min-width: 48px;
+  transform: translateX(-50%);
+  padding: 8px 11px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+  word-break: break-word;
+  animation: bubble-in 180ms var(--ease-out) both;
+}
+
+.bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.bubble .name {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.bubble .said {
+  max-height: 9em;
+  overflow-y: auto;
+}
+
+.bubble textarea {
+  display: block;
+  width: 220px;
+  margin-top: 6px;
+  resize: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.bubble .hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.bubble .problem {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--bad-text);
+}
+
+.dots {
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 2px;
+}
+
+.dots span {
+  display: inline-block;
+  animation: dot 1.2s infinite ease-in-out;
+}
+
+.dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.zzz {
+  position: absolute;
+  right: 18%;
+  top: 22%;
+  font-family: var(--font);
+  font-weight: 700;
+  color: #7aa7e0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  animation: zzz 2.4s infinite ease-out;
+  pointer-events: none;
+}
+
+/* 贴边藏起: her bubble beside what peeks out of her (--dock-b from pet.js), not centred off the screen. */
+.pet.dock-left .bubble,
+.pet.dock-right .bubble {
+  bottom: 52%;
+  transform: none;
+  animation-name: bubble-in-plain;
+}
+
+.pet.dock-left .bubble {
+  left: var(--dock-b);
+}
+
+.pet.dock-right .bubble {
+  left: auto;
+  right: var(--dock-b);
+}
+
+.pet.dock-top .bubble {
+  bottom: auto;
+  top: var(--dock-b);
+}
+
+.pet.dock-left .bubble::after {
+  left: 18px;
+}
+
+.pet.dock-right .bubble::after {
+  left: auto;
+  right: 12px;
+}
+
+.pet.dock-top .bubble::after {
+  bottom: auto;
+  top: -6px;
+  transform: translateX(-50%) rotate(225deg);
+}
+
+/* Her two hands on the edge. */
+.hands {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+  transition: opacity 140ms ease;
+  animation: hands-in 320ms var(--ease-out) both;
+}
+
+.hands.left,
+.hands.right {
+  flex-direction: column;
+}
+
+.hands.away {
+  opacity: 0;
+}
+
+.hands .hand {
+  display: block;
+  animation: hand-hold 4.2s ease-in-out infinite;
+}
+
+.hands .hand:nth-child(2) {
+  animation-delay: 2.1s;
+}
+
+.hands .hand.pixel {
+  image-rendering: pixelated;
+}
+
+/* A hand lets go a little and grips again, now and then (towards the edge she holds). */
+.hands.left {
+  --grip-x: -3px;
+  --grip-y: 0;
+}
+
+.hands.right {
+  --grip-x: 3px;
+  --grip-y: 0;
+}
+
+.hands.top {
+  --grip-x: 0;
+  --grip-y: -3px;
+}
+
+@keyframes hand-hold {
+  0%,
+  84%,
+  100% {
+    transform: translate(0, 0);
+  }
+  89% {
+    transform: translate(var(--grip-x), var(--grip-y));
+  }
+  94% {
+    transform: translate(0, 0);
+  }
+}
+
+/* Coming to hold on (the box itself is placed with an inline transform, so only the fade). */
+@keyframes hands-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes bubble-in-plain {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px) scale(0.96);
+  }
+}
+
+@keyframes dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes zzz {
+  from {
+    opacity: 0;
+    transform: translate(0, 6px) scale(0.8);
+  }
+  30% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translate(10px, -18px) scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble,
+  .dots span,
+  .zzz,
+  .hands,
+  .hands .hand {
+    animation: none;
+  }
+}
+
+/* Over her head: busy with a task, or waiting for a nod. */
+.mark {
+  position: absolute;
+  top: 2px;
+  right: 14%;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.mark.working {
+  animation: mark-turn 3s linear infinite;
+}
+
+.mark.asking {
+  animation: mark-hop 900ms ease-in-out infinite alternate;
+}
+
+@keyframes mark-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mark-hop {
+  to {
+    transform: translateY(-5px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark {
+    animation: none !important;
+  }
+}

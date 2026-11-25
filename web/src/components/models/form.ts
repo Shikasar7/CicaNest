@@ -16,6 +16,7 @@ export type ModelFormState = {
   auth_header: 'x-api-key' | 'bearer'
   effort: 'low' | 'medium' | 'high'
   web_search: boolean
+  tools: boolean
   auth_file: string
   key: string
   /** The user typed in the key field during this edit. */
@@ -45,6 +46,7 @@ export function formFrom(provider: ProviderView | null): ModelFormState {
     auth_header: options.auth_header === 'bearer' ? 'bearer' : 'x-api-key',
     effort: effortOf(options.effort),
     web_search: options.web_search === true,
+    tools: options.tools === true,
     auth_file: text(options.auth_file),
     key: '',
     keyTouched: false,
@@ -68,6 +70,7 @@ export function withKind(form: ModelFormState, kind: ProviderKind): ModelFormSta
   if (!allowed.includes('auth_header')) next.auth_header = 'x-api-key'
   if (!allowed.includes('effort')) next.effort = 'low'
   if (!allowed.includes('web_search')) next.web_search = false
+  if (!allowed.includes('tools')) next.tools = false
   if (!allowed.includes('auth_file')) next.auth_file = ''
   if (kind === 'codex') {
     // Codex only talks to chatgpt.com and uses the login file instead of a key.
@@ -201,6 +204,7 @@ export function checkForm(
     }
   }
   if (allowed.includes('web_search') && form.web_search) options.web_search = true
+  if (allowed.includes('tools') && form.tools) options.tools = true
   if (allowed.includes('auth_file') && form.auth_file.trim()) options.auth_file = form.auth_file.trim()
 
   const key = keyToSend(form)

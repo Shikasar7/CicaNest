@@ -1,4 +1,5 @@
-/* Shared tokens for the desktop shell's own pages (splash, offline). Matches the console palette. */
+/* Shared tokens for the desktop shell's own pages (splash, offline). Matches the console palette; the theme
+   picked in nest is laid over these variables by src/theme.js. */
 
 @font-face {
   font-family: 'Geist';
@@ -23,6 +24,9 @@
   --warn-text: #a8690c;
   --bad: #d64545;
   --bad-text: #c23b3b;
+  /* Buttons and focus: the theme's accent; nest's own look draws them in the text colour. */
+  --accent: var(--text);
+  --accent-text: var(--bg);
   --shadow:
     0 1px 2px rgba(16, 24, 32, 0.05),
     0 8px 20px -6px rgba(16, 24, 32, 0.14),
@@ -83,6 +87,10 @@ button {
   color: inherit;
 }
 
+input {
+  accent-color: var(--accent);
+}
+
 .btn {
   -webkit-app-region: no-drag;
   height: 32px;
@@ -104,17 +112,17 @@ button {
 }
 
 .btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--text) 45%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
 
 .btn.primary {
-  background: var(--text);
-  color: var(--bg);
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 .btn.primary:hover {
-  background: color-mix(in srgb, var(--text) 86%, var(--bg));
+  background: color-mix(in srgb, var(--accent) 86%, var(--bg));
 }
 
 .btn.ghost {

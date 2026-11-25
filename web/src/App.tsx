@@ -1,19 +1,23 @@
 import { useEffect, useState, type ComponentType } from 'react'
 import {
-  IdCard,
-  MessageSquareQuote,
+  AudioLines,
   BookOpen,
   Brain,
   ChartColumn,
   Cpu,
   House,
+  LayoutDashboard,
+  IdCard,
   Library,
+  ListChecks,
+  MessageCircleHeart,
+  MessageSquareQuote,
   MessagesSquare,
-  NotebookPen,
-  AudioLines,
   Monitor,
   Moon,
+  NotebookPen,
   Pause,
+  Puzzle,
   Radar,
   Server,
   Smile,
@@ -21,28 +25,34 @@ import {
   Sun,
 } from 'lucide-react'
 
+import { AppearanceSync } from '@/components/Appearance'
+import { Approvals } from '@/components/Approvals'
 import { NestMark } from '@/components/NestMark'
 import { Segmented, type SegmentedOption } from '@/components/Segmented'
 import { SignIn } from '@/components/SignIn'
 import { StatusDot, type Tone } from '@/components/StatusDot'
 import { sendJson, type Bot } from '@/lib/api'
-import { desktop } from '@/lib/desktop'
+import { chatView, desktop } from '@/lib/desktop'
 import { cn } from '@/lib/utils'
 import { LiveProvider, useBots, useLive, type LiveState } from '@/lib/live'
+import { useLiveData } from '@/lib/live-data'
 import { setTheme, useTheme, type ThemeChoice } from '@/lib/theme'
 import { UnsavedProvider, useConfirmLeave } from '@/lib/unsaved'
 import { Bots } from '@/pages/Bots'
+import { Chat } from '@/pages/Chat'
 import { Knowledge } from '@/pages/Knowledge'
 import { Memories } from '@/pages/Memories'
 import { Messages } from '@/pages/Messages'
 import { Models } from '@/pages/Models'
 import { Overview } from '@/pages/Overview'
 import { Personas } from '@/pages/Personas'
+import { Plugins } from '@/pages/Plugins'
 import { Issues } from '@/pages/Issues'
 import { Slang } from '@/pages/Slang'
 import { Speech } from '@/pages/Speech'
 import { Stickers } from '@/pages/Stickers'
 import { System } from '@/pages/System'
+import { TasksPage } from '@/pages/Tasks'
 import { Tones } from '@/pages/Tones'
 import { Usage } from '@/pages/Usage'
 import { Watches } from '@/pages/Watches'
@@ -51,11 +61,13 @@ type PageDef = { hash: string; label: string; Icon: ComponentType<{ className?: 
 
 const PAGES: PageDef[] = [
   { hash: '#/', label: '总览', Icon: House, Page: Overview },
+  { hash: '#/chat', label: '聊天', Icon: MessageCircleHeart, Page: Chat },
   { hash: '#/messages', label: '消息', Icon: MessagesSquare, Page: Messages },
   { hash: '#/bots', label: 'Bot', Icon: SquareUserRound, Page: Bots },
   { hash: '#/personas', label: '人设', Icon: IdCard, Page: Personas },
   { hash: '#/tones', label: '语气', Icon: MessageSquareQuote, Page: Tones },
   { hash: '#/models', label: '模型', Icon: Cpu, Page: Models },
+  { hash: '#/tasks', label: '任务', Icon: ListChecks, Page: TasksPage },
   { hash: '#/usage', label: '用量', Icon: ChartColumn, Page: Usage },
   { hash: '#/watches', label: '监控', Icon: Radar, Page: Watches },
   { hash: '#/stickers', label: '表情包', Icon: Smile, Page: Stickers },
@@ -64,8 +76,15 @@ const PAGES: PageDef[] = [
   { hash: '#/memories', label: '记忆', Icon: Brain, Page: Memories },
   { hash: '#/knowledge', label: '资料', Icon: Library, Page: Knowledge },
   { hash: '#/issues', label: '问题记录', Icon: NotebookPen, Page: Issues },
+  { hash: '#/plugins', label: '插件', Icon: Puzzle, Page: Plugins },
   { hash: '#/system', label: '系统', Icon: Server, Page: System },
 ]
+
+/** Installed plugins with a newer version in the market (looked at once a day). */
+function usePluginUpdates(): number {
+  const { botsVersion } = useLive()
+  return useLiveData<{ updates: unknown[] }>('/api/market/updates', [botsVersion]).data?.updates.length ?? 0
+}
 
 function useHashPage(): PageDef {
   const read = () => PAGES.find((p) => p.hash === window.location.hash) ?? PAGES[0]
@@ -107,11 +126,18 @@ function Problem() {
   if (state === 'login') {
     return (
       <p className="rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
-        {desktop ? '登录已失效。请在右下角的 nest 图标菜单里选「重启 nest」。' : '登录已失效或还没登录。请双击项目目录里的 启动.bat 重新打开控制台。'}
+        {desktop && !desktop.remote ? '登录已失效。请在右下角的 nest 图标菜单里选「重启 nest」。' : '登录已失效或还没登录。请双击项目目录里的 启动.bat 重新打开控制台。'}
       </p>
     )
   }
   if (state === 'down') {
+    if (desktop?.remote) {
+      return (
+        <p className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          连不上运行 nest 的那台电脑。它可能关机或睡着了，或者不在同一个网络里；连上后会自动恢复。
+        </p>
+      )
+    }
     return (
       <p className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
         连不上 nest 后台。{desktop ? '请在右下角的 nest 图标菜单里选「重启 nest」。' : '请双击 启动.bat 启动它，'}或查看 data/logs/nest.log。
@@ -168,6 +194,7 @@ function PauseAll({ compact = false }: { compact?: boolean }) {
 }
 
 function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' }) {
+  const updates = usePluginUpdates()
   const confirmLeave = useConfirmLeave()
   return (
     <nav
@@ -196,6 +223,14 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
               className={cn('size-4 transition-transform duration-200', current ? 'text-foreground' : 'group-hover:scale-110')}
             />
             {p.label}
+            {p.hash === '#/plugins' && updates > 0 && (
+              <span
+                title={`${updates} 个插件有新版本`}
+                className="ml-auto rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground"
+              >
+                {updates}
+              </span>
+            )}
           </a>
         )
       })}
@@ -203,12 +238,56 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
   )
 }
 
+/** The desktop app's chat window: the 聊天 page alone, under a draggable strip for the window's buttons. */
+/** From the chat window to the console: the app's console window, or (in a browser) a new tab. */
+function openConsole() {
+  if (desktop?.openConsole) void desktop.openConsole()
+  else if (desktop) window.location.assign('/') // an app from before the button: this window turns into the console
+  else window.open('/', '_blank', 'noopener')
+}
+
+function ChatWindow() {
+  return (
+    <div className="flex h-svh flex-col overflow-hidden bg-surface">
+      <header
+        className="drag-region flex h-10 shrink-0 items-center gap-2 px-4"
+        style={desktop ? { paddingRight: desktop.captionWidth + 12 } : undefined}
+      >
+        <NestMark className="size-5" />
+        <span className="text-sm font-medium">聊天</span>
+        <button
+          type="button"
+          onClick={openConsole}
+          title="打开控制台：Bot、模型、插件、外观这些设置都在那里"
+          className="ml-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <LayoutDashboard className="size-3.5" />
+          控制台
+        </button>
+      </header>
+      <main className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+        <Problem />
+        <Chat standalone />
+      </main>
+    </div>
+  )
+}
+
 function Shell() {
   const page = useHashPage()
   const { Page } = page
   const { state } = useLive()
-  // The desktop app signs itself in; a browser that is not signed in gets the password screen instead.
-  if (state === 'login' && !desktop) return <SignIn />
+  // The desktop app signs itself in to a nest on this machine; a browser, or the app connected to a nest
+  // elsewhere, gets the password screen instead.
+  if (state === 'login' && (!desktop || desktop.remote)) return <SignIn />
+  if (chatView) {
+    return (
+      <>
+        <ChatWindow />
+        <Approvals />
+      </>
+    )
+  }
   return (
     <div className="flex h-svh overflow-hidden">
       <aside className="hidden w-52 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
@@ -252,6 +331,7 @@ function Shell() {
           </div>
         </main>
       </div>
+      <Approvals />
     </div>
   )
 }
@@ -259,6 +339,7 @@ function Shell() {
 export default function App() {
   return (
     <LiveProvider>
+      <AppearanceSync />
       <UnsavedProvider>
         <Shell />
       </UnsavedProvider>

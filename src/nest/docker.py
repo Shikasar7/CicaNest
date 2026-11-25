@@ -269,7 +269,7 @@ def create(args: list[str]) -> None:
 
 
 def remove(name: str) -> None:
-    """Stop and delete the container (its data folders, mounted from the Mac, stay)."""
+    """Stop and delete the container (its data folders, mounted from this machine, stay)."""
     _run(["rm", "-f", name], ACTION_TIMEOUT)
 
 

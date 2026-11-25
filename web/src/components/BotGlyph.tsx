@@ -7,6 +7,10 @@ import { cn } from '@/lib/utils'
 const SIZES = {
   sm: 'size-6 text-[13px]',
   md: 'size-9 text-lg',
+  /** Beside a message in the chat window. */
+  chat: 'size-10 text-xl',
+  /** In the chat window's companion list. */
+  list: 'size-12 text-2xl',
   lg: 'size-14 text-[28px]',
 } as const
 

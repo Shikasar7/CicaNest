@@ -338,9 +338,9 @@ async def test_persona_crud(world: World) -> None:
         "used_by": [],
     }
     assert ("bots", {"bot_id": None}) in world.events
-    await persona(world, "小马", "你是一匹阿马。")
+    await persona(world, "小鹿", "你是一只小鹿。")
     await persona(world, "a-persona")
-    assert [p["name"] for p in (await world.http.get("/api/personas")).json()] == ["a-persona", "小马", "鲸"]
+    assert [p["name"] for p in (await world.http.get("/api/personas")).json()] == ["a-persona", "小鹿", "鲸"]
 
     duplicate = await world.http.post("/api/personas", json={"name": "鲸", "content": "别的"})
     assert duplicate.status_code == 409 and duplicate.json() == {"detail": "已经有叫 鲸 的人设"}
@@ -349,17 +349,17 @@ async def test_persona_crud(world: World) -> None:
     # Editing the text applies at once to every group using it.
     for key in ("whale@42", "whale@77"):
         assert (await world.patch_channel(key, {"persona_id": whale["id"]})).status_code == 200
-    edited = await world.http.patch(f"/api/personas/{whale['id']}", json={"content": "你是一只胖鲸鱼。"})
-    assert edited.status_code == 200 and edited.json()["content"] == "你是一只胖鲸鱼。"
+    edited = await world.http.patch(f"/api/personas/{whale['id']}", json={"content": "你是一只大鲸鱼。"})
+    assert edited.status_code == 200 and edited.json()["content"] == "你是一只大鲸鱼。"
     assert edited.json()["updated_at"] >= whale["updated_at"]
-    assert world.channel("whale@42").persona == world.channel("whale@77").persona == "你是一只胖鲸鱼。"
-    renamed = await world.http.patch(f"/api/personas/{whale['id']}", json={"name": "胖鲸"})
-    assert renamed.status_code == 200 and renamed.json()["name"] == "胖鲸"
-    assert world.channel("whale@42").persona_name == "胖鲸"
-    onto = await world.http.patch(f"/api/personas/{whale['id']}", json={"name": "小马"})
-    assert onto.status_code == 409 and onto.json() == {"detail": "已经有叫 小马 的人设"}
+    assert world.channel("whale@42").persona == world.channel("whale@77").persona == "你是一只大鲸鱼。"
+    renamed = await world.http.patch(f"/api/personas/{whale['id']}", json={"name": "大鲸"})
+    assert renamed.status_code == 200 and renamed.json()["name"] == "大鲸"
+    assert world.channel("whale@42").persona_name == "大鲸"
+    onto = await world.http.patch(f"/api/personas/{whale['id']}", json={"name": "小鹿"})
+    assert onto.status_code == 409 and onto.json() == {"detail": "已经有叫 小鹿 的人设"}
     # Renaming onto its own name is not a clash.
-    assert (await world.http.patch(f"/api/personas/{whale['id']}", json={"name": "胖鲸"})).status_code == 200
+    assert (await world.http.patch(f"/api/personas/{whale['id']}", json={"name": "大鲸"})).status_code == 200
 
     empty = await world.http.patch(f"/api/personas/{whale['id']}", json={})
     assert empty.status_code == 422 and empty.json() == {"detail": "没有要改的内容"}

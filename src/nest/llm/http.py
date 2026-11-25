@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -22,6 +25,23 @@ def scrub(text: str, *secrets: str) -> str:
 def client(*, timeout: float, proxy: str | None = None, transport: httpx.AsyncBaseTransport | None = None):
     # trust_env=False: proxies are explicit per provider, never inherited from the environment.
     return httpx.AsyncClient(timeout=timeout, trust_env=False, proxy=proxy, transport=transport)
+
+
+async def sse(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+    """The events of a Server-Sent Events answer, as they come."""
+    async for line in response.aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            continue  # "[DONE]", a keepalive
+        if isinstance(event, dict):
+            yield event
+
+
+def is_sse(response: httpx.Response) -> bool:
+    return "text/event-stream" in response.headers.get("content-type", "")
 
 
 def transport_error(exc: Exception) -> ProviderError:

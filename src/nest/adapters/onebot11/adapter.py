@@ -81,6 +81,7 @@ class OneBotAdapter:
     capabilities = frozenset(
         {
             "birthdays",
+            "comparable",
             "fetch_history",
             "list_channels",
             "member_joins",

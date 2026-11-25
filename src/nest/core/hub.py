@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any
 
 from nest.adapters.base import Adapter, AdapterStatus, BackfillSource, StatusSink
-from nest.adapters.registry import PLATFORMS, build_adapter, can
+from nest.adapters.registry import DESK, PLATFORMS, build_adapter, can
 from nest.core.brain import Brain
 from nest.core.broadcast import Broadcaster
 from nest.core.events import CaughtUp, ChannelsSeen, Event, MemberJoined, MessageEvent, RecallEvent
@@ -61,6 +61,7 @@ class Hub:
         self.stickers: StickerKeeper | None = None  # 表情包: set by the app; sees every stored message
         self._factory = factory
         self._retention_days = retention_days
+        self.desk_media: Any = None  # 桌面聊天的图片和语音 (nest.core.desk_media.DeskMedia)
         self._queue: asyncio.Queue[Event] = asyncio.Queue(queue_size)
         self.accounts: dict[str, Account] = {}
         self.adapters: dict[str, Adapter] = {}
@@ -79,7 +80,13 @@ class Hub:
             if account.id not in removed:
                 await self._connect(account)
 
+    async def emit(self, event: Event) -> None:
+        """An event that did not come from an adapter (桌面聊天): handled like one that did."""
+        await self._queue.put(event)
+
     async def _connect(self, account: Account) -> None:
+        if account.platform == DESK:
+            return  # 只在桌面上的伙伴: nothing to connect, and not a connection to watch or list
         self.accounts[account.id] = account
         if not account.enabled or account.id in self.held:
             return
@@ -234,6 +241,8 @@ class Hub:
                 elif isinstance(event, RecallEvent):
                     row = await self.store.recall(event)
                     if row is not None:
+                        if self.brain is not None:
+                            self.brain.on_recall(row)
                         self.broadcaster.publish("recall", row)
                 elif isinstance(event, ChannelsSeen):
                     await self.store.name_channels(list(event.infos))
@@ -261,6 +270,10 @@ class Hub:
         if runs:
             log.info("清理了 %d 条超过 %g 天的监控记录", runs, days)
         records = runs
+        if self.desk_media is not None:
+            files = await asyncio.to_thread(self.desk_media.purge, before)
+            if files:
+                log.info("清理了 %d 个超过 %g 天的桌面聊天图片和语音", files, days)
         if self.brain is not None:
             records += await self.brain.purge(decisions_before=before, calls_before=now - calls_days * DAY)
         return {"messages": messages, "records": records}

@@ -6,7 +6,9 @@ import { StatusDot, type Tone } from '@/components/StatusDot'
 import { getJson, type Account, type AdapterState, type Bot, type Decision, type Status, type SystemView } from '@/lib/api'
 import { useRecentDecisions } from '@/lib/activity'
 import { formatAgo, formatTime, formatUptime } from '@/lib/format'
+import type { LifeView } from '@/lib/life'
 import { useBots, useLive } from '@/lib/live'
+import { useLiveData } from '@/lib/live-data'
 import { botLook } from '@/lib/persona'
 import { platformName } from '@/lib/platforms'
 import { cn } from '@/lib/utils'
@@ -73,7 +75,7 @@ function LastLine({ line, groupOf }: { line: Decision | undefined; groupOf: Map<
     <figure
       key={line.id}
       className={cn(
-        'animate-in fade-in-0 zoom-in-95 duration-500 rounded-2xl rounded-tl-md px-4 py-3',
+        'animate-in fade-in-0 zoom-in-95 duration-300 rounded-2xl rounded-tl-md px-4 py-3',
         real
           ? 'bg-[color-mix(in_oklch,var(--hue)_10%,var(--card))]'
           : 'border border-dashed border-[color-mix(in_oklch,var(--hue)_45%,transparent)]',
@@ -216,6 +218,45 @@ function Services({ accounts }: { accounts: Account[] }) {
   )
 }
 
+/** 她们的近况: what each companion is doing in 小窝 now, and the latest little thing that happened. */
+function Lately() {
+  const { botsVersion } = useLive()
+  const { data } = useLiveData<LifeView>('/api/life', [botsVersion])
+  if (!data?.on) return null
+  const home = data.people.filter((p) => p.home)
+  if (home.length === 0) return null
+  const nameOf = new Map(data.people.map((p) => [p.bot_id, p.name]))
+  const moment = data.moments[0]
+  return (
+    <section aria-labelledby="lately" className="rounded-2xl border bg-card p-5">
+      <h2 id="lately" className="mb-3 text-sm font-semibold">
+        她们的近况
+      </h2>
+      <ul className="space-y-2.5">
+        {home.map((p) => (
+          <li key={p.bot_id} className="flex items-center gap-2.5 text-sm">
+            <BotGlyph name={p.name} id={p.bot_id} size="sm" />
+            <span className="min-w-0 truncate">
+              <span className="font-medium">{p.name}</span>
+              <span className="ml-1.5 text-muted-foreground">
+                {p.now ? `在${p.now.room}${p.now.doing}` : data.planned ? '在发呆' : '还没起床'}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {moment && (
+        <p className="mt-3 truncate text-xs text-muted-foreground">
+          {nameOf.get(moment.bot_id) ?? ''}：{moment.text}
+        </p>
+      )}
+      <a href="#/chat" className="mt-3 inline-block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+        在「聊天」页的小窝里看看
+      </a>
+    </section>
+  )
+}
+
 const OUTCOME_TEXT: Record<Decision['outcome'], string> = {
   replied: '回了',
   would_reply: '本来会回',
@@ -319,6 +360,7 @@ export function Overview() {
         <Feed {...activity} />
         <div className="space-y-4">
           <Services accounts={accounts} />
+          <Lately />
           {bots && (
             <p className="px-1 text-xs leading-relaxed text-muted-foreground">
               {bots.some((b) => b.mode === 'live')

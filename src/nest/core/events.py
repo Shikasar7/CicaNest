@@ -23,7 +23,7 @@ class Segment:
 class ChannelRef:
     """A place where messages happen, as seen from one of our accounts."""
 
-    platform: str  # "qq", "discord", "wecom"
+    platform: str  # "qq", "discord", "telegram", "slack", "wecom"
     account: str  # our account id on that platform, e.g. the bot's QQ number; never holds a colon
     kind: Literal["group", "private"]
     id: str  # group number / peer id

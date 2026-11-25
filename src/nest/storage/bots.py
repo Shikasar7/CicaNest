@@ -95,6 +95,7 @@ class BotConfig:
     channels: dict[int, BotChannel]
     voice: str = ""  # 发语音: "<service>:<voice id>"
     backup_provider_id: str | None = None  # 备用模型: speaks when the bot's own model cannot
+    task_provider_id: str | None = None  # 做事模型: her tasks and routines run on it (None: her own model)
 
 
 def _with_examples(persona: str, examples: str) -> str:
@@ -148,9 +149,10 @@ class BotRepo:
         the foreign key's ON DELETE SET NULL). False when there was no such row."""
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                "SELECT name FROM bots WHERE (provider_id = ? OR backup_provider_id = ?)"
+                "SELECT name FROM bots"
+                " WHERE (provider_id = ? OR backup_provider_id = ? OR task_provider_id = ?)"
                 " AND deleted_at IS NULL ORDER BY created_at, id",
-                (provider_id, provider_id),
+                (provider_id, provider_id, provider_id),
             )
             names = [row["name"] for row in await cursor.fetchall()]
             await cursor.close()
@@ -164,12 +166,12 @@ class BotRepo:
     async def provider_users(self) -> dict[str, list[dict[str, Any]]]:
         """Provider id -> the bots using it ({bot_id, name, mode}), from the bots table."""
         rows = await self.db.fetchall(
-            "SELECT id, name, mode, provider_id, backup_provider_id FROM bots"
+            "SELECT id, name, mode, provider_id, backup_provider_id, task_provider_id FROM bots"
             " WHERE deleted_at IS NULL ORDER BY created_at, id"
         )
         users: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            for provider in {row["provider_id"], row["backup_provider_id"]} - {None}:
+            for provider in {row["provider_id"], row["backup_provider_id"], row["task_provider_id"]} - {None}:
                 users.setdefault(provider, []).append(
                     {"bot_id": row["id"], "name": row["name"], "mode": row["mode"]}
                 )
@@ -263,7 +265,105 @@ class BotRepo:
             await cursor.close()
             if uses:
                 raise InUse([f"{use['bot_name']}（{use['channel_name']}）" for use in uses])
+            cursor = await conn.execute(PERSONA_IN_SETS, (persona_id,))
+            kept = [f"{row['bot_name']}的方案「{row['set_name']}」" for row in await cursor.fetchall()]
+            await cursor.close()
+            if kept:
+                raise InUse(kept)
             cursor = await conn.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
+            deleted = cursor.rowcount > 0
+            await cursor.close()
+        return deleted
+
+    # -- 人设方案 ----------------------------------------------------------------------------------
+
+    async def persona_sets(self) -> dict[str, list[dict[str, Any]]]:
+        """Bot id -> its sets by name: {id, name, items: {channel_id: persona_id or None}}."""
+        sets = await self.db.fetchall("SELECT id, bot_id, name FROM persona_sets ORDER BY name, id")
+        items = await self.db.fetchall("SELECT set_id, channel_id, persona_id FROM persona_set_items")
+        by_set: dict[int, dict[int, int | None]] = {}
+        for row in items:
+            by_set.setdefault(row["set_id"], {})[row["channel_id"]] = row["persona_id"]
+        views: dict[str, list[dict[str, Any]]] = {}
+        for row in sets:
+            views.setdefault(row["bot_id"], []).append(
+                {"id": row["id"], "name": row["name"], "items": by_set.get(row["id"], {})}
+            )
+        return views
+
+    async def create_persona_set(self, bot_id: str, name: str) -> int:
+        """Save the persona the bot uses in each of its places as a new set; NameTaken when the bot already
+        has a set of that name."""
+        now = time.time()
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                "SELECT 1 FROM persona_sets WHERE bot_id = ? AND name = ?", (bot_id, name)
+            )
+            taken = await cursor.fetchone()
+            await cursor.close()
+            if taken:
+                raise NameTaken(name)
+            cursor = await conn.execute(
+                "INSERT INTO persona_sets (bot_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (bot_id, name, now, now),
+            )
+            set_id = cursor.lastrowid
+            await cursor.close()
+            assert set_id is not None
+            await conn.execute(SNAPSHOT, (set_id, bot_id))
+        return set_id
+
+    async def update_persona_set(
+        self, bot_id: str, set_id: int, *, name: str | None = None, resave: bool = False
+    ) -> bool:
+        """Rename the set and/or save the bot's current personas over it. False when the bot has no such
+        set; NameTaken on a rename onto another of its sets."""
+        async with self.db.transaction() as conn:
+            if not await _own_set(conn, bot_id, set_id):
+                return False
+            if name is not None:
+                cursor = await conn.execute(
+                    "SELECT 1 FROM persona_sets WHERE bot_id = ? AND name = ? AND id != ?",
+                    (bot_id, name, set_id),
+                )
+                taken = await cursor.fetchone()
+                await cursor.close()
+                if taken:
+                    raise NameTaken(name)
+                await conn.execute("UPDATE persona_sets SET name = ? WHERE id = ?", (name, set_id))
+            if resave:
+                await conn.execute("DELETE FROM persona_set_items WHERE set_id = ?", (set_id,))
+                await conn.execute(SNAPSHOT, (set_id, bot_id))
+            await conn.execute("UPDATE persona_sets SET updated_at = ? WHERE id = ?", (time.time(), set_id))
+        return True
+
+    async def apply_persona_set(self, bot_id: str, set_id: int) -> int | None:
+        """Give each of the bot's places the persona the set has for it; places the set does not know
+        (added after it was saved) keep theirs. Returns how many places changed, None when the bot has no
+        such set."""
+        async with self.db.transaction() as conn:
+            if not await _own_set(conn, bot_id, set_id):
+                return None
+            chosen = (
+                "(SELECT i.persona_id FROM persona_set_items i"
+                " WHERE i.set_id = ? AND i.channel_id = bc.channel_id)"
+            )
+            cursor = await conn.execute(
+                f"""UPDATE bot_channels AS bc SET persona_id = {chosen}
+                    WHERE bc.bot_id = ?
+                      AND bc.channel_id IN (SELECT channel_id FROM persona_set_items WHERE set_id = ?)
+                      AND bc.persona_id IS NOT {chosen}""",
+                (set_id, bot_id, set_id, set_id),
+            )
+            changed = cursor.rowcount
+            await cursor.close()
+        return changed
+
+    async def delete_persona_set(self, bot_id: str, set_id: int) -> bool:
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM persona_sets WHERE id = ? AND bot_id = ?", (set_id, bot_id)
+            )
             deleted = cursor.rowcount > 0
             await cursor.close()
         return deleted
@@ -309,7 +409,7 @@ class BotRepo:
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
                 "UPDATE bots SET deleted_at = ?, mode = 'paused', provider_id = NULL, "
-                "backup_provider_id = NULL, updated_at = ? "
+                "backup_provider_id = NULL, task_provider_id = NULL, updated_at = ? "
                 "WHERE id = ? AND deleted_at IS NULL",
                 (now, now, bot_id),
             )
@@ -345,6 +445,7 @@ class BotRepo:
         aliases: list[str] | None = None,
         provider_id: str | _Unset | None = UNSET,
         backup_provider_id: str | _Unset | None = UNSET,
+        task_provider_id: str | _Unset | None = UNSET,
         mode: str | None = None,
         voice: str | None = None,
     ) -> bool:
@@ -361,6 +462,8 @@ class BotRepo:
             columns["provider_id"] = provider_id
         if backup_provider_id is not UNSET:
             columns["backup_provider_id"] = backup_provider_id
+        if task_provider_id is not UNSET:
+            columns["task_provider_id"] = task_provider_id
         if mode is not None:
             columns["mode"] = mode
         if voice is not None:
@@ -473,7 +576,7 @@ class BotRepo:
     async def bots(self) -> list[BotConfig]:
         rows = await self.db.fetchall(
             """SELECT b.id, b.account_id, a.self_id, a.platform, b.name, b.aliases, b.provider_id, b.mode,
-                      b.voice, b.backup_provider_id
+                      b.voice, b.backup_provider_id, b.task_provider_id
                FROM bots b JOIN accounts a ON a.id = b.account_id WHERE b.deleted_at IS NULL
                ORDER BY b.created_at, b.id"""
         )
@@ -536,6 +639,7 @@ class BotRepo:
                     channels=channels,
                     voice=row["voice"],
                     backup_provider_id=row["backup_provider_id"],
+                    task_provider_id=row["task_provider_id"],
                 )
             )
         return configs
@@ -556,12 +660,13 @@ class BotRepo:
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
         output: str | None = None,
+        purpose: str = "",
     ) -> int:
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
                 """INSERT INTO llm_calls (bot_id, provider_id, model, started_at, latency_ms, status, error,
-                       prompt_chars, prompt_tokens, completion_tokens, output)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       prompt_chars, prompt_tokens, completion_tokens, output, purpose)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     bot_id,
                     provider_id,
@@ -574,6 +679,7 @@ class BotRepo:
                     prompt_tokens,
                     completion_tokens,
                     (output or "")[:2000] or None,
+                    purpose,
                 ),
             )
             call_id = cursor.lastrowid
@@ -724,6 +830,26 @@ PERSONA_USES = """SELECT bc.persona_id, bc.bot_id, b.name AS bot_name, bc.channe
                   WHERE bc.persona_id IS NOT NULL AND (? IS NULL OR bc.persona_id = ?)
                         AND b.deleted_at IS NULL
                   ORDER BY b.created_at, b.id, channel_name, bc.channel_id"""
+
+
+# The sets of bots still in the console that name one persona. A removed bot's sets let go of it (the
+# foreign key's ON DELETE SET NULL turns that place into 不用人设 there).
+PERSONA_IN_SETS = """SELECT DISTINCT b.name AS bot_name, s.name AS set_name
+                     FROM persona_set_items i JOIN persona_sets s ON s.id = i.set_id
+                     JOIN bots b ON b.id = s.bot_id
+                     WHERE i.persona_id = ? AND b.deleted_at IS NULL
+                     ORDER BY b.created_at, b.id, s.name"""
+
+# Each of a bot's places with the persona it uses now, into one set (set id, bot id).
+SNAPSHOT = """INSERT INTO persona_set_items (set_id, channel_id, persona_id)
+              SELECT ?, channel_id, persona_id FROM bot_channels WHERE bot_id = ?"""
+
+
+async def _own_set(conn: Any, bot_id: str, set_id: int) -> bool:
+    cursor = await conn.execute("SELECT 1 FROM persona_sets WHERE id = ? AND bot_id = ?", (set_id, bot_id))
+    found = await cursor.fetchone()
+    await cursor.close()
+    return found is not None
 
 
 def _persona_use(row) -> dict[str, Any]:  # type: ignore[no-untyped-def]

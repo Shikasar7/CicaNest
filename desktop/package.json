@@ -9,9 +9,54 @@
     "start": "electron .",
     "check": "node scripts/check.js",
     "icons": "python scripts/make_icons.py",
-    "shortcuts": "electron scripts/install-shortcuts.js"
+    "shortcuts": "electron scripts/install-shortcuts.js",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --win nsis --publish never"
   },
   "devDependencies": {
-    "electron": "45.0.0"
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0"
+  },
+  "author": "nest",
+  "build": {
+    "appId": "nest",
+    "productName": "nest",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "!src/debug.js",
+      "package.json",
+      "assets/fonts/**",
+      "assets/nest-mark.svg",
+      "assets/icons/nest.ico",
+      "assets/icons/nest-{16,24,32,48,64,128,256,512}.png",
+      "assets/icons/tray-*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icons/nest.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "shortcutName": "nest",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "nest-setup-${version}.exe"
+    },
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ]
   }
 }

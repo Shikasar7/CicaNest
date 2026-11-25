@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import Any
@@ -11,7 +12,7 @@ import httpx
 import pytest
 
 from nest.storage.watches import Watch
-from nest.watch.check import Check, evaluate, first_price, show_price, visible_lines
+from nest.watch.check import Check, evaluate, first_price, invite_api, invite_code, show_price, visible_lines
 from nest.watch.fetch import MAX_REDIRECTS, Page, WatchError, decode, fetch
 
 URL = "https://example.com/feed"
@@ -354,3 +355,80 @@ async def test_price_change_and_threshold() -> None:
     assert exact.message is not None and "低于你设的 1000" in exact.message
     with pytest.raises(WatchError, match="没有在这里找到价格"):
         await checked(w, html.format("缺货"))
+
+
+# -- Discord invites --------------------------------------------------------------------------------------
+
+
+def invite(*features: str, members: int = 1200) -> str:
+    return json.dumps(
+        {
+            "code": "demo",
+            "approximate_member_count": members,
+            "guild": {"id": "1", "name": "Demo 服务器", "features": ["COMMUNITY", *features]},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "code"),
+    [
+        ("https://discord.gg/demo-Room1", "demo-Room1"),
+        ("discord.gg/demo", "demo"),
+        ("https://discord.com/invite/demo/", "demo"),
+        ("https://discordapp.com/invite/demo", "demo"),
+        ("  demo  ", "demo"),
+        ("https://example.com/demo", None),
+        ("discord.gg/", None),
+        ("有 空格", None),
+    ],
+)
+def test_invite_codes(text: str, code: str | None) -> None:
+    assert invite_code(text) == code
+
+
+def test_invite_api_address() -> None:
+    assert (
+        invite_api("https://discord.gg/demo") == "https://discord.com/api/v10/invites/demo?with_counts=true"
+    )
+    with pytest.raises(WatchError, match="不是 Discord 邀请链接"):
+        invite_api("https://example.com/")
+
+
+async def test_discord_pushes_when_the_invites_open_again() -> None:
+    w = watch("discord", name="Demo", url="https://discord.gg/demo")
+    first = await checked(w, invite("INVITES_DISABLED"), "application/json")
+    assert (first.outcome, first.summary, first.message) == (
+        "baseline",
+        "第一次检查：现在暂停邀请中，1200 人，开放时推送",
+        None,
+    )
+    w = then(w, first)
+    same = await checked(w, invite("INVITES_DISABLED", members=1201), "application/json")
+    assert (same.outcome, same.summary, same.message) == ("unchanged", "没有变化：暂停邀请中，1201 人", None)
+    opened = await checked(w, invite(), "application/json")
+    assert (opened.outcome, opened.summary, opened.changes) == ("changed", "开放加入了，1200 人", 1)
+    assert (
+        opened.message
+        == "「Demo」的 Discord 开放加入了，开放时间可能不长，要进趁现在：\nhttps://discord.gg/demo"
+    )
+    w = then(w, opened)
+    assert (await checked(w, invite(), "application/json")).message is None  # still open: told once
+    closed = await checked(w, invite("INVITES_DISABLED"), "application/json")
+    assert (closed.outcome, closed.summary, closed.message) == ("changed", "又暂停邀请了，1200 人", None)
+
+
+async def test_discord_first_check_pushes_when_already_open() -> None:
+    w = watch("discord", name="Demo", url="https://discord.gg/demo")
+    first = await checked(w, invite(), "application/json")
+    assert first.outcome == "baseline" and first.summary == "第一次检查：现在可以加入，1200 人"
+    assert first.message is not None and first.state == {"open": True, "server": "Demo 服务器"}
+
+
+@pytest.mark.parametrize(
+    ("body", "error"),
+    [("<html></html>", "Discord 返回的不是邀请信息"), ('{"code": "demo"}', "这个邀请不是加入服务器的邀请")],
+)
+async def test_discord_odd_answers(body: str, error: str) -> None:
+    with pytest.raises(WatchError, match=error):
+        await checked(watch("discord"), body, "application/json")

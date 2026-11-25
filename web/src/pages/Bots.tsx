@@ -46,7 +46,7 @@ export function Bots() {
       <SideError what="人设列表" error={personas.error} loaded={personas.data !== null} />
       <div className="grid items-start gap-4 lg:grid-cols-2">
         {bots.data.map((bot) => (
-          <BotCard key={bot.id} bot={bot} providers={providers.data} personas={personas.data} tones={tones.data} reload={reload} />
+          <BotCard key={bot.id} bot={bot} providers={providers.data} personas={personas.data} tones={tones.data} bots={bots.data ?? []} reload={reload} />
         ))}
       </div>
       <AddBot providers={providers.data} reload={reload} />

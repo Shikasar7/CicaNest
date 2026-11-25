@@ -9,8 +9,8 @@ Every half minute the accounts' newest messages are compared; there are two sign
   nothing missed. A healthy account misses a few in a row at most, one really cut off many more. Its own
   messages do not count (it is not sent those), a group it has left does not either, and neither does a
   connection younger than SETTLE, whose messages are still catching up.
-  Only accounts that see every message (sees_all) compare: 企业微信 is only told what @s it, so two of them
-  in a group getting different counts says nothing;
+  Only accounts that hear the same (comparable) compare: 企业微信 is only told what @s it, Telegram bots do
+  not see each other, so two of them in a group getting different counts says nothing;
 - a send failed the way NapCat's did that day (OneBotAdapter.stuck_send_at), and nothing arrived for QUIET
   up to now. Rare (that one line in a week of logs), so one is enough.
 
@@ -62,7 +62,7 @@ def missed(rows: list[dict[str, Any]], account: str, self_id: str, after: float)
         for row in rows
         if row["kind"] == "group"
         and row["account_id"] != account
-        and can(row["account_id"], "sees_all")
+        and can(row["account_id"], "comparable")
         and row["sent_at"] > after
         and row["sender_id"] != self_id
     )
@@ -138,7 +138,7 @@ class DeafWatch:
     async def _left_out(
         self, rows: list[dict[str, Any]], view: dict[str, Any], adapter: Any, after: float
     ) -> str:
-        if not can(view["id"], "sees_all"):
+        if not can(view["id"], "comparable"):
             return ""
         most = missed(rows, view["id"], view["self_id"], after)
         loud = {group: count for group, count in most.items() if count >= MISSED}

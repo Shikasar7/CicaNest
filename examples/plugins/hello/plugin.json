@@ -1,0 +1,13 @@
+{
+  "id": "example.hello",
+  "version": "1.0.0",
+  "name": "打招呼",
+  "author": "example",
+  "description": "一个最小的示例插件：教伙伴怎么好好打个招呼。",
+  "nest": "0.5.0",
+  "provides": {
+    "skills": [
+      "skills/hello.md"
+    ]
+  }
+}

@@ -11,6 +11,7 @@ import calendar
 import difflib
 import hashlib
 import io
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -352,7 +353,71 @@ def check_price(watch: Watch, page: Page) -> Check:
     )
 
 
-CHECKS = {"feed": check_feed, "page": check_page, "price": check_price}
+# -- Discord invites ------------------------------------------------------------------------------------
+# A server that pauses its invites ("暂停邀请") gets the INVITES_DISABLED feature; anyone may read an invite
+# through Discord's public API, so the pause and the reopening show there the moment they happen.
+
+DISCORD_INVITE = re.compile(
+    r"(?:https?://)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com/invite)/([A-Za-z0-9-]{2,64})/?", re.ASCII
+)
+DISCORD_CODE = re.compile(r"[A-Za-z0-9-]{2,64}", re.ASCII)
+DISCORD_API = "https://discord.com/api/v10/invites/{code}?with_counts=true"
+INVITES_PAUSED = "INVITES_DISABLED"
+INVITE_GONE = "邀请链接失效了：过期了，或者服务器换了新链接。找到新链接后改一下这里的地址"
+
+
+def invite_code(text: str) -> str | None:
+    """The code of a Discord invite link (discord.gg/abc, discord.com/invite/abc) or of a bare code."""
+    text = text.strip()
+    match = DISCORD_INVITE.fullmatch(text)
+    if match is not None:
+        return match.group(1)
+    return text if DISCORD_CODE.fullmatch(text) else None
+
+
+def invite_link(code: str) -> str:
+    return f"https://discord.gg/{code}"
+
+
+def invite_api(url: str) -> str:
+    code = invite_code(url)
+    if code is None:
+        raise WatchError("这不是 Discord 邀请链接，要写成 https://discord.gg/邀请码")
+    return DISCORD_API.format(code=code)
+
+
+def check_discord(watch: Watch, page: Page) -> Check:
+    try:
+        data = json.loads(page.text)
+    except ValueError:
+        raise WatchError("Discord 返回的不是邀请信息") from None
+    guild = data.get("guild") if isinstance(data, dict) else None
+    if not isinstance(guild, dict):
+        raise WatchError("这个邀请不是加入服务器的邀请")
+    features = guild.get("features")
+    is_open = not (isinstance(features, list) and INVITES_PAUSED in features)
+    members = data.get("approximate_member_count")
+    count = f"，{members} 人" if isinstance(members, int) else ""
+    now = "可以加入" if is_open else "暂停邀请中"
+    state = {"open": is_open, "server": str(guild.get("name") or "")[:TITLE_CHARS]}
+    message = f"「{watch.name}」的 Discord 开放加入了，开放时间可能不长，要进趁现在：\n{watch.url}"
+    was_open = watch.state.get("open")
+    if not isinstance(was_open, bool):
+        # The first check pushes only when it is open already: that is what the watch is for.
+        return Check(
+            "baseline",
+            f"第一次检查：现在{now}{count}" + ("" if is_open else "，开放时推送"),
+            message=message if is_open else None,
+            state=state,
+        )
+    if is_open == was_open:
+        return Check("unchanged", f"没有变化：{now}{count}", state=state)
+    if is_open:
+        return Check("changed", f"开放加入了{count}", changes=1, message=message, state=state)
+    return Check("changed", f"又暂停邀请了{count}", changes=1, state=state)
+
+
+CHECKS = {"feed": check_feed, "page": check_page, "price": check_price, "discord": check_discord}
 
 
 def evaluate(watch: Watch, page: Page) -> Check:

@@ -88,8 +88,12 @@ class MessageStore:
         channel = await self.channel_id(event.channel)
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                f"""UPDATE messages SET recalled_at = ? WHERE channel_id = ? AND external_id = ?
-                    AND recalled_at IS NULL RETURNING {MESSAGE_COLUMNS}""",
+                # What was said in the desk chat (ids "app:…") is taken back for good: its words go too.
+                f"""UPDATE messages SET recalled_at = ?,
+                        text = CASE WHEN external_id LIKE 'app:%' THEN '' ELSE text END,
+                        segments = CASE WHEN external_id LIKE 'app:%' THEN '[]' ELSE segments END
+                    WHERE channel_id = ? AND external_id = ?
+                      AND recalled_at IS NULL RETURNING {MESSAGE_COLUMNS}""",
                 (event.timestamp, channel, event.message_id),
             )
             row = await cursor.fetchone()
@@ -186,6 +190,21 @@ class MessageStore:
             found.update((row["id"], message_dict(row)) for row in rows)
         newest = sorted(found.values(), key=lambda row: (row["sent_at"], row["id"]))[-limit:]
         return newest
+
+    async def find(self, channel: int, words: list[str], *, limit: int = 50) -> list[dict[str, Any]]:
+        """Looking through a chat: the newest messages of a channel whose text has every one of `words`,
+        newest first. Recalled ones are left out."""
+        likes = [f"%{_escape_like(word)}%" for word in words if word.strip()]
+        if not likes:
+            return []
+        matches = " AND ".join("text LIKE ? ESCAPE '\\'" for _ in likes)
+        rows = await self.db.fetchall(
+            f"""SELECT {MESSAGE_COLUMNS} FROM messages
+                WHERE channel_id = ? AND recalled_at IS NULL AND {matches}
+                ORDER BY sent_at DESC, id DESC LIMIT ?""",
+            (channel, *likes, limit),
+        )
+        return [message_dict(row) for row in rows]
 
     async def message(self, message_id: int) -> dict[str, Any] | None:
         row = await self.db.fetchone(f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?", (message_id,))

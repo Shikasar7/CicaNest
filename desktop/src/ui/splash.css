@@ -61,17 +61,6 @@ body {
   min-height: 36px;
 }
 
-.mark rect {
-  stroke: transparent;
-  stroke-width: 1;
-}
-
-@media (prefers-color-scheme: dark) {
-  .mark rect {
-    stroke: rgba(231, 235, 238, 0.1);
-  }
-}
-
 .brand {
   display: flex;
   flex-direction: column;

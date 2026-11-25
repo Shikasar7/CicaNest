@@ -185,6 +185,50 @@ def _status_failure(service: Service, response: httpx.Response) -> SpeechError:
     return SpeechError(f"{LABELS[service.id]} HTTP {response.status_code}：{words}（{said}）")
 
 
+LISTEN_TIMEOUT = 60.0
+LISTEN_LABEL = "语音转写"
+
+
+async def transcribe(
+    base_url: str,
+    key: str,
+    model: str,
+    audio: bytes,
+    filename: str,
+    *,
+    proxy: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
+    """语音输入: what was said, from an OpenAI-compatible /audio/transcriptions (Whisper and the like).
+    SpeechError says why not, without the key."""
+    url = f"{base_url.rstrip('/')}/audio/transcriptions"
+    headers = {"authorization": f"Bearer {key}"} if key else {}
+    async with client(timeout=LISTEN_TIMEOUT, proxy=proxy, transport=transport) as http:
+        try:
+            response = await http.post(
+                url,
+                headers=headers,
+                data={"model": model, "response_format": "json"},
+                files={"file": (filename, audio, "application/octet-stream")},
+            )
+        except httpx.HTTPError as exc:
+            if isinstance(exc, httpx.TimeoutException):
+                raise SpeechError(f"连不上{LISTEN_LABEL}：等了太久没有回应，检查网络和代理") from None
+            raise SpeechError(f"连不上{LISTEN_LABEL}：{type(exc).__name__}，检查网络和代理") from None
+    if response.status_code >= 400:
+        said = scrub(response.text[:120], key).strip()
+        words = STATUS_TEXT.get(response.status_code, "服务暂时异常")
+        raise SpeechError(f"{LISTEN_LABEL} HTTP {response.status_code}：{words}（{said}）")
+    try:
+        data = response.json()
+    except ValueError:
+        raise SpeechError(f"{LISTEN_LABEL}的回应看不懂") from None
+    text = data.get("text") if isinstance(data, dict) else None
+    if not isinstance(text, str):
+        raise SpeechError(f"{LISTEN_LABEL}的回应里没有文字")
+    return text.strip()
+
+
 async def synth(
     service: Service, voice: str, text: str, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> bytes:

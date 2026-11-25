@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { ArrowDown, FolderOpen, Search } from 'lucide-react'
 
 import { AccountConnections } from '@/components/AccountConnections'
+import { AppearanceSettings } from '@/components/Appearance'
 import { FirstLoad, StaleNotice } from '@/components/Feedback'
 import { QRLogin } from '@/components/QRLogin'
 import { RemoteAccess } from '@/components/RemoteAccess'
@@ -144,7 +145,7 @@ function QQLogin({ url, onThisMachine }: { url: string; onThisMachine: boolean }
   )
 }
 
-/** A NapCat account's 回退密码: typed here, only its MD5 kept on the Mac. Saving makes the container again, so
+/** A NapCat account's 回退密码: typed here, only its MD5 kept on nest's machine. Saving makes the container again, so
  * the account drops for a few seconds. */
 function PasswordForm({ box, who, onDone }: { box: QQContainer; who: string; onDone: () => void }) {
   const id = useId()
@@ -198,7 +199,7 @@ function PasswordForm({ box, who, onDone }: { box: QQContainer; who: string; onD
       </div>
       <p className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')} role={error ? 'alert' : undefined}>
         {error ||
-          `${box.password_set ? '已经设了回退密码，再保存会换成新的。' : ''}保存的登录失效时，QQ 先用这个密码登录，不行再出二维码。Mac 上只存密码的 MD5，不存密码本身，但拿到它也能登录这个号。账号被冻结、要人脸验证时它帮不上忙。保存或清除都会重建容器，这个号断开十几秒，登录状态不丢。`}
+          `${box.password_set ? '已经设了回退密码，再保存会换成新的。' : ''}保存的登录失效时，QQ 先用这个密码登录，不行再出二维码。nest 那台电脑上只存密码的 MD5，不存密码本身，但拿到它也能登录这个号。账号被冻结、要人脸验证时它帮不上忙。保存或清除都会重建容器，这个号断开十几秒，登录状态不丢。`}
       </p>
     </form>
   )
@@ -316,7 +317,7 @@ function Services({ system, reload }: { system: SystemView; reload: () => void }
   const stopSnow = () => {
     const what = inDocker
       ? `停止 SnowLuma 容器（${sl.container}）？里面的 QQ 也会一起停下，bot 全部断开，直到再次启动。登录状态会保留。`
-      : '停止 SnowLuma？三个 bot 和主号的连接都会断开，直到再次启动。QQ 本身不会退出。'
+      : '停止 SnowLuma？用它的 bot 都会断开，直到再次启动。QQ 本身不会退出。'
     if (!window.confirm(what)) return
     void snow.run('stop', () => sendJson('POST', '/api/system/snowluma/stop'))
   }
@@ -756,6 +757,9 @@ export function System() {
           <DesktopOptions />
         </Section>
       )}
+      <Section title="外观">
+        <AppearanceSettings />
+      </Section>
       <Section title="远程访问">
         <RemoteAccess />
       </Section>

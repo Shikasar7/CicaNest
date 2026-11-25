@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from nest.core import tones
-from nest.core.prompt import build_answer_prompt, build_private_prompt, build_prompt
+from nest.core.prompt import NAMING, build_answer_prompt, build_private_prompt, build_prompt
 from nest.knowledge.investigate import build_messages
 
 ROW = {
@@ -90,3 +90,13 @@ def test_the_source_reading_prompt_takes_the_tone_too() -> None:
         tone=onee,
     )
     assert onee.manner in system.content and "不分点、不加小标题和客套话" in system.content
+
+
+def test_group_replies_and_answers_ask_for_fewer_names() -> None:
+    """Models open every group reply with the person's name, and sometimes the wrong person's."""
+    kwargs: dict[str, Any] = {"persona": "你是阿鲸。", "bot_name": "阿鲸", "context": [], "batch": [ROW]}
+    group_system, _ = build_prompt(**kwargs, called={1}, peers={})
+    answer_system, _ = answer(tones.BUILTIN_BY_KEY[tones.DEFAULT_ANSWER])
+    private_system, _ = build_private_prompt(**kwargs)
+    assert NAMING in group_system.content and NAMING in answer_system
+    assert NAMING not in private_system.content  # one person: no one to mix up

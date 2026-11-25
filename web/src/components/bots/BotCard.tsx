@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react'
-import { Activity, Camera, Cpu, MessageCircle, Users } from 'lucide-react'
+import { Activity, Camera, Cpu, Drama, MessageCircle, Plug, Users } from 'lucide-react'
 
 import { AddGroup } from '@/components/bots/AddGroup'
 import { AddPrivate } from '@/components/bots/AddPrivate'
@@ -8,6 +8,8 @@ import { AvatarPicker } from '@/components/bots/AvatarPicker'
 import { BotForm } from '@/components/bots/BotForm'
 import { ChannelRow } from '@/components/bots/ChannelRow'
 import { ModelPanel } from '@/components/bots/ModelPanel'
+import { MoveIn } from '@/components/bots/MoveIn'
+import { PersonaSets } from '@/components/bots/PersonaSets'
 import { Section } from '@/components/bots/Section'
 import { BotGlyph } from '@/components/BotGlyph'
 import { MODES, OUTCOMES, botForm, isPrivate, useAction } from '@/components/bots/shared'
@@ -38,6 +40,14 @@ function countText(channels: BotChannel[], unit: string): string {
   return `${channels.length} ${unit}` + (off ? `，${off} 个关着` : '')
 }
 
+/** What the section header says: the set in use, if any. */
+function personaSetsSummary(bot: Bot): string {
+  const sets = bot.persona_sets ?? []
+  if (sets.length === 0) return '还没有方案'
+  const current = sets.find((s) => s.current)
+  return current ? `正在用「${current.name}」` : `${sets.length} 个方案，现在的搭配没存过`
+}
+
 function ForeignWarning({ bot }: { bot: Bot }) {
   if (!bot.foreign_at) return null // the backend only reports sightings from the last 30 minutes
   return (
@@ -58,12 +68,15 @@ export function BotCard({
   providers,
   personas,
   tones,
+  bots,
   reload,
 }: {
   bot: Bot
   providers: ProviderView[] | null
   personas: Persona[] | null
   tones: Tone[] | null
+  /** All of them: where a companion of the desk may move in. */
+  bots: Bot[]
   reload: () => void
 }) {
   const { busy, error, run } = useAction(reload)
@@ -75,7 +88,9 @@ export function BotCard({
   const { data: platforms } = usePlatforms()
   const platform = platformOf(bot, platforms)
   const status = accounts.find((a) => a.id === bot.id)?.status
-  const online = status?.state === 'connected'
+  // 只在桌面上的伙伴: no connection to be up or down, and no groups or platform private chats.
+  const deskOnly = bot.platform === 'desk'
+  const online = deskOnly || status?.state === 'connected'
   const [picking, setPicking] = useState(false)
   const groups = bot.channels.filter((c) => !isPrivate(c))
   const privates = bot.channels.filter(isPrivate)
@@ -106,7 +121,7 @@ export function BotCard({
           {bot.name}
         </CardTitle>
         <CardDescription className="break-words">
-          {platform?.label ?? 'QQ'} {bot.self_id}，叫到这些名字算点名：{names}
+          {deskOnly ? '只在桌面上，在「聊天」页和她聊' : `${platform?.label ?? 'QQ'} ${bot.self_id}`}，叫到这些名字算点名：{names}
           {status?.state === 'deaf' && <span className="mt-1 block text-destructive">{status.detail}</span>}
         </CardDescription>
         {!draft.editing && (
@@ -180,6 +195,15 @@ export function BotCard({
           {/* Keyed by model: a 测试一下 result belongs to the model it tested. */}
           <ModelPanel key={bot.provider_id ?? ''} bot={bot} />
         </Section>
+        <Section id={`${bot.id}.persona-sets`} title="人设方案" Icon={Drama} summary={personaSetsSummary(bot)}>
+          <PersonaSets bot={bot} personas={personas} reload={reload} />
+        </Section>
+        {deskOnly && (
+          <Section id={`${bot.id}.move-in`} title="平台账号" Icon={Plug} summary="只在桌面上">
+            <MoveIn bot={bot} bots={bots} reload={reload} />
+          </Section>
+        )}
+        {!deskOnly && (
         <Section id={`${bot.id}.groups`} title="群" Icon={Users} summary={countText(groups, '个群')}>
           <div className="space-y-2">
             {groups.length === 0 ? (
@@ -194,7 +218,13 @@ export function BotCard({
             <AddGroup bot={bot} personas={personas} reload={reload} />
           </div>
         </Section>
-        <Section id={`${bot.id}.private`} title="私聊" Icon={MessageCircle} summary={countText(privates, '个人')}>
+        )}
+        <Section
+          id={`${bot.id}.private`}
+          title={deskOnly ? '和你的聊天' : '私聊'}
+          Icon={MessageCircle}
+          summary={deskOnly ? '人设、语气、长期记忆' : countText(privates, '个人')}
+        >
           <div className="space-y-2">
             {privates.length === 0 ? (
               <p className="py-2 text-sm text-muted-foreground">不回任何人的私聊</p>
@@ -205,7 +235,7 @@ export function BotCard({
                 ))}
               </ul>
             )}
-            <AddPrivate bot={bot} personas={personas} reload={reload} />
+            {!deskOnly && <AddPrivate bot={bot} personas={personas} reload={reload} />}
           </div>
         </Section>
       </CardContent>

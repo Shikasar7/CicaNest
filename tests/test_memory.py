@@ -11,8 +11,9 @@ from datetime import date
 
 import pytest
 
-from nest.core.memory import MemoryKeeper, clean_content, clean_due, render_recall
-from nest.core.prompt import build_prompt
+from nest.core.desk import MAX_CHARS
+from nest.core.memory import LINE_MAX, READ_MAX, MemoryKeeper, clean_content, clean_due, render_recall
+from nest.core.prompt import build_prompt, first_part
 from nest.storage.memories import MemoryStore
 from nest.storage.settings import SettingsRepo
 from tests.test_bot_settings_api import WHALE as API_WHALE
@@ -136,6 +137,37 @@ async def test_the_next_run_reads_only_new_messages_and_may_change_what_it_learn
     assert {m["content"] for m in await kit.store.of_place(KEY)} == {"现在更喜欢狗", "在雾港上班（主人改过）"}
 
 
+async def test_long_messages_of_the_desk_chat_are_read_to_their_end(kit: Kit) -> None:
+    long = "字" * (MAX_CHARS - 1) + "完"
+    await kit.w.say(long, sender=STAR, name="阿星", accounts=["10001"])
+    await kit.chat()
+    kit.model().queue(ops())  # type: ignore[attr-defined]
+    await kit.keeper.learn(KEY, force=True)
+    said = kit.model().requests[-1][1].content  # type: ignore[attr-defined]
+    assert said.count("字") == LINE_MAX and "完" not in said  # elsewhere only the beginning
+
+
+async def test_a_lot_of_long_talk_takes_several_runs(kit: Kit) -> None:
+    for n in range(20):
+        await kit.w.say(f"第{n}段" + "字" * 3900 + "完", sender=STAR, name="阿星", accounts=["10001"])
+    async with kit.w.db.transaction() as conn:
+        await conn.execute("UPDATE messages SET external_id = 'app:' || external_id")
+    read = []
+    for _ in range(2):
+        kit.model().queue(ops())  # type: ignore[attr-defined]
+        assert not (await kit.keeper.learn(KEY, force=True))["error"]
+        read.append(kit.model().requests[-1][1].content)  # type: ignore[attr-defined]
+    assert read[0].count("完") == 10 and len(read[0]) < READ_MAX + 500
+    assert read[1].count("完") == 10 and "第10段" in read[1] and "第9段" not in read[1]
+
+
+def test_what_was_said_in_one_moment_is_read_together() -> None:
+    rows = [{"text": "字" * 10, "sent_at": at} for at in (1.0, 2.0, 2.0, 3.0)]
+    assert len(first_part(rows, lambda _: 10, 20)) == 3
+    assert len(first_part(rows, lambda _: 10, 1)) == 1 and first_part([], lambda _: 10, 1) == []
+    assert len(first_part(rows, lambda _: 5, 20)) == 4
+
+
 async def test_a_bad_answer_is_read_again_next_time(kit: Kit) -> None:
     await kit.chat()
     kit.model().queue("我看不出什么")  # type: ignore[attr-defined]
@@ -221,6 +253,21 @@ async def test_old_promises_and_too_many_memories_are_forgotten(kit: Kit) -> Non
     assert removed == 4 and {"刚过两天", "主人写的"} <= left
     assert "早就过了" not in left and "很久没提" not in left
     assert "喜好0" not in left and "喜好1" not in left and "喜好13" in left
+
+
+async def test_what_the_user_added_does_not_take_the_room_of_what_she_learns(kit: Kit) -> None:
+    now = time.time()
+    add = kit.store.add
+    for i in range(12):  # a companion brought in with a dozen points of the user's own
+        await add(KEY, MOON, "阿月", "fact", f"主人写的{i}", source="manual", at=now - 1000)
+    for i in range(9):
+        await add(KEY, MOON, "阿月", "promise", f"约好的{i}", bot_id=WHALE, source="manual", at=now - 1000)
+    for i in range(3):
+        await add(KEY, MOON, "阿月", "like", f"学到的{i}", at=now + i)
+    await add(KEY, MOON, "阿月", "promise", "学到的约定", bot_id=WHALE, at=now)
+    assert await kit.keeper.tidy(now) == 0
+    left = {m["content"] for m in await kit.store.of_place(KEY)}
+    assert {"学到的0", "学到的2", "学到的约定", "主人写的0", "约好的8"} <= left
 
 
 # -- console --------------------------------------------------------------------------------------
