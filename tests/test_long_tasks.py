@@ -42,10 +42,45 @@ async def test_a_long_task_is_folded_into_a_summary(
     assert [s["kind"] for s in done["log"]] == ["tool", "tool", "tool", "fold"]
     asked, after = model(world).requests[-2:]
     assert "整理成一份给自己接着做用的小结" in asked[0].content and "甲" in asked[0].content
+    assert "现在没有设着的提醒" not in asked[0].content  # the latest step stays as it is
     # It starts over from the summary and the step just made, as records.
     assert "找甲、乙、提醒" in after[1].content and "甲没有，乙没有。››› 还要看提醒" in after[1].content
-    assert "list_reminders：没有提醒" not in asked[0].content and "现在没有设着的提醒" in after[1].content
+    assert "现在没有设着的提醒" in after[1].content
     assert model(world).rounds[-1] == []  # a new conversation: nothing handed back
+
+
+async def test_what_is_folded_is_all_she_read(
+    world: World,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """More than what is stored of a step goes into the summary: it is all that is left of it afterwards."""
+    monkeypatch.setattr(tasks_module, "FOLD_TOKENS", 10)
+    chat = await claude_chat(world)
+    for_task = world.state.brain.tools.for_task
+
+    def long_answers(*args: Any, **kwargs: Any) -> Any:
+        tools, _ = for_task(*args, **kwargs)
+
+        async def run(name: str, given: dict[str, Any]) -> str:
+            return f"{given['keywords'][0]}：" + "长" * 5000 + "（末尾）"
+
+        return tools, run
+
+    monkeypatch.setattr(world.state.brain.tools, "for_task", long_answers)
+    words = "甲乙丙丁戊"
+    model(world).queue(
+        *[Asks("search_chat", {"keywords": [w]}) for w in words[:3]],
+        "甲和乙的要点。",
+        *[Asks("search_chat", {"keywords": [w]}) for w in words[3:]],
+        "丙和丁的要点。",
+        "都看完了。",
+    )
+    task_id = await _begin(world, chat, "找东西", "找这几样")
+    done = await eventually(lambda: _status(world, task_id, "done"))
+    assert done["report"] == "都看完了。" and [s["kind"] for s in done["log"]].count("fold") == 2
+    first, second = [r[0].content for r in model(world).requests if "整理成一份" in r[0].content]
+    assert first.count("（末尾）") == 2 and "丙：" not in first
+    assert second.count("（末尾）") == 2 and "甲和乙的要点。" in second and "甲：" not in second
 
 
 async def test_a_task_waiting_for_the_pc_takes_no_place(world: World) -> None:  # noqa: F811

@@ -34,6 +34,8 @@ from nest.storage.settings import SettingsRepo
 log = logging.getLogger(__name__)
 
 SETTING = "life"  # {"on": bool}
+ROOMS_SETTING = "life_rooms"  # room -> its furniture, walls and floor, as the user wants them (the 3D 小窝)
+BEDROOM_OF = "卧室:"  # and whose it is
 SHARED_ROOMS = ("客厅", "厨房", "书房", "阳台")
 BEDROOM = "卧室"  # each companion's own
 ROOMS = (*SHARED_ROOMS, BEDROOM)
@@ -296,6 +298,7 @@ class LifeKeeper:
         self.clock = clock
         self._task: asyncio.Task[None] | None = None
         self._planning = asyncio.Lock()
+        self._furnishing = asyncio.Lock()
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._loop(), name="life")
@@ -538,6 +541,25 @@ class LifeKeeper:
     async def forget(self, moment_id: int) -> None:
         async with self.db.transaction() as conn:
             await conn.execute("DELETE FROM life_moments WHERE id = ?", (moment_id,))
+        self._changed()
+
+    def is_room(self, room: str) -> bool:
+        return room in SHARED_ROOMS or (
+            room.startswith(BEDROOM_OF) and room.removeprefix(BEDROOM_OF) in self.bots()
+        )
+
+    async def furnished(self) -> dict[str, Any]:
+        value = (await SettingsRepo(self.db).all()).get(ROOMS_SETTING)
+        rooms = value if isinstance(value, dict) else {}
+        return {room: wanted for room, wanted in rooms.items() if self.is_room(room)}
+
+    async def furnish(self, room: str, wanted: dict[str, Any] | None) -> None:
+        async with self._furnishing:
+            rooms = await self.furnished()
+            rooms.pop(room, None)
+            if wanted is not None:
+                rooms[room] = wanted
+            await SettingsRepo(self.db).set_many({ROOMS_SETTING: rooms})
         self._changed()
 
     async def view(self) -> dict[str, Any]:

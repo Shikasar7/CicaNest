@@ -34,7 +34,7 @@ from nest.core.sandbox import Sandbox
 from nest.core.workspace import RECEIVED, Workspace, WorkspaceError
 from nest.llm.base import Tool, ToolRunner
 from nest.storage.bots import BotChannel, BotConfig
-from nest.watch.check import visible_lines
+from nest.watch.check import reading_lines
 from nest.watch.fetch import PrivateAddress, WatchError, fetch
 
 log = logging.getLogger(__name__)
@@ -949,7 +949,7 @@ class CompanionTools:
         except WatchError as exc:
             return f"没读到：{exc}"
         if "html" in page.content_type or page.text.lstrip()[:1] == "<":
-            text = "\n".join(visible_lines(page.text, ""))
+            text = "\n".join(reading_lines(page.text))
         else:
             text = page.text
         if not text.strip():

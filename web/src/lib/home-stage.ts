@@ -6,7 +6,8 @@ export type Pose = 'stand' | 'sit' | 'lie'
 /** Where she can be in a room: her feet, in units of a 320×180 room (y goes down). */
 export type Spot = { x: number; y: number; pose: Pose }
 
-export type Occupant = { id: string; pose: Pose }
+/** `for`: what she is doing, if there are places for it (lib/dorm.ts). */
+export type Occupant = { id: string; pose: Pose; for?: string }
 
 export const ROOM_W = 320
 export const ROOM_H = 180
@@ -50,9 +51,10 @@ function turn(id: string): number {
   return n
 }
 
-/** A place for each of `people`: where she was (`before`) if that still suits what she does, else a free one for
- * her pose, else a free one to stand. Never two on one. `spots`: those of one room, the same objects each time. */
-export function seatOn<S extends { pose: Pose }>(
+/** A place for each of `people`: where she was (`before`) if that still suits what she does, else a free one to do
+ * it, else one for her pose, else one to stand. Never two on one. `spots`: those of one room, the same objects each
+ * time. Places that are for something (`for`) and to stand at are only for who does it. */
+export function seatOn<S extends { pose: Pose; for?: readonly string[] }>(
   spots: S[],
   people: Occupant[],
   before: Record<string, S> = {},
@@ -63,14 +65,25 @@ export function seatOn<S extends { pose: Pose }>(
     places[id] = spot
     taken.add(spot)
   }
-  for (const { id, pose } of people) {
-    const was = before[id]
-    if (was && was.pose === pose && spots.includes(was) && !taken.has(was)) put(id, was)
+  const suits = (spot: S, person: Occupant) => Boolean(person.for && spot.for?.includes(person.for))
+  const loose = (spot: S) => spot.pose !== 'stand' || !spot.for?.length
+  for (const person of people) {
+    const was = before[person.id]
+    if (!was || !spots.includes(was) || taken.has(was)) continue
+    const better = !suits(was, person) && spots.some((spot) => suits(spot, person) && !taken.has(spot))
+    if (suits(was, person) || (was.pose === person.pose && loose(was) && !better)) put(person.id, was)
+  }
+  for (const person of people) {
+    if (places[person.id]) continue
+    // What it is mainly for, and as she is: first; two at the same thing are together.
+    const rank = (spot: S) => (spot.for?.indexOf(person.for ?? '') ?? 0) + (spot.pose === person.pose ? 0 : 1)
+    const free = spots.filter((spot) => suits(spot, person) && !taken.has(spot))
+    if (free.length) put(person.id, free.reduce((best, spot) => (rank(spot) < rank(best) ? spot : best)))
   }
   for (const { id, pose } of people) {
     if (places[id]) continue
     for (const kind of INSTEAD[pose]) {
-      const free = spots.filter((spot) => spot.pose === kind && !taken.has(spot))
+      const free = spots.filter((spot) => spot.pose === kind && loose(spot) && !taken.has(spot))
       if (!free.length) continue
       put(id, free.includes(before[id]) ? before[id] : free[turn(id) % free.length])
       break

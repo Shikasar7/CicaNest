@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -63,6 +63,60 @@ class Settings(BaseModel):
     chatter_provider: str | None = None  # null: each one's own model (told apart with model_fields_set)
     life_provider: str | None = None
     rhythm: bool | None = None
+
+
+class Piece(BaseModel):
+    """A piece of furniture in a room of the 3D 小窝 (web/src/lib/dorm.ts)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Annotated[str, Field(pattern=r"^[a-z]{1,20}$")]
+    x: Annotated[int, Field(ge=0, le=40)]
+    z: Annotated[int, Field(ge=0, le=40)]
+    turn: Annotated[int, Field(ge=0, le=3)]
+
+
+class Hung(BaseModel):
+    """Something on a wall (web/src/lib/dorm-look.ts)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Annotated[str, Field(pattern=r"^[a-z]{1,20}$")]
+    wall: Literal["left", "right"]
+    at: Annotated[int, Field(ge=0, le=80)]
+    y: Annotated[int, Field(ge=0, le=20)]
+
+
+class Look(BaseModel):
+    """Its paper, its floor and what hangs there."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wall: Annotated[str, Field(pattern=r"^[a-z]{1,20}$")]
+    floor: Annotated[str, Field(pattern=r"^[a-z]{1,20}$")]
+    hung: Annotated[list[Hung], Field(max_length=30)]
+
+
+class Furnishing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pieces: Annotated[list[Piece], Field(max_length=60)] | None  # null: the room as it was
+    look: Look | None = None  # null: its walls and floor as they were
+
+
+@router.get("/rooms")
+async def rooms(request: Request) -> dict[str, Any]:
+    """How the user has furnished the rooms; a room not in it is as it comes."""
+    return {"rooms": await request.app.state.life.furnished()}
+
+
+@router.put("/rooms/{room}")
+async def furnish(request: Request, room: str, body: Furnishing) -> dict[str, Any]:
+    life = request.app.state.life
+    if not life.is_room(room):
+        raise HTTPException(status_code=404, detail="没有这个房间")
+    await life.furnish(room, None if body.pieces is None else body.model_dump())
+    return {"rooms": await life.furnished()}
 
 
 @router.get("/settings")

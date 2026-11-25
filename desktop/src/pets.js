@@ -103,7 +103,7 @@ function overlayArea(displays, primary) {
 }
 
 // What the 小窝 shows of a pet.
-const HOME_ACTIONS = ['idle', 'blink', 'smile', 'think', 'stretch', 'yawn', 'walk', 'wave', 'pout', 'sleep', 'happy', 'sit']
+const HOME_ACTIONS = ['idle', 'blink', 'smile', 'think', 'stretch', 'yawn', 'walk', 'wave', 'pout', 'sleep', 'happy', 'sit', 'work']
 const DOCK_SIDES = new Set(['left', 'right', 'top'])
 
 function cleanLines(lines) {

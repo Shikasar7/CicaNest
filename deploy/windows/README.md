@@ -1,6 +1,6 @@
 # 在 Windows 上部署 nest
 
-nest 直接跑在 Windows 上（uv 管 Python）。只用 Discord 或企业微信时，装好就能用；接 QQ 还要装 Docker Desktop，每个 QQ 号一个 NapCat 容器，由控制台创建和管理。
+nest 直接跑在 Windows 上（uv 管 Python）。只用 Discord、Telegram、Slack 或企业微信时，装好就能用；接 QQ 还要装 Docker Desktop，每个 QQ 号一个 NapCat 容器，由控制台创建和管理。
 
 > **风险**：NapCat 这类程序是用个人 QQ 号挂 bot，不是腾讯官方的机器人接口，违反 QQ 的用户协议。号可能被提示「风险设备」、限制功能甚至冻结。请用专门的小号，不要用主号。
 
@@ -28,6 +28,8 @@ npm run shortcuts   # 在桌面和开始菜单放「nest」快捷方式
 ```
 
 以后从快捷方式打开即可。想让 nest 随 Windows 启动，在托盘菜单里勾上「开机时自动启动」。
+
+nest 在另一台电脑上，或者不想装 Node.js 时，用 [Releases](https://github.com/Shikasar7/CicaNest/releases/latest) 里的 `nest-setup-版本.exe`：装好后填 nest 的地址（同一台电脑填 `127.0.0.1:18800`），用 `uv run nest set-password` 设的密码登录。它不启动也不停止 nest。自己打这个安装包：在 `desktop` 里运行 `npm run dist`。
 
 ## 三、接 QQ（Docker Desktop + NapCat）
 

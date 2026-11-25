@@ -267,10 +267,13 @@ class ProviderRuntime:
         max_tokens: int,
         state: Any = None,
         results: Sequence[tuple[ToolCall, str]] = (),
+        words_only: bool = False,
     ) -> tuple[Turn, int]:
         """One round of a conversation with tools (任务): (turn, llm_calls id). Only for a model that
         `can_use_tools`. Each round takes its own place in the queue, so a long task never holds the model
-        for long; a failed round is tried again like any call (nothing has been done yet in it)."""
+        for long; a failed round is tried again like any call (nothing has been done yet in it).
+        `words_only`: it may not ask for a tool this round (the tools are still named: the conversation so
+        far has calls to them)."""
         self._in_flight += 1
         self._idle.clear()
         try:
@@ -283,10 +286,17 @@ class ProviderRuntime:
                 )
             if not self.can_use_tools:
                 raise ProviderUnavailable(f"模型 {self.config.id} 不会用工具")
+            # A plugin's kind of model is not asked for it: its converse may be older than this.
+            only = {"words_only": True} if words_only and self.config.kind in KINDS else {}
             async with self._semaphore:
                 return await self._attempts(
                     lambda provider: provider.converse(  # type: ignore[attr-defined]
-                        messages, tools=tools, max_tokens=max_tokens, state=state, results=results
+                        messages,
+                        tools=tools,
+                        max_tokens=max_tokens,
+                        state=state,
+                        results=results,
+                        **only,
                     ),
                     bot_id,
                     sum(len(m.content) for m in messages) + sum(len(r) for _, r in results),

@@ -18,9 +18,9 @@ import { cn } from '@/lib/utils'
 const SHARED = ['客厅', '厨房', '书房', '阳台']
 const MINUTE = 60_000
 const VIEW_KEY = 'nest-home-view'
-const LivingRoom3D = lazy(() => import('@/components/chat/LivingRoom3D'))
+const Dorm3D = lazy(() => import('@/components/chat/Dorm3D'))
 
-/** The line drawings, or the 3D living room (a first look). */
+/** The line drawings, or in 3D. */
 function useView(): ['lines' | '3d', (view: 'lines' | '3d') => void] {
   const [view, setView] = useState<'lines' | '3d'>(() => (localStorage.getItem(VIEW_KEY) === '3d' ? '3d' : 'lines'))
   return [
@@ -209,7 +209,7 @@ export function Home({ onClose, onOpenChat }: { onClose: () => void; onOpenChat:
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
         <h2 className="text-base font-semibold">小窝</h2>
         <span className="text-xs text-muted-foreground">
@@ -220,7 +220,7 @@ export function Home({ onClose, onOpenChat }: { onClose: () => void; onOpenChat:
             {(
               [
                 ['lines', '线稿'],
-                ['3d', '3D 客厅（试）'],
+                ['3d', '3D（试）'],
               ] as const
             ).map(([key, name]) => (
               <button
@@ -300,16 +300,16 @@ export function Home({ onClose, onOpenChat }: { onClose: () => void; onOpenChat:
         </div>
       ) : (
         <div className="relative flex min-h-0 flex-1">
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+          <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto p-5">
             {residents.length === 0 && data && (
               <p className="rounded-2xl border border-dashed p-4 text-center text-sm text-muted-foreground">
                 还没有人住进来：会回话、有模型的伙伴才住在小窝里。
               </p>
             )}
             {view === '3d' ? (
-              <div className="flex h-[min(38rem,calc(100dvh-11rem))]">
+              <div className="flex h-[min(46rem,calc(100dvh-9.5rem))]">
                 <Suspense fallback={<LoaderCircle className="m-auto size-6 animate-spin text-muted-foreground" />}>
-                  <LivingRoom3D residents={residents} light={light} onPick={setPicked} />
+                  <Dorm3D residents={residents} light={light} onPick={setPicked} />
                 </Suspense>
               </div>
             ) : (

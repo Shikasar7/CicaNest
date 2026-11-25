@@ -58,10 +58,12 @@ WAITING_PER_BOT = 5  # queued or running, per companion
 ROUND_TOKENS = 4000  # what one round may write (a report can be long)
 # A long task: when a round's prompt has grown past this, what was done so far is folded into a summary and
 # the conversation starts over from it (the model's window is not filled, and each round stays cheap).
-FOLD_TOKENS = 24_000
-FOLD_WRITTEN = 1500  # tokens the summary may take
-FOLD_STEP_CHARS = 1500  # of each step's result, shown to the one who sums up
-FOLD_CHARS = 60_000
+FOLD_TOKENS = 16_000
+FOLD_WRITTEN = 2500  # tokens the summary may take
+FOLD_LIMIT = 1500  # characters of it, as asked
+FOLD_STEP_CHARS = 9000  # of each step's result, shown to the one who sums up
+RESUME_STEP_CHARS = 1000  # of each step's result, when a task goes on after a stop
+FOLD_CHARS = 100_000
 KEEP_DAYS = 30
 TITLE_MAX = 40
 GOAL_MAX = 2000
@@ -90,8 +92,13 @@ UNATTENDED = (
     "\n\n（这是到点自动开始的定时任务，对方现在不一定在：要对方点头的步骤做不了，"
     "遇到了就别再试，接着做能做的，在汇报里说清楚卡在哪、等对方回来处理什么。）"
 )
+REPORT = (
+    "你在后台替对方做一件事，{why}，但还没写汇报。按下面的步骤记录，直接用你自己的口吻写给对方：做到了哪、"
+    "结果是什么、还差什么；记录里没有的不要编。\n这件事：{title}\n{goal}\n\n{steps}"
+)
 FOLD = (
-    "把下面这些已经做过的步骤整理成一份给自己接着做用的小结：查到的事实（带来源网址和具体数字）、"
+    "把下面这些已经做过的步骤整理成一份给自己接着做用的小结。原文之后就看不到了，所以不要只写「查到了」，"
+    "把要用的具体内容逐条写下来：查到的事实（带来源网址和具体数字）、"
     "改过或写好的文件（路径）、已经排除的、还没做的。只写有用的，不要编，{limit} 字以内，不要写给对方的话。\n"
     "任务：{title}\n{goal}\n\n{steps}"
 )
@@ -124,7 +131,9 @@ def _steps_text(steps: list[dict[str, Any]]) -> str:
     lines = []
     for step in steps:
         if step["kind"] == "tool":
-            lines.append(f"- 用了 {step['tool']}（{step['given'][:200]}）→ {step['result'][:300]}")
+            lines.append(
+                f"- 用了 {step['tool']}（{step['given'][:200]}）→ {step['result'][:RESUME_STEP_CHARS]}"
+            )
         elif step["kind"] == "say":
             lines.append(f"- 你说：{step['result'][:300]}")
         elif step["kind"] == "note":
@@ -430,6 +439,7 @@ class TaskKeeper:
         steps, tokens, spent = task["steps"], task["tokens"], task["seconds"]
         state: Any = None
         results: list[tuple[ToolCall, str]] = []
+        read: dict[int, str] = {}  # what this run's steps answered, in full, till it is folded
         ending = ""
         while True:
             seconds = spent + self._clock() - started - waits.get(task["id"], 0.0)
@@ -456,6 +466,7 @@ class TaskKeeper:
                 max_tokens=ROUND_TOKENS,
                 state=state,
                 results=results,
+                words_only=bool(ending),
             )
             tokens += (turn.prompt_tokens or 0) + (turn.completion_tokens or 0)
             state, results = turn.state, []
@@ -473,6 +484,7 @@ class TaskKeeper:
                 self.broadcaster.publish("task_step", {"bot_id": bot.id, "id": task["id"]})
                 at = time.monotonic()
                 result = await run(call.name, call.given)
+                read[step] = result[:FOLD_STEP_CHARS]
                 await self.store.finish_step(step, result=result, ms=(time.monotonic() - at) * 1000)
                 results.append((call, result))
             added = await self.store.unseen_notes(task["id"])
@@ -480,9 +492,10 @@ class TaskKeeper:
                 call, last = results[-1]
                 results[-1] = (call, last + ADDED.format(text="；".join(n["result"] for n in added)))
             if full:
-                summary, used, folded_at = await self._fold(task, bot, runtime, folded_at, len(results))
+                summary, used, folded_at = await self._fold(task, bot, runtime, folded_at, len(results), read)
                 tokens += used
                 if summary:
+                    read = {step: text for step, text in read.items() if step >= folded_at}
                     fresh = brief + FOLDED.format(summary=_marked(summary, "小结"))
                     latest = "\n\n".join(f"{call.name}：{text}" for call, text in results)
                     fresh += LAST.format(results=latest)
@@ -498,6 +511,9 @@ class TaskKeeper:
             self.broadcaster.publish("task_step", {"bot_id": bot.id, "id": task["id"]})
 
         report = after_drafting(turn.text)[0].strip()
+        if not report:  # it wrote nothing (or asked for a tool all the same)
+            report, used = await self._report(task, bot, runtime, persona, ending or "已经做完了")
+            tokens += used
         if not report:
             how = "做到一半到了上限" if ending else "做完了"
             report = f"「{task['title']}」{how}，不过我没写出汇报，步骤都在任务记录里。"
@@ -514,27 +530,35 @@ class TaskKeeper:
         await self._tell(bot, channel, sent, also_qq=bool(task.get("also_qq")))
 
     async def _fold(
-        self, task: dict[str, Any], bot: BotConfig, runtime: Any, since: int, latest: int
+        self,
+        task: dict[str, Any],
+        bot: BotConfig,
+        runtime: Any,
+        since: int,
+        latest: int,
+        read: dict[int, str],
     ) -> tuple[str, int, int]:
-        """The steps from `since` on but the `latest` ones, summed up: (summary, tokens, where the next fold
-        starts). "" when there is nothing to fold or the model did not write one (the task then goes on
-        as it is)."""
+        """The steps from `since` on but the `latest` ones, summed up in a call of its own (asked for within
+        the task's conversation, a model takes it for the end and reports): (summary, tokens, where the next
+        fold starts). `read`: what the steps of this run answered, in full (less of it is stored). "" when
+        there is nothing to fold or the model did not write one (the task then goes on as it is)."""
         told = ("tool", "say", "note", "fold")
         done = [s for s in await self.store.steps(task["id"]) if s["kind"] in told and s["id"] >= since]
-        tools = [s for s in done if s["kind"] == "tool"]
-        kept = {s["id"] for s in tools[-latest:]}
+        made = [s for s in done if s["kind"] == "tool"]
+        kept = {s["id"] for s in made[-latest:]}
         old = [s for s in done if s["id"] not in kept]
         if sum(1 for s in old if s["kind"] == "tool") < 2:
             return "", 0, since
         lines = []
         for s in old:
             if s["kind"] == "tool":
-                lines.append(f"- 用了 {s['tool']}（{s['given'][:300]}）→ {s['result'][:FOLD_STEP_CHARS]}")
+                got = read.get(s["id"]) or s["result"]
+                lines.append(f"- 用了 {s['tool']}（{s['given'][:300]}）→ {got[:FOLD_STEP_CHARS]}")
             else:
                 name = {"say": "你说", "note": "对方追加", "fold": "更早的小结"}[s["kind"]]
                 lines.append(f"- {name}：{s['result'][:FOLD_STEP_CHARS]}")
         text = MATERIAL.format(what="做过的步骤", text=_plain("\n".join(lines))[-FOLD_CHARS:])
-        ask = FOLD.format(limit=800, title=task["title"], goal=task["goal"], steps=text)
+        ask = FOLD.format(limit=FOLD_LIMIT, title=task["title"], goal=task["goal"], steps=text)
         try:
             completion, _ = await runtime.complete(
                 [ChatMessage("user", ask)], bot_id=bot.id, max_tokens=FOLD_WRITTEN
@@ -549,6 +573,26 @@ class TaskKeeper:
         log.info("任务 %s 把 %d 步收成了小结", task["id"], len(old))
         await self.store.add_step(task["id"], "fold", result=summary)
         return summary, used, min(kept)
+
+    async def _report(
+        self, task: dict[str, Any], bot: BotConfig, runtime: Any, persona: str, why: str
+    ) -> tuple[str, int]:
+        """A report when the task ended without one: written from its steps, with no tools to ask for.
+        "" when that did not work either."""
+        told = ("tool", "say", "note", "fold")
+        steps = [s for s in await self.store.steps(task["id"]) if s["kind"] in told]
+        ask = REPORT.format(why=why, title=task["title"], goal=task["goal"], steps=_steps_text(steps))
+        try:
+            completion, _ = await runtime.complete(
+                [ChatMessage("system", persona), ChatMessage("user", ask)],
+                bot_id=bot.id,
+                max_tokens=FOLD_WRITTEN,
+            )
+        except (ProviderUnavailable, ProviderError) as exc:
+            log.info("任务 %s 没写成汇报（%s）", task["id"], exc)
+            return "", 0
+        used = (completion.prompt_tokens or 0) + (completion.completion_tokens or 0)
+        return after_drafting(completion.text)[0].strip(), used
 
     async def _tell(self, bot: BotConfig, channel: BotChannel, text: str, *, also_qq: bool = False) -> None:
         reminders = self.brain.reminders

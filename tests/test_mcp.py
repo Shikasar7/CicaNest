@@ -156,7 +156,8 @@ async def test_a_plugin_server_runs_in_its_own_container(world: World, tmp_path:
     # delete_city needs the user's nod: it waits, shown to every console, until they say no.
     (waiting,) = await eventually(lambda: _pending(world), timeout=15)
     assert (waiting["tool"], waiting["plugin_name"], waiting["bot_name"]) == ("delete_city", "天气", "阿鲸")
-    assert ("approval", {"id": waiting["id"], "bot_id": WHALE, "status": "pending"}) in world.events
+    told = ("approval", {"id": waiting["id"], "bot_id": WHALE, "status": "pending"})
+    await eventually(lambda: told in world.events)  # sent just after it is there to be listed
     said_no = await world.http.post(f"/api/approvals/{waiting['id']}", json={"choice": "deny"})
     assert said_no.status_code == 200
     assert (

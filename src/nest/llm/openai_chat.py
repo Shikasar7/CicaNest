@@ -234,6 +234,7 @@ class OpenAIChat:
         max_tokens: int,
         state: Any = None,
         results: Sequence[tuple[ToolCall, str]] = (),
+        words_only: bool = False,
     ) -> Turn:
         """One round with tools (任务): the caller runs what it asks for and hands back the results."""
         turns: list[dict[str, Any]] = (
@@ -252,6 +253,8 @@ class OpenAIChat:
         }
         if tools:
             body["tools"] = function_tools(tools)
+            if words_only:
+                body["tool_choice"] = "none"
         if self._temperature is not None:
             body["temperature"] = self._temperature
         headers = {"authorization": f"Bearer {self._key}"} if self._key else {}

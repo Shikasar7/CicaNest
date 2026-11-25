@@ -65,7 +65,9 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
 const ACTIVE: TaskStatus[] = ['queued', 'running', 'waiting_pc']
 const RESUMABLE: TaskStatus[] = ['failed', 'stopped', 'limit', 'interrupted']
 export const TOOL_LABEL: Record<string, string> = {
+  web_search: '联网搜索',
   read_page: '读网页',
+  read_skill: '看做法',
   set_reminder: '设提醒',
   list_reminders: '看提醒',
   change_reminder: '改提醒',

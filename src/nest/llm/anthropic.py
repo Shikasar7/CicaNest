@@ -250,6 +250,7 @@ class Anthropic:
         max_tokens: int,
         state: Any = None,
         results: Sequence[tuple[ToolCall, str]] = (),
+        words_only: bool = False,
     ) -> Turn:
         if state is None:
             system, turns = request_parts(messages)
@@ -280,6 +281,8 @@ class Anthropic:
                 {"name": t.name, "description": t.description, "input_schema": dict(t.parameters)}
                 for t in tools
             ]
+            if words_only:
+                body["tool_choice"] = {"type": "none"}
         started = time.monotonic()
         data = await self._post(body, SEARCH_TIMEOUT)
         content = data.get("content")

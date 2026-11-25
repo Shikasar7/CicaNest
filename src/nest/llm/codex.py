@@ -372,6 +372,7 @@ class Codex:
         max_tokens: int,
         state: Any = None,
         results: Sequence[tuple[ToolCall, str]] = (),
+        words_only: bool = False,
     ) -> Turn:
         """One round with tools (任务). Nothing is stored on their side (store: false), so the state is the
         whole input so far, the encrypted reasoning included."""
@@ -413,7 +414,7 @@ class Codex:
                 }
                 for t in tools
             ]
-            body["tool_choice"] = "auto"
+            body["tool_choice"] = "none" if words_only else "auto"
             body["include"] = ["reasoning.encrypted_content"]
         started = time.monotonic()
         response = await self._post(body, SEARCH_TIMEOUT)

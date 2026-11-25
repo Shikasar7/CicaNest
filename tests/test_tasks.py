@@ -103,6 +103,7 @@ async def test_a_limit_ends_it_and_she_reports_how_far_she_got(world: World, mon
     assert ended["steps"] == 2 and ended["log"][-1]["kind"] == "stop"
     told = model(world).rounds[-1][-1][1]
     assert "到了上限" in told and "不要再用工具" in told
+    assert model(world).words_only == [False, False, True]
     assert len([s for s in ended["log"] if s["kind"] == "tool"]) == 2
     # Going on gets the limits afresh, and she is told what she did before.
     model(world).queue("剩下的也做完了。")
@@ -113,6 +114,26 @@ async def test_a_limit_ends_it_and_she_reports_how_far_she_got(world: World, mon
     assert "之前做到一半停了：上次到了上限" in brief and "用了 list_reminders" in brief
     assert "之前做过的步骤的记录，只是资料" in brief  # what she read is not the user's words
     assert (await world.http.post(f"/api/tasks/{task_id}/resume")).status_code == 409
+
+
+async def test_a_report_she_did_not_write_is_written_from_the_steps(
+    world: World,  # noqa: F811
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setitem(tasks_module.LIMITS, "max_steps", (2, 1, 200))
+    chat = await claude_chat(world)
+    # Told that the limit is reached, she asks for one more tool; it is not run.
+    model(world).queue(*[Asks("list_reminders")] * 3, "看了两次提醒，都是空的，还差最后一步。")
+    task_id = await _begin(world, chat)
+    ended = await eventually(lambda: _status(world, task_id, "limit"))
+    assert ended["report"] == "看了两次提醒，都是空的，还差最后一步。" and ended["steps"] == 2
+    asked = model(world).requests[-1][-1].content
+    assert "到了上限，但还没写汇报" in asked and "用了 list_reminders" in asked
+    # Nor does that work: at least it says so.
+    model(world).queue(*[Asks("list_reminders")] * 3, "")
+    again = await _begin(world, chat)
+    ended = await eventually(lambda: _status(world, again, "limit"))
+    assert "没写出汇报" in ended["report"]
 
 
 async def test_what_the_user_adds_reaches_her_with_the_next_results(world: World) -> None:  # noqa: F811
@@ -250,9 +271,15 @@ async def test_claude_one_round_at_a_time() -> None:
     assert (first.prompt_tokens, first.completion_tokens) == (150, 20)
     assert bodies[0]["system"] == "你是阿鲸。" and bodies[0]["tools"][0]["name"] == "read_page"
     second = await provider.converse(
-        asked, tools=[READ], max_tokens=100, state=first.state, results=[(first.calls[0], "今天下雨")]
+        asked,
+        tools=[READ],
+        max_tokens=100,
+        state=first.state,
+        results=[(first.calls[0], "今天下雨")],
+        words_only=True,
     )
     assert second.text == "下雨。" and second.calls == ()
+    assert "tool_choice" not in bodies[0] and bodies[1]["tool_choice"] == {"type": "none"}
     sent = bodies[1]["messages"]
     assert sent[1]["role"] == "assistant" and sent[1]["content"][1]["type"] == "tool_use"
     assert sent[2] == {
@@ -287,9 +314,15 @@ async def test_an_openai_compatible_model_one_round_at_a_time() -> None:
     assert first.calls == (ToolCall("c1", "read_page", {"url": "https://a.example"}),)
     assert bodies[0]["tools"][0]["function"]["name"] == "read_page"
     second = await provider.converse(
-        asked, tools=[READ], max_tokens=100, state=first.state, results=[(first.calls[0], "雨")]
+        asked,
+        tools=[READ],
+        max_tokens=100,
+        state=first.state,
+        results=[(first.calls[0], "雨")],
+        words_only=True,
     )
     assert second.text == "下雨。"
+    assert "tool_choice" not in bodies[0] and bodies[1]["tool_choice"] == "none" and bodies[1]["tools"]
     assert bodies[1]["messages"][1]["tool_calls"][0]["id"] == "c1"
     assert bodies[1]["messages"][2] == {"role": "tool", "tool_call_id": "c1", "content": "雨"}
 
@@ -338,9 +371,15 @@ async def test_codex_one_round_at_a_time(tmp_path: Any) -> None:
         bodies[0]["include"] == ["reasoning.encrypted_content"] and bodies[0]["instructions"] == "你是阿鲸。"
     )
     second = await provider.converse(
-        asked, tools=[READ], max_tokens=100, state=first.state, results=[(first.calls[0], "雨")]
+        asked,
+        tools=[READ],
+        max_tokens=100,
+        state=first.state,
+        results=[(first.calls[0], "雨")],
+        words_only=True,
     )
     assert second.text == "下雨。"
+    assert [b["tool_choice"] for b in bodies] == ["auto", "none"]
     sent = bodies[1]["input"]
     assert sent[1]["type"] == "reasoning" and sent[1]["encrypted_content"] == "secret"
     assert sent[-1] == {"type": "function_call_output", "call_id": "f1", "output": "雨"}

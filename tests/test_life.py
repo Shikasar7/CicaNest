@@ -61,15 +61,15 @@ def test_how_she_is_seen_at_home() -> None:
         ("卧室", "赖床", "lie"),
         ("卧室", "睡着了", "lie"),
         ("卧室", "起床，收拾自己", "stand"),
-        ("卧室", "梳洗叠被，写便签", "stand"),
+        ("卧室", "梳头，写日记", "stand"),
         ("厨房", "做早饭、吃早饭", "stand"),
         ("厨房", "吃午饭", "sit"),
-        ("客厅", "泡茶翻书", "sit"),
+        ("客厅", "喝茶看书", "sit"),
         ("客厅", "打游戏", "sit"),
         ("客厅", "忙自己的事", "sit"),
         ("书房", "复习", "sit"),
         ("阳台", "给花浇水", "stand"),
-        ("客厅", "眯一会儿，靠着沙发", "sit"),
+        ("客厅", "在沙发上打盹", "sit"),
     ]
     assert [(room, doing, pose_of(room, doing)) for room, doing, _ in said] == said
     raw = [{"from": "08:00", "to": "09:00", "room": "书房", "doing": "看书", "pose": "躺着"}]
@@ -156,3 +156,35 @@ async def test_profiles_are_drafted_and_edited(world: World) -> None:  # noqa: F
     people = {p["bot_id"]: p for p in (await world.http.get("/api/life")).json()["people"]}
     assert people[WHALE]["home"] is False and people[WHALE]["profile"]["hobbies"] == ["发呆"]
     assert (await world.http.post("/api/life/profiles/qq:404/draft")).status_code == 404
+
+
+async def test_the_rooms_as_the_user_furnished_them(world: World) -> None:  # noqa: F811
+    assert (await world.http.get("/api/life/rooms")).json() == {"rooms": {}}
+    sofa = {"kind": "sofa", "x": 4, "z": 0, "turn": 0}
+    clock = {"kind": "clock", "wall": "left", "at": 14, "y": 8}
+    look = {"wall": "starry", "floor": "tatami", "hung": [clock]}
+    mine = f"卧室:{WHALE}"
+    living = {"pieces": [sofa], "look": look}
+    assert (await world.http.put("/api/life/rooms/客厅", json=living)).status_code == 200
+    saved = await world.http.put(f"/api/life/rooms/{mine}", json={"pieces": []})
+    # An empty room is one too; its walls as they were.
+    assert saved.json() == {"rooms": {"客厅": living, mine: {"pieces": [], "look": None}}}
+    assert (await world.http.get("/api/life/rooms")).json() == saved.json()
+    # As it was.
+    back = await world.http.put("/api/life/rooms/客厅", json={"pieces": None})
+    assert list(back.json()["rooms"]) == [mine]
+
+    for room in ("地下室", "卧室:nobody", "卧室:", "卧室"):
+        assert (await world.http.put(f"/api/life/rooms/{room}", json={"pieces": []})).status_code == 404
+    for bad in (
+        {"pieces": [sofa | {"kind": "<b>"}]},
+        {"pieces": [sofa | {"x": -1}]},
+        {"pieces": [sofa | {"turn": 4}]},
+        {"pieces": [sofa | {"more": 1}]},
+        {"pieces": [sofa] * 61},
+        {"pieces": [], "look": look | {"wall": "url(x)"}},
+        {"pieces": [], "look": look | {"hung": [clock | {"wall": "ceiling"}]}},
+        {"pieces": [], "look": look | {"hung": [clock] * 31}},
+        {},
+    ):
+        assert (await world.http.put("/api/life/rooms/客厅", json=bad)).status_code == 422

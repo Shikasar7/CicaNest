@@ -35,6 +35,11 @@ TEXT_KEPT = 20_000  # previous text kept for the diff of the next change
 DIFF_LINES = 6
 DIFF_LINE_CHARS = 100
 INVISIBLE = ["script", "style", "noscript", "template"]
+AROUND = "nav, aside, footer, [role=navigation], [role=complementary], [role=contentinfo]"
+MAIN = ("main", "[role=main]", "article")
+MAIN_CHARS = 200
+MAIN_SHARE = 0.3  # of the page's text, for a marked part to be taken as the main one
+HEADER_LINKS = 8
 BLOCKS = frozenset(
     {
         "address",
@@ -267,6 +272,38 @@ def visible_lines(html: str, selector: str) -> list[str]:
         _node_lines(node, parts)
         parts.append("\n")
     return [line for line in (" ".join(raw.split()) for raw in "".join(parts).split("\n")) if line]
+
+
+def reading_lines(html: str) -> list[str]:
+    """What there is to read on a page, as visible_lines gives it: the title, then the main part without
+    menus, side columns and footers. A page that does not mark its parts is given whole."""
+    parser = LexborHTMLParser(html)
+    parser.strip_tags(INVISIBLE)
+    head = parser.css_first("title")
+    title = " ".join(head.text().split()) if head is not None else ""
+    for node in parser.css(AROUND):
+        node.decompose()
+    for node in parser.css("header"):  # a byline stays, a bar of links goes
+        if len(node.css("a")) >= HEADER_LINKS:
+            node.decompose()
+
+    def lines_of(node: LexborNode) -> list[str]:
+        parts: list[str] = []
+        _node_lines(node, parts)
+        return [line for line in (" ".join(raw.split()) for raw in "".join(parts).split("\n")) if line]
+
+    body = parser.body or parser.root
+    lines = lines_of(body) if body is not None else []
+    size = sum(map(len, lines))
+    if size < MAIN_CHARS:  # most of it was in what was left out
+        return visible_lines(html, "")
+    for selector in MAIN:
+        nodes = parser.css(selector)
+        part = lines_of(nodes[0]) if len(nodes) == 1 else []
+        if sum(map(len, part)) >= max(MAIN_CHARS, size * MAIN_SHARE):
+            lines = part
+            break
+    return [title, *lines] if title and title not in lines[:3] else lines
 
 
 def changed_lines(old: list[str], new: list[str]) -> tuple[list[str], int]:

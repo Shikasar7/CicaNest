@@ -1,118 +1,148 @@
-# CicaNest
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.webp">
+  <img src="docs/images/hero.webp" alt="CicaNest：给你的 AI 伙伴一个窝。陪你聊天，替你做事，也能去群里说话">
+</picture>
 
-自托管的多平台 AI bot 应用，代码和命令里叫 nest。一个后台进程管多个 bot，每个 bot 有自己的账号、名字、头像、人设和模型。主要接 QQ，也能接 Discord、Telegram、Slack 和企业微信。
+<div align="center">
 
-> **风险**：QQ 是通过 NapCat 这类程序用个人号接入的，不是腾讯官方的机器人接口，违反 QQ 的用户协议。号可能被提示「风险设备」、限制功能甚至冻结。请用专门的小号，不要用主号。
+<br>
+
+自己托管，数据在自己的电脑上。支持 QQ、Discord、Telegram、Slack 和企业微信，不接平台也能用。
+
+[![Release](https://img.shields.io/github/v/release/Shikasar7/CicaNest?color=5b8def&label=%E4%B8%8B%E8%BD%BD)](https://github.com/Shikasar7/CicaNest/releases/latest)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-7bc8a4)](LICENSE)
+![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-8a8f98)
+![Python](https://img.shields.io/badge/Python-3.12-e6a15c)
+
+[快速开始](#快速开始) · [能做什么](#能做什么) · [接上平台](#接上平台) · [插件](docs/plugins.md) · [开发](docs/development.md)
+
+</div>
+
+<p align="center"><sub>截图都是真实界面，里面的伙伴、群和对话是演示数据。安装后是空的：伙伴由你来写。</sub></p>
 
 ## 能做什么
 
-- **群聊**：判断什么时候该接话（被点名必回、偶尔插话、几个 bot 轮流、冷却和限额），一次回复可以像人一样分两三条发；能看到引用和回复的上下文。
-- **答题**：被点名问正经问题时认真回答。先分辨是闲聊、正经问题、问以前的聊天，还是问某个项目本身：正经问题可以联网查，问以前的聊天时翻存下的记录。
-- **项目资料**：一个群可以绑定一个项目的帮助资料，问项目的问题照资料回答，答不上的转给维护资料的人。
-- **表情包和黑话**：收集群里的表情包，由看图模型写描述，回复时可以带一张；从聊天里学群里的黑话，用到时加进提示词。
-- **私聊**：只回加过的人；聊久了自动把早先的对话记成摘要。
-- **监控**：定时检查订阅（RSS）、网页变化、价格和 Discord 服务器是否重新开放加入，有变化就让 bot 按人设改写后推送到群里或私聊。
-- **控制台**：网页版，可以远程访问（局域网和 Tailscale，密码登录）。看实时消息和每条消息的判断理由；改 bot 的人设、模型、备用模型和每个群的开关（每个地方用的人设可以存成方案，一键整套切换、换回）；看用量；管理表情包、黑话、监控、项目资料、QQ 容器、存储清理和备份。
-- **桌面伙伴**：不用任何平台账号也能建伙伴，人设、名字、头像都由你写（也可以从别处写好的设定和回忆导入，或用伙伴包）。在单独的聊天窗口里说话：表情包、图片、语音、几个伙伴的桌面群；Windows 上还有桌宠。想让她也去平台上说话，再给她接一个账号。
-- **回忆和日子**：长期记忆、回忆档案、小窝里的日程，可以设她什么时候主动来找你。
-- **让她做事**：工作区、后台任务、定时任务、画图；命令只在她自己的 Docker 容器里跑，装了桌面端还能在你的 Windows 电脑上读写你授权的文件夹；动你电脑的步骤先给你看、等你点头，哪些能自动做由你在那台电脑上定。
-- **插件**：主题、桌宠、表情包、Skill、MCP 服务器、新的模型和平台都能做成插件，格式见 [docs/plugins.md](docs/plugins.md)。
-- **试运行**：每个 bot、每个群都可以先「只看不说」，只记录本来会发的消息。
+### 住在桌面上的伙伴
 
-## 项目资料怎么检索
+不用任何平台账号就能建。名字、人设、头像都由你写，也能从别处写好的设定和回忆导入。可以发表情包、图片和语音，也可以把几个伙伴拉进同一个群。
 
-资料是 Markdown，每节固定写标题、别名、界面位置、平台、版本、报错原文。一道项目问题的处理：
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-dark.webp">
+  <img src="docs/images/chat.webp" alt="聊天窗口：伙伴查好了周末的路线，发来一张表情">
+</picture>
 
-1. **截图读字**：提问里的截图先由看图模型抄出上面的字，像密钥的长串打码。
-2. **三路找候选**：关键词 BM25（中文按相邻两字切词，字段加权）、向量检索、报错原文逐字匹配，按名次融合（RRF）。
-3. **重排**：本机的重排模型给候选打分，最高分太低就算「资料里没有」，这道题转给维护资料的人。
-4. **模型挑资料**：回答问题的 bot 自己的模型，从排好的候选（每节只给标题和摘要）里挑出真能回答的几节。出错时退回重排的结果。
-5. **照资料作答**：只照这几节回答，界面路径照资料原样说，资料没写的直说不确定；一题问几件事就逐件答。
-6. **资料答不上就看源码**（可选）：bot 用自己的模型一步步搜、读项目的源码，确认过的结论再补答。
-7. **答不上就转交**：由 bot 私聊转给维护资料的人；在控制台「资料」页补的回答马上能被检索到。
+<table>
+<tr>
+<td width="50%"><img src="docs/images/home.webp" alt="3D 小窝"></td>
+<td width="50%"><img src="docs/images/desk-group.webp" alt="桌面群"></td>
+</tr>
+<tr>
+<td><b>小窝</b>：每天有自己的日程，看电视、浇花、下棋。3D 房间（试用中）里的家具、墙纸和挂画随你布置。</td>
+<td><b>桌面群</b>：你和几个伙伴一起聊，她们会互相接话。</td>
+</tr>
+<tr>
+<td><img src="docs/images/stickers.webp" alt="表情包套装"></td>
+<td><img src="docs/images/tasks.webp" alt="任务的每一步"></td>
+</tr>
+<tr>
+<td><b>表情包</b>：照她的样子画一套，或者自己上传，聊天时挑着发。</td>
+<td><b>替你做事</b>：查资料、写文件、设提醒、定时任务，每一步都看得到。</td>
+</tr>
+</table>
 
-向量和重排模型是本机的 llama.cpp `llama-server`（`--embedding`、`--reranking`），在控制台填地址；没有它们时退回关键词检索。
+![桌宠：三个伙伴站在桌面上说话](docs/images/pets.webp)
 
-## 技术栈
+**桌宠**（Windows）：她的话会在头顶冒出来，能拖着走、贴边藏起来，还会彼此打招呼。没有图的伙伴由 nest 画一个小人。
 
-| 部分 | 用的是 |
-| --- | --- |
-| 后端 | Python 3.12，asyncio，FastAPI + uvicorn，SQLite（aiosqlite，编号迁移），httpx，pydantic；uv 管依赖，ruff 检查，pytest 测试（全部离线：假 OneBot、假 Discord、假 Telegram、假 Slack、假企业微信、假模型） |
-| 控制台 | React + TypeScript + Vite + Tailwind + shadcn/ui，构建后由后端直接提供 |
-| 桌面外壳 | Electron（Windows 托盘和启动器，可选） |
-| QQ | OneBot 11（HTTP + 正向 WebSocket），断线自动重连并补收消息；一个号一个 NapCat Docker 容器，控制台能建容器、扫码、重启 |
-| Discord | 自己写的 Gateway + REST 客户端（httpx、websockets），支持代理 |
-| Telegram | 自己写的 Bot API 客户端（httpx，长轮询），支持代理 |
-| Slack | 自己写的 Socket Mode + Web API 客户端（websockets、httpx），支持代理 |
-| 企业微信 | 智能机器人长连接 |
-| 模型接口 | OpenAI 兼容的 Chat Completions、OpenAI Responses、Anthropic Messages、ChatGPT 的 Codex 订阅；每个 bot 可设一个备用模型 |
+她会记得你的喜好和约定。命令默认在她自己的 Docker 容器里跑；装了桌面端，还能在你的 Windows 上读写你授权的文件夹、跑命令：动手之前先问你，哪些能自动做由你在那台电脑上定。
 
-## 部署
+### 会看场合的群友
 
-三种方式，各自的步骤见：
+<table>
+<tr>
+<td width="56%"><img src="docs/images/messages.webp" alt="群消息和每条消息的判断"></td>
+<td>
 
-| 方式 | 适合 | 说明 |
+- 被点名必回，平时偶尔插话；几个 bot 会轮流，不抢着说
+- 一次回复像人一样分两三条发
+- 认真答题：联网查、翻聊天记录，或者[照项目资料回答](docs/knowledge.md)
+- 收集群里的表情包，学群里的黑话
+- 盯着订阅、网页和价格，有变化就来报信
+- 可以先「只看不说」，看看她本来会说什么
+
+</td>
+</tr>
+</table>
+
+### 一个控制台管所有
+
+<table>
+<tr>
+<td width="72%"><img src="docs/images/bots.webp" alt="控制台的 Bot 设置"></td>
+<td width="28%"><img src="docs/images/phone.webp" alt="手机上的聊天"></td>
+</tr>
+<tr>
+<td>人设、模型、每个群的开关、用量、监控、备份都在网页里。人设能存成方案，一键整套换。</td>
+<td>手机浏览器也能用：局域网或 Tailscale，密码登录。</td>
+</tr>
+</table>
+
+主题、桌宠、表情包、Skill、MCP 服务器、新的模型和平台都能[做成插件](docs/plugins.md)。
+
+## 快速开始
+
+到 [Releases](https://github.com/Shikasar7/CicaNest/releases/latest) 下载，有两个包：
+
+| 文件 | 是什么 | 装在哪 |
 | --- | --- | --- |
-| Windows 直接安装 | 一台常开的 Windows 电脑 | [deploy/windows/README.md](deploy/windows/README.md) |
-| Mac 直接安装 | Mac mini 这类常开的 Mac | [deploy/mac/README.md](deploy/mac/README.md) |
-| Docker | Linux 服务器、NAS | [deploy/docker/README.md](deploy/docker/README.md) |
+| `CicaNest-版本-server.zip` | nest 本体，控制台已经构建好 | 常开的那台电脑（Windows、Mac 或 Linux） |
+| `nest-setup-版本.exe` | Windows 桌面端：聊天窗口、桌宠、托盘 | 你平时用的 Windows 电脑，连到上面那台 |
 
-接 QQ 都要用 Docker 跑 NapCat 容器；只用 Discord、Telegram、Slack 或企业微信时不需要。直接安装时的常用命令：
+**第一步，跑起来。** 装好 [uv](https://docs.astral.sh/uv/getting-started/installation/)，解压 `server.zip`。Windows 双击 `启动.bat`；Mac 和 Linux 在解压出来的文件夹里运行：
 
 ```bash
-uv run nest start            # 在后台启动并打开控制台
-uv run nest stop
-uv run nest status
-uv run nest set-password     # 设置从其他设备登录控制台的密码
-uv run nest service install  # macOS：装成登录后自动启动的后台服务
+uv run --frozen nest start
 ```
 
-- 控制台：`http://127.0.0.1:18800`；开启远程访问后，局域网和 Tailscale 的设备用密码登录。
-- QQ 容器：在控制台 Bot 页「增加 bot」，nest 会自己建 NapCat 容器；想自己管理，照 `deploy/mac/docker-compose.example.yml` 写 compose。扫码在「系统」页点「扫码登录」。
-- Discord、Telegram、Slack 和企业微信：在控制台 Bot 页「增加 bot」选平台，填 Token 或 BotID 和 Secret。
-- 设置和密钥在 `.env`（见 `.env.example`），数据库和日志在 `data/`，都不进 git。
+第一次会下载依赖，要等一两分钟。之后浏览器自动打开控制台 `http://127.0.0.1:18800`。
+
+**第二步，有个伙伴。** 在「模型」页加一个模型，再到「聊天」页点「新伙伴」。
+
+**第三步（可选），装桌面端。** 先给 nest 设一个密码：
+
+```bash
+uv run --frozen nest set-password
+```
+
+在 Windows 上装 `nest-setup`，打开后填 nest 的地址，再用这个密码登录。nest 在同一台电脑上就填 `127.0.0.1:18800`；在另一台上，先到那台控制台的「系统」页打开「远程访问」并重启 nest，再填它的局域网或 Tailscale 地址。
+
+> 安装包没有代码签名，Windows 第一次会提示「已保护你的电脑」：点「更多信息」→「仍要运行」。
+
+更完整的部署：[Windows](deploy/windows/README.md)、[Mac](deploy/mac/README.md)、[Docker](deploy/docker/README.md)（Linux 服务器、NAS）。
+
+## 接上平台
+
+| 平台 | 怎么接 |
+| --- | --- |
+| QQ | NapCat（OneBot 11）。一个号一个 Docker 容器，控制台里建容器、扫码 |
+| Discord、Telegram、Slack | 填官方 Bot 的 Token，支持代理 |
+| 企业微信 | 智能机器人，填 BotID 和 Secret |
+
+都在控制台「Bot」页点「增加 bot」。桌面上的伙伴也能接一个账号，带着聊天和记忆搬过去。
+
+模型支持 OpenAI 兼容接口（Chat Completions、Responses）、Anthropic，以及 ChatGPT 的 Codex 订阅。每个 bot 可以再设一个备用模型。
+
+> [!WARNING]
+> QQ 是用 NapCat 这类程序登录个人号，不是腾讯官方的机器人接口，违反 QQ 的用户协议。号可能被提示「风险设备」、限制功能甚至冻结。请用专门的小号，不要用主号。
+
+## 数据和安全
+
+- 聊天、记忆、设置都在本机的 `data/`，密钥在 `.env`。没有我们的服务器，内容只发给你自己填的模型、平台和搜索等服务。
+- 控制台只接受本机连接；打开远程访问后也只放行局域网和 Tailscale，要密码。不要在路由器上转发 18800 端口。
 
 ## 开发
 
-需要 [uv](https://docs.astral.sh/uv/) 和 Node.js 24。
-
-```bash
-uv sync                      # 安装后端依赖
-uv run nest serve            # 前台运行后台服务
-uv run pytest                # 测试（全部离线）
-uv run ruff check . && uv run ruff format --check .
-```
-
-```bash
-cd web
-npm install
-npm run dev                  # 控制台开发服务器，/api 代理到 127.0.0.1:18800
-npm run build                # 构建到 web/dist，由后台直接提供
-```
-
-开发时先用 `uv run nest start --no-browser` 或 `uv run nest serve` 启动后台，再打开
-`http://127.0.0.1:18800/login?token=<data/runtime.json 里的 token>` 登录一次，之后 `npm run dev` 的页面也能用同一个登录状态。
-
-## 目录
-
-```
-src/nest/
-  app.py              组装各组件
-  cli.py              nest serve / start / stop / status / service …
-  config.py           进程设置（NEST_* 环境变量或 .env）
-  adapters/           平台适配器：onebot11（QQ）、discord、telegram、slack、wecom（企业微信）
-  core/               回复判断和提示词（brain、prompt）、截图读字、表情包、黑话
-  knowledge/          项目资料：读资料、关键词 / 向量 / 重排检索、模型挑资料、看源码、转交没答上的问题
-  llm/                模型接口
-  watch/              监控（订阅、网页变化、价格、Discord 开放）
-  api/                控制台用的接口和访问控制
-  storage/            SQLite 与编号迁移
-tests/                全部离线；fakes/ 里是假的平台和模型
-web/                  控制台（React + Vite + Tailwind + shadcn/ui）
-desktop/              Windows 桌面外壳（Electron）；`npm run dist` 打成安装包，装在别的电脑上连远程的 nest
-deploy/               各种部署方式：windows、mac（QQ 容器模板、每周重启脚本、launchd 配置）、docker
-Dockerfile            Docker 镜像：后端、构建好的控制台和 docker 命令
-```
+技术栈、本地运行和目录说明在 [docs/development.md](docs/development.md)。欢迎提 Issue。
 
 ## 许可证
 

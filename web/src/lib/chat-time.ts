@@ -1,6 +1,6 @@
 /** Time in the chat window: a line between messages only after a pause or on a new day. */
 
-type Timed = { id: number; sent_at: number; from_self: boolean }
+type Timed = { id: number; sent_at: number; from_self: boolean; sender_id: string }
 
 const PAUSE_S = 5 * 60 // a pause this long gets a time line between the messages
 const WEEKDAYS = '日一二三四五六'
@@ -24,7 +24,7 @@ export type Row<M extends Timed> =
   | { kind: 'message'; key: string; message: M; first: boolean }
 
 /** Messages with a time line before each one after a pause or on a new day; `first`: the first of a run
- * by the same side (only it shows the avatar). */
+ * by the same one (only it shows the avatar, and in a group the name). */
 export function rowsOf<M extends Timed>(messages: M[]): Row<M>[] {
   const rows: Row<M>[] = []
   let previous: M | null = null
@@ -34,7 +34,8 @@ export function rowsOf<M extends Timed>(messages: M[]): Row<M>[] {
       new Date(previous.sent_at * 1000).toDateString() !== new Date(message.sent_at * 1000).toDateString()
     const paused = previous === null || newDay || message.sent_at - previous.sent_at >= PAUSE_S
     if (paused) rows.push({ kind: 'time', key: `t${message.id}`, at: message.sent_at })
-    const first = paused || previous === null || previous.from_self !== message.from_self
+    const first =
+      paused || previous === null || previous.from_self !== message.from_self || previous.sender_id !== message.sender_id
     rows.push({ kind: 'message', key: `m${message.id}`, message, first })
     previous = message
   }

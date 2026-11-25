@@ -39,6 +39,7 @@ class FakeProvider:
         self.rounds: list[
             list[tuple[str, str]]
         ] = []  # converse: the (tool, result) pairs handed back, per round
+        self.words_only: list[bool] = []  # converse: whether no tool could be asked for, per round
         self.closed = False
         self.streams = False  # set by a test: it tells what it writes, ten characters at a time
         self.letters = 0.0  # seconds between two of them
@@ -57,6 +58,7 @@ class FakeProvider:
         max_tokens: int,
         state: Any = None,
         results: Sequence[tuple[Call, str]] = (),
+        words_only: bool = False,
     ) -> Turn:
         """A round of a task: a scripted ToolCall asks for that tool, anything else is the last words."""
         if self.closed:
@@ -64,6 +66,7 @@ class FakeProvider:
         self.requests.append(list(messages))
         self.tool_lists.append([t.name for t in tools])
         self.rounds.append([(call.name, result) for call, result in results])
+        self.words_only.append(words_only)
         self.tool_results.extend((call.name, result) for call, result in results)
         if self.delay:
             await asyncio.sleep(self.delay)
