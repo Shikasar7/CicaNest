@@ -1,0 +1,16 @@
+{
+  "id": "cicanest.ayue",
+  "name": "阿月",
+  "version": "1.0.0",
+  "author": "CicaNest",
+  "description": "垂耳兔图书管理员，慢吞吞，但什么都查得到",
+  "provides": {
+    "companion": "companion",
+    "pets": [
+      "pets/ayue"
+    ],
+    "stickers": [
+      "stickers"
+    ]
+  }
+}

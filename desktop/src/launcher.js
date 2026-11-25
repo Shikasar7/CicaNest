@@ -3,12 +3,14 @@
 // The launch sequence shown in the splash (or run silently from the tray / at login).
 // Pure logic: it talks to nest and emits snapshots; splash.js draws them, main.js reacts to 'finish'.
 //
-// Steps: [停止 nest 后台 (restart only)] · 启动 nest 后台 · 登录控制台 · 连接 SnowLuma · 等待 QQ 上线
+// Steps: [停止 nest 后台 (restart only)] · 启动 nest 后台 · 登录控制台 · 启动 QQ 连接 (only where a SnowLuma or its
+// containers are set up) · 等伙伴上线
 // A failed step can be retried; the retry resumes at that step.
 
 const { EventEmitter } = require('node:events')
 const { NestError, sleep, detailOf } = require('./nest')
 const log = require('./log')
+const { FACES, faceOf } = require('./ui/face')
 
 const QQ_WAIT_MS = 20_000
 const POLL_MS = 1000
@@ -19,21 +21,24 @@ const HUES = ['#2F7FD0', '#E2557F', '#1E9C82', '#8A63D2', '#D9822B']
 const isOnline = (account) => account?.status?.state === 'connected'
 
 function glyphsFor(accounts) {
-  return accounts.slice(0, HUES.length).map((account, n) => {
-    const name = String(account.name || account.self_id || '?')
-    const han = Array.from(name).filter((c) => /\p{Script=Han}/u.test(c))
-    return { key: account.id, char: han.at(-1) ?? Array.from(name)[0], hue: HUES[n], name, online: isOnline(account) }
-  })
+  return accounts.slice(0, HUES.length).map((account, n) => ({
+    key: account.id,
+    face: faceOf(account.id),
+    hue: HUES[n],
+    name: String(account.name || account.self_id || '?'),
+    online: isOnline(account),
+  }))
 }
 
-const PLACEHOLDER_GLYPHS = HUES.slice(0, 3).map((hue) => ({ key: hue, char: '·', hue, name: '', online: false }))
+// Asleep until the accounts are known; with none (companions only on this computer) they just wake up.
+const PLACEHOLDER_GLYPHS = FACES.slice(0, 3).map((face, n) => ({ key: face, face, hue: HUES[n], name: '', online: false }))
 
 const STEP_LABELS = {
   stop: '停止 nest 后台',
   backend: '启动 nest 后台',
   login: '登录控制台',
-  snowluma: '连接 SnowLuma',
-  qq: '等待 QQ 上线',
+  snowluma: '启动 QQ 连接',
+  qq: '等伙伴上线',
 }
 
 function networkMessage(err) {
@@ -53,7 +58,8 @@ class Launch extends EventEmitter {
     this.restart = restart
     this.onLogin = onLogin
     const ids = restart ? ['stop', 'backend', 'login', 'snowluma', 'qq'] : ['backend', 'login', 'snowluma', 'qq']
-    this.steps = ids.map((id) => ({ id, label: STEP_LABELS[id], state: 'pending', detail: '' }))
+    // Most have no QQ on this computer: that step shows once there turns out to be something to start.
+    this.steps = ids.map((id) => ({ id, label: STEP_LABELS[id], state: 'pending', detail: '', hidden: id === 'snowluma' }))
     this.phase = 'running' // running · waiting (QQ) · failed · done
     this.glyphs = PLACEHOLDER_GLYPHS
     this.qqWaiting = false
@@ -68,7 +74,7 @@ class Launch extends EventEmitter {
   snapshot() {
     const titles = {
       running: this.restart ? '正在重启…' : '正在启动…',
-      waiting: '等 QQ 登录',
+      waiting: '等账号登录',
       failed: '没有启动完成',
       done: '准备好了',
     }
@@ -76,7 +82,7 @@ class Launch extends EventEmitter {
       mode: this.restart ? 'restart' : 'launch',
       phase: this.phase,
       title: titles[this.phase],
-      steps: this.steps.map((s) => ({ ...s })),
+      steps: this.steps.filter((s) => !s.hidden).map((s) => ({ ...s })),
       glyphs: this.glyphs.map((g) => ({ ...g })),
       qqWaiting: this.qqWaiting,
       message: this.message,
@@ -230,19 +236,22 @@ class Launch extends EventEmitter {
     if (sys.status === 200 && sys.json) {
       this.system = sys.json
       const snow = sys.json.snowluma || {}
-      if (!snow.configured) return this.set(step, 'skipped', '未设置，跳过')
+      if (!snow.configured) return this.set(step, 'skipped', '没有要启动的')
+      step.hidden = false
       if (snow.running) return this.set(step, 'done', '已在运行')
     } else if (sys.status !== 404) {
-      throw new NestError(`读不到 SnowLuma 的状态：${detailOf(sys)}`, { short: '读不到状态' })
+      step.hidden = false
+      throw new NestError(`读不到 QQ 连接的状态：${detailOf(sys)}`, { short: '读不到状态' })
     }
+    step.hidden = false
     this.set(step, 'running', '启动中…')
     const res = await this.nest.api('POST', '/api/system/snowluma/start', undefined, { timeout: 30_000 })
     if (res.status === 404) return this.set(step, 'skipped', '这个版本不支持，跳过')
     if (res.status === 400) {
       log.info(`snowluma start refused: ${detailOf(res)}`)
-      return this.set(step, 'skipped', '未设置，跳过')
+      return this.set(step, 'skipped', '没有要启动的')
     }
-    if (res.status !== 200) throw new NestError(`SnowLuma 没能启动：${detailOf(res)}`, { short: '没有启动' })
+    if (res.status !== 200) throw new NestError(`QQ 连接没能启动：${detailOf(res)}`, { short: '没有启动' })
     this.set(step, 'done', res.json?.started === false ? '已在运行' : '已启动')
   }
 
@@ -258,11 +267,12 @@ class Launch extends EventEmitter {
         throw new NestError(`读不到账号状态：${detailOf(res)}`, { short: '读不到账号' })
       }
       const accounts = res.json.filter((a) => a.enabled !== false)
-      this.glyphs = glyphsFor(accounts)
       if (accounts.length === 0) {
         this.qqWaiting = false
-        return this.set(step, 'skipped', '还没有账号')
+        this.glyphs = this.glyphs.map((g) => ({ ...g, online: true }))
+        return this.set(step, 'done', '都在家')
       }
+      this.glyphs = glyphsFor(accounts)
       const offline = accounts.filter((a) => !isOnline(a))
       if (offline.length === 0) {
         this.qqWaiting = false

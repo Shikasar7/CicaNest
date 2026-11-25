@@ -1,0 +1,16 @@
+{
+  "id": "cicanest.chengcheng",
+  "name": "橙橙",
+  "version": "1.0.0",
+  "author": "CicaNest",
+  "description": "戴耳机的小狐狸，爱听歌、爱起哄，点子多",
+  "provides": {
+    "companion": "companion",
+    "pets": [
+      "pets/chengcheng"
+    ],
+    "stickers": [
+      "stickers"
+    ]
+  }
+}

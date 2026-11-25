@@ -18,13 +18,13 @@
 
 </div>
 
-<p align="center"><sub>截图都是真实界面，里面的伙伴、群和对话是演示数据。安装后是空的：伙伴由你来写。</sub></p>
+<p align="center"><sub>截图都是真实界面，里面的群和对话是演示数据。安装后是空的：伙伴由你来写，也可以从三位示例伙伴（三花、阿月、橙橙）开始。</sub></p>
 
 ## 能做什么
 
 ### 住在桌面上的伙伴
 
-不用任何平台账号就能建。名字、人设、头像都由你写，也能从别处写好的设定和回忆导入。可以发表情包、图片和语音，也可以把几个伙伴拉进同一个群。
+不用任何平台账号就能建。名字、人设、头像都由你写，也能从别处写好的设定和回忆导入；想先试试，就请一位示例伙伴过来。可以发表情包、图片和语音，也可以把几个伙伴拉进同一个群。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-dark.webp">
@@ -95,28 +95,41 @@
 
 | 文件 | 是什么 | 装在哪 |
 | --- | --- | --- |
-| `CicaNest-版本-server.zip` | nest 本体，控制台已经构建好 | 常开的那台电脑（Windows、Mac 或 Linux） |
-| `nest-setup-版本.exe` | Windows 桌面端：聊天窗口、桌宠、托盘 | 你平时用的 Windows 电脑，连到上面那台 |
+| `nest-setup-版本.exe` | Windows 一个就够：后台、控制台、聊天窗口、桌宠、托盘都在里面，不用另装 Python、uv 或 Node | Windows 10、11（64 位） |
+| `CicaNest-版本-server.zip` | 只有 nest 本体，控制台已经构建好 | 常开的 Mac、Linux 或服务器 |
 
-**第一步，跑起来。** 装好 [uv](https://docs.astral.sh/uv/getting-started/installation/)，解压 `server.zip`。Windows 双击 `启动.bat`；Mac 和 Linux 在解压出来的文件夹里运行：
+### Windows
+
+1. 运行 `nest-setup`，选装在哪（哪个盘、哪个文件夹都行）。
+2. 打开 nest，选「在这台电脑上」，点「开始使用」。过几秒控制台就开了。
+3. 在「模型」页加一个模型，再到「聊天」页请一位示例伙伴过来，或者自己写一个。
+
+![刚装好的聊天页：先请谁过来](docs/images/empty-welcome.webp)
+
+以后从开始菜单打开；关掉窗口它还在任务栏右下角，想连伙伴一起停，在图标菜单里选「退出并停止 nest」。伙伴、聊天记录和密钥都在 `%APPDATA%\nest\home`，和装在哪无关，升级、卸载都不会删。
+
+有新版本时它会提醒：在图标菜单或「桌面应用」设置里点「更新」，下载好、核对过校验值后再问你一次才装，装在原来的位置，bot 停一两分钟。自动检查可以关。0.7.0 和更早的没有这个功能，要下载新的 `nest-setup` 装一遍。
+
+> 安装包没有代码签名，Windows 第一次会提示「已保护你的电脑」：点「更多信息」→「仍要运行」。打开了「智能应用控制」的电脑可能不让运行没签名的程序。
+
+### Mac、Linux
+
+装好 [uv](https://docs.astral.sh/uv/getting-started/installation/)，解压 `server.zip`，在解压出来的文件夹里运行：
 
 ```bash
 uv run --frozen nest start
 ```
 
-第一次会下载依赖，要等一两分钟。之后浏览器自动打开控制台 `http://127.0.0.1:18800`。
+第一次会下载依赖，要等一两分钟。之后浏览器自动打开控制台 `http://127.0.0.1:18800`。在「模型」页加一个模型，再到「聊天」页请一位示例伙伴过来，或者自己写一个。
 
-**第二步，有个伙伴。** 在「模型」页加一个模型，再到「聊天」页点「新伙伴」。
+### 在 Windows 上连另一台的 nest
 
-**第三步（可选），装桌面端。** 先给 nest 设一个密码：
+nest 跑在常开的另一台电脑上，Windows 只当聊天窗口和桌宠：
 
-```bash
-uv run --frozen nest set-password
-```
+1. 在那台电脑上设一个密码：`uv run --frozen nest set-password`，再到它控制台的「系统」页打开「远程访问」，重启 nest。
+2. 在 Windows 上装 `nest-setup`，第一次打开时选「在另一台电脑上」，填那台的局域网或 Tailscale 地址，用这个密码登录。
 
-在 Windows 上装 `nest-setup`，打开后填 nest 的地址，再用这个密码登录。nest 在同一台电脑上就填 `127.0.0.1:18800`；在另一台上，先到那台控制台的「系统」页打开「远程访问」并重启 nest，再填它的局域网或 Tailscale 地址。
-
-> 安装包没有代码签名，Windows 第一次会提示「已保护你的电脑」：点「更多信息」→「仍要运行」。
+两种以后都能换：图标菜单里的「连接设置…」。
 
 更完整的部署：[Windows](deploy/windows/README.md)、[Mac](deploy/mac/README.md)、[Docker](deploy/docker/README.md)（Linux 服务器、NAS）。
 
@@ -137,7 +150,7 @@ uv run --frozen nest set-password
 
 ## 数据和安全
 
-- 聊天、记忆、设置都在本机的 `data/`，密钥在 `.env`。没有我们的服务器，内容只发给你自己填的模型、平台和搜索等服务。
+- 聊天、记忆、设置都在本机的 `data/`，密钥在 `.env`。没有我们的服务器，内容只发给你自己填的模型、平台和搜索等服务。安装包版的桌面端每 12 小时问一次 GitHub 有没有新版本，不带任何内容，可以关掉。
 - 控制台只接受本机连接；打开远程访问后也只放行局域网和 Tailscale，要密码。不要在路由器上转发 18800 端口。
 
 ## 开发

@@ -6,10 +6,14 @@
 
 const fs = require('node:fs')
 const http = require('node:http')
+const net = require('node:net')
 const { spawn } = require('node:child_process')
 const log = require('./log')
 
-const START_TIMEOUT_MS = 25_000
+// The first start on a slow computer: the antivirus looks at every file of a fresh install (`nest start` waits
+// as long).
+const START_TIMEOUT_MS = 60_000
+const RUNTIME_WAIT_MS = 3000 // runtime.json is written a moment after the port answers
 const STOP_TIMEOUT_MS = 15_000
 
 class NestError extends Error {
@@ -69,6 +73,39 @@ function detailOf(res) {
   const detail = res?.json?.detail
   if (typeof detail === 'string' && detail) return detail
   return `HTTP ${res?.status ?? '?'}`
+}
+
+/** The environment nest runs in. Bundled: its data and console are named, and whatever Python the user has
+ * (PYTHONPATH, user site-packages, a module lying in the working folder) stays out of it. */
+function backendEnv(config, env = process.env) {
+  const own = { ...env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
+  if (!config.bundled) return own
+  for (const name of Object.keys(own)) {
+    if (/^(PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|PYTHONUSERBASE|VIRTUAL_ENV)$/i.test(name)) delete own[name]
+  }
+  return {
+    ...own,
+    PYTHONSAFEPATH: '1',
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1', // the app's folder is not written to
+    NEST_HOME: config.home,
+    NEST_WEB_DIST_DIR: config.bundled.web,
+    NEST_BUNDLED: '1', // how it tells the user to start and stop it (nest.hints)
+  }
+}
+
+/** Whether some program listens on this machine's `port`. */
+function portTaken(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port })
+    const done = (taken) => {
+      socket.destroy()
+      resolve(taken)
+    }
+    socket.setTimeout(1000, () => done(false))
+    socket.on('connect', () => done(true))
+    socket.on('error', () => done(false))
+  })
 }
 
 class Nest {
@@ -157,7 +194,7 @@ class Nest {
           detached: true,
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+          env: backendEnv(this.config),
         })
       } catch (err) {
         resolve({ code: -1, output: err.message })
@@ -182,15 +219,51 @@ class Nest {
     })
   }
 
+  // Whether the nest that answers on our port is the one whose data is ours (it takes our token).
+  async isOurs(signal) {
+    const deadline = Date.now() + RUNTIME_WAIT_MS
+    for (;;) {
+      const token = this.readRuntime()?.token
+      if (token) {
+        const res = await this.request('GET', '/api/accounts', { token, timeout: 8000 })
+        if (res.status !== 401) return true
+      }
+      if (Date.now() > deadline) return false
+      await sleep(300, signal)
+    }
+  }
+
   // Make sure the backend answers. onWait(seconds) is called while waiting.
   async start({ signal, onWait } = {}) {
-    if (await this.health()) return { already: true }
+    const { home, port, bundled, version } = this.config
+    const otherPort = '在 .env 里换一个 NEST_PORT'
+    const running = await this.health()
+    if (running) {
+      if (!(await this.isOurs(signal))) {
+        throw new NestError(
+          `端口 ${port} 上是另一个 nest。想用它，到托盘的「连接设置…」里连过去；否则先停掉它，或${otherPort}。`,
+          { code: 'foreign', short: '是另一个 nest' },
+        )
+      }
+      // Left running from before an update: it and the app's console would not fit together.
+      if (!bundled || !version || running.version === version) return { already: true }
+      log.info(`nest ${running.version} is running, this app brings ${version}: restarting it`)
+      await this.stop()
+    }
     if (!fs.existsSync(this.config.python)) {
-      throw new NestError(`找不到运行 nest 的 Python：${this.config.python}。在 nest 文件夹里运行一次 uv sync 再试。`, {
+      const how = bundled ? '重新安装一次再试。' : '在 nest 文件夹里运行一次 uv sync 再试。'
+      throw new NestError(`找不到运行 nest 的 Python：${this.config.python}。${how}`, {
         code: 'no-python',
         short: '找不到 Python',
       })
     }
+    // Our own, hung: `nest start` says what to do about that one.
+    const runtime = this.readRuntime()
+    const hung = runtime?.port === port && pidAlive(runtime.pid)
+    if (!hung && (await portTaken(port))) {
+      throw new NestError(`端口 ${port} 被其他程序占用。关掉那个程序，或${otherPort}。`, { code: 'port', short: '端口被占用' })
+    }
+    if (bundled) fs.mkdirSync(home, { recursive: true })
     const began = Date.now()
     let finished = null
     this.run(['start', '--no-browser'], { timeoutMs: START_TIMEOUT_MS + 5000 }).then((result) => {
@@ -208,7 +281,7 @@ class Nest {
       }
       const elapsed = Date.now() - began
       if (elapsed > START_TIMEOUT_MS) {
-        throw new NestError('nest 后台 25 秒内没有响应。', { code: 'start-timeout', short: '没有响应' })
+        throw new NestError(`nest 后台 ${START_TIMEOUT_MS / 1000} 秒内没有响应。`, { code: 'start-timeout', short: '没有响应' })
       }
       onWait?.(Math.floor(elapsed / 1000))
       await sleep(300, signal)
@@ -246,4 +319,4 @@ class Nest {
   }
 }
 
-module.exports = { Nest, NestError, sleep, detailOf }
+module.exports = { Nest, NestError, backendEnv, portTaken, sleep, detailOf }

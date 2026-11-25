@@ -65,7 +65,7 @@ async def _changed(request: Request, bot_id: str) -> dict[str, Any]:
 
 @router.get("/avatars")
 async def avatars(request: Request) -> dict[str, dict[str, Any]]:
-    """Every bot -> which picture it shows ("chosen": "qq" | "custom" | null = its brush character) and
+    """Every bot -> which picture it shows ("chosen": "qq" | "custom" | null = its little face) and
     when each stored picture last changed (null: none stored)."""
     state = request.app.state
     stored = await state.avatars.views()

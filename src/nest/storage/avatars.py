@@ -71,7 +71,7 @@ class AvatarStore:
             )
 
     async def choose(self, bot_id: str, source: str | None) -> bool:
-        """Show the picture from `source`, or the brush character (None). False: no such picture."""
+        """Show the picture from `source`, or the little face (None). False: no such picture."""
         async with self.db.transaction() as conn:
             if source is not None:
                 async with conn.execute(
@@ -85,7 +85,7 @@ class AvatarStore:
         return True
 
     async def delete(self, bot_id: str, source: str) -> None:
-        """Forget that picture; when it was the one shown, the brush character is shown again."""
+        """Forget that picture; when it was the one shown, the little face is shown again."""
         async with self.db.transaction() as conn:
             await conn.execute("DELETE FROM bot_avatars WHERE bot_id = ? AND source = ?", (bot_id, source))
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 import type { PetSprite } from './desktop.ts'
+import { drawFace } from './face-canvas.ts'
 import {
   canStand,
   CELL,
@@ -563,7 +564,7 @@ export class DormScene {
     figure.actions.clear()
     const sprite = guest.sprite
     if (!sprite) {
-      figure.actions.set('idle', { texture: badge(guest.name), frames: 1, fps: 1, loop: true })
+      figure.actions.set('idle', { texture: badge(guest.name, guest.id), frames: 1, fps: 1, loop: true })
       figure.card.geometry.dispose()
       figure.card.geometry = new THREE.PlaneGeometry(0.8, 0.8).translate(0, 0.55, 0)
     } else {
@@ -1027,23 +1028,11 @@ export function thumbnails(size = 96): { pieces: Record<Kind, string>; hung: Rec
   return out
 }
 
-/** Who has no pet: the first character of her name, on a disc. */
-function badge(name: string): THREE.Texture {
+/** Who has no pet: her little face, as in the console. */
+function badge(name: string, id: string): THREE.Texture {
   const el = document.createElement('canvas')
   el.width = el.height = 256
-  const g = el.getContext('2d')!
-  g.fillStyle = '#fffaf2'
-  g.beginPath()
-  g.arc(128, 128, 118, 0, 7)
-  g.fill()
-  g.lineWidth = 8
-  g.strokeStyle = '#b9a8dd'
-  g.stroke()
-  g.fillStyle = '#6a5a86'
-  g.font = '600 120px sans-serif'
-  g.textAlign = 'center'
-  g.textBaseline = 'middle'
-  g.fillText([...name][0] ?? '', 128, 136)
+  drawFace(el.getContext('2d')!, 256, name, id)
   const texture = new THREE.CanvasTexture(el)
   texture.colorSpace = THREE.SRGBColorSpace
   return texture

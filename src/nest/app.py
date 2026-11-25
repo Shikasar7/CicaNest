@@ -46,6 +46,7 @@ from nest.api.routes_reminders import router as reminders_router
 from nest.api.routes_remote import public as remote_public_router
 from nest.api.routes_remote import router as remote_router
 from nest.api.routes_routines import router as routines_router
+from nest.api.routes_samples import router as samples_router
 from nest.api.routes_slang import router as slang_router
 from nest.api.routes_speech import router as speech_router
 from nest.api.routes_sticker_packs import router as sticker_packs_router
@@ -524,6 +525,7 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(executor_router)
     app.include_router(companion_packs_router)
+    app.include_router(samples_router)
     app.include_router(workspaces_router)
     app.include_router(bot_admin_router)
     app.include_router(issues_router)

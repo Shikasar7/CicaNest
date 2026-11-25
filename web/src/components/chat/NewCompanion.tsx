@@ -2,14 +2,16 @@ import { useId, useRef, useState, type ChangeEvent } from 'react'
 import { FileUp, ImageUp, Plus, Trash2 } from 'lucide-react'
 
 import { AvatarCropper } from '@/components/bots/AvatarCropper'
-
+import { ModelSelect } from '@/components/chat/ModelSelect'
+import { Samples } from '@/components/chat/Samples'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
-import { avatarPath, sendBlob, sendJson, type AvatarView, type ProviderView } from '@/lib/api'
+import { avatarPath, sendBlob, sendJson, type AvatarView } from '@/lib/api'
 import { useLive, useProviders } from '@/lib/live'
+import { usable } from '@/lib/models'
 import { readPicture } from '@/lib/pictures'
 import { cn } from '@/lib/utils'
 import { SkillTexts } from '@/pages/Plugins'
@@ -44,10 +46,6 @@ const KINDS: { value: Kind; label: string }[] = [
 const POINT_MAX = 60
 const FILE_MAX_MB = 2
 
-function usable(providers: ProviderView[] | null) {
-  return (providers ?? []).filter((p) => p.health !== null)
-}
-
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -57,35 +55,25 @@ function toBase64(file: File): Promise<string> {
   })
 }
 
-function ModelSelect({ id, value, onChange, providers, optional = false }: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-  providers: ProviderView[]
-  optional?: boolean
-}) {
-  return (
-    <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full">
-      {optional && <option value="">先不选（她不会说话）</option>}
-      {providers.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.id}（{p.model}）
-        </option>
-      ))}
-    </NativeSelect>
-  )
-}
+const TABS = [
+  ['samples', '示例伙伴'],
+  ['new', '自己写一个'],
+  ['import', '从备份搬一个进来'],
+  ['pack', '导入伙伴包'],
+] as const
 
-export function NewCompanion({ targets, onDone, onCancel }: {
+export function NewCompanion({ targets, own = false, onDone, onCancel }: {
   targets: DeskTarget[]
+  /** Opened to write one of your own. */
+  own?: boolean
   onDone: (botId: string) => void
   onCancel: () => void
 }) {
-  const [tab, setTab] = useState<'new' | 'import' | 'pack'>('import')
+  const [tab, setTab] = useState<(typeof TABS)[number][0]>(own ? 'new' : targets.length ? 'import' : 'samples')
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b px-4 py-2">
-        {(['import', 'pack', 'new'] as const).map((t) => (
+      <div className="flex flex-wrap items-center gap-1 border-b px-4 py-2">
+        {TABS.map(([t, label]) => (
           <button
             key={t}
             type="button"
@@ -96,7 +84,7 @@ export function NewCompanion({ targets, onDone, onCancel }: {
               tab === t ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60',
             )}
           >
-            {t === 'import' ? '从备份搬一个进来' : t === 'pack' ? '导入伙伴包' : '新伙伴'}
+            {label}
           </button>
         ))}
         <Button size="sm" variant="ghost" className="ml-auto" onClick={onCancel}>
@@ -104,7 +92,11 @@ export function NewCompanion({ targets, onDone, onCancel }: {
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {tab === 'new' ? (
+        {tab === 'samples' ? (
+          <div className="mx-auto max-w-2xl">
+            <Samples onDone={onDone} />
+          </div>
+        ) : tab === 'new' ? (
           <Blank onDone={onDone} />
         ) : tab === 'pack' ? (
           <ImportPack onDone={onDone} />

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ComponentType } from 'react'
 import {
+  AppWindow,
   AudioLines,
   BookOpen,
   Brain,
@@ -32,7 +33,7 @@ import { Segmented, type SegmentedOption } from '@/components/Segmented'
 import { SignIn } from '@/components/SignIn'
 import { StatusDot, type Tone } from '@/components/StatusDot'
 import { sendJson, type Bot } from '@/lib/api'
-import { chatView, desktop } from '@/lib/desktop'
+import { chatView, desktop, openChatWindow, openConsole } from '@/lib/desktop'
 import { cn } from '@/lib/utils'
 import { LiveProvider, useBots, useLive, type LiveState } from '@/lib/live'
 import { useLiveData } from '@/lib/live-data'
@@ -203,7 +204,7 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
     >
       {PAGES.map((p) => {
         const current = p.hash === page.hash
-        return (
+        const link = (
           <a
             key={p.hash}
             href={p.hash}
@@ -233,19 +234,28 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
             )}
           </a>
         )
+        if (p.hash !== '#/chat' || layout !== 'column') return link
+        // Beside the link, not in it: it opens another window and leaves this page as it is.
+        return (
+          <div key={p.hash} className="relative grid">
+            {link}
+            <button
+              type="button"
+              onClick={openChatWindow}
+              aria-label="打开聊天窗口"
+              title="打开聊天窗口"
+              className="absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <AppWindow className="size-3.5" />
+            </button>
+          </div>
+        )
       })}
     </nav>
   )
 }
 
 /** The desktop app's chat window: the 聊天 page alone, under a draggable strip for the window's buttons. */
-/** From the chat window to the console: the app's console window, or (in a browser) a new tab. */
-function openConsole() {
-  if (desktop?.openConsole) void desktop.openConsole()
-  else if (desktop) window.location.assign('/') // an app from before the button: this window turns into the console
-  else window.open('/', '_blank', 'noopener')
-}
-
 function ChatWindow() {
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-surface">
@@ -321,6 +331,16 @@ function Shell() {
           style={desktop ? { paddingRight: desktop.captionWidth + 16 } : undefined}
         >
           <h1 className="text-lg font-semibold tracking-tight">{page.label === 'Bot' ? 'Bot 设置' : page.label}</h1>
+          {page.hash === '#/chat' && (
+            <button
+              type="button"
+              onClick={openChatWindow}
+              className="ml-auto flex h-8 items-center gap-1.5 rounded-full border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <AppWindow className="size-4" />
+              在单独的窗口里聊
+            </button>
+          )}
         </header>
         <main className="flex-1 overflow-y-auto px-4 pb-10 md:px-8">
           <div className="mx-auto flex max-w-6xl flex-col gap-6">

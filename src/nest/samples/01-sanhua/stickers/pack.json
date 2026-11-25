@@ -1,0 +1,21 @@
+{
+  "name": "三花的日常",
+  "items": [
+    {
+      "mood": "打招呼",
+      "file": "wave.webp"
+    },
+    {
+      "mood": "犯困",
+      "file": "sleepy.webp"
+    },
+    {
+      "mood": "得意",
+      "file": "cake.webp"
+    },
+    {
+      "mood": "害羞",
+      "file": "shy.webp"
+    }
+  ]
+}

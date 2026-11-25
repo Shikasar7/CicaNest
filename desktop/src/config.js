@@ -8,13 +8,17 @@
 //           remote-access password, like a browser would. Set in the app (托盘 → 连接设置…, saved in
 //           <profile>\connection.json) or with NEST_REMOTE_URL.
 //
-// Installed (an .exe made with `npm run dist`) there is no nest folder around it: it keeps its own files in the
-// profile, and asks for the address of the nest to connect to when none is set.
+// connection.json: { mode: 'local' | 'remote', remote, other }. Without a mode (written before there was one) an
+// address means remote. Switching to local keeps the addresses, to come back to.
+//
+// Installed (an .exe made with `npm run dist`) there is no nest folder around it: it brings nest and a Python to
+// run it (resources\backend, scripts/build-backend.js; `bundled` below), keeps nest's data in <profile>\home, and
+// asks at the first start which of the two it should be: nothing runs before that.
 //
 // NEST_HOME   the nest folder (default: the folder that contains desktop/);
 //             any other folder is a test copy and is labelled 「测试副本」 wherever the app shows itself
 // NEST_PORT   the console port (default: NEST_PORT in <home>\.env, else 18800)
-// NEST_PYTHON the Python that runs nest (default: <home>\.venv\Scripts\python.exe)
+// NEST_PYTHON the Python that runs nest (default: <home>\.venv\Scripts\python.exe, else the bundled one)
 // NEST_REMOTE_URL  a nest elsewhere, e.g. http://My-Mac.local:18800 (overrides connection.json)
 // NEST_DESKTOP_PROFILE  a separate Electron profile folder (window size, single-instance lock); for testing
 // NEST_PETS_DIR    the 桌宠 sprite packs (default: <profile>\pets)
@@ -73,25 +77,41 @@ function readConnection(file) {
 
 const DEFAULT_HOME = path.resolve(__dirname, '..', '..')
 
-/** `installed`: the profile folder of an installed app, null when it runs from the sources. */
-function loadConfig(env = process.env, connection = {}, installed = null) {
+/** The nest an installed app brings (its resources folder), null when it was built without one. */
+function bundledBackend(resources) {
+  const folder = path.join(resources, 'backend')
+  const python = path.join(folder, 'python', 'python.exe')
+  return fs.existsSync(python) ? { folder, python, web: path.join(folder, 'web') } : null
+}
+
+/** `installed`: the profile folder of an installed app, null when it runs from the sources.
+ * `bundled`: the nest that came with it (bundledBackend). */
+function loadConfig(env = process.env, connection = {}, installed = null, bundled = null) {
   const usual = installed ? path.join(installed, 'home') : DEFAULT_HOME
   const home = path.resolve(env.NEST_HOME || usual)
   const port = validPort(env.NEST_PORT) ?? portFromDotenv(home) ?? DEFAULT_PORT
   const dataDir = path.join(home, 'data')
-  const remote = remoteOrigin(env.NEST_REMOTE_URL) ?? remoteOrigin(connection.remote)
+  const fromEnv = remoteOrigin(env.NEST_REMOTE_URL)
+  const remote = fromEnv ?? (connection.mode === 'local' ? null : remoteOrigin(connection.remote))
   // Another way to the same nest (Tailscale first, the home network second, say): tried when the first does
   // not answer at start.
-  const other = remote && !remoteOrigin(env.NEST_REMOTE_URL) ? remoteOrigin(connection.other) : null
+  const other = remote && !fromEnv ? remoteOrigin(connection.other) : null
+  const ownPython = path.join(home, '.venv', 'Scripts', 'python.exe')
+  const brought = Boolean(bundled) && !env.NEST_PYTHON && !fs.existsSync(ownPython)
+  const chosen = Boolean(env.NEST_HOME) || (connection.mode === 'local' && brought)
   return Object.freeze({
     home,
     isTestCopy: !remote && home.toLowerCase() !== path.resolve(usual).toLowerCase(),
-    needsAddress: Boolean(installed) && !remote && !env.NEST_HOME,
+    // Installed and not told yet which nest it is for.
+    undecided: Boolean(installed) && !remote && !chosen,
+    // Whether nest can run on this computer at all.
+    canRunHere: !installed || Boolean(bundled) || Boolean(env.NEST_HOME),
     port,
     remote: Boolean(remote),
     origin: remote ?? `http://127.0.0.1:${port}`,
     origins: remote ? [remote, ...(other && other !== remote ? [other] : [])] : [],
-    python: env.NEST_PYTHON ? path.resolve(env.NEST_PYTHON) : path.join(home, '.venv', 'Scripts', 'python.exe'),
+    python: env.NEST_PYTHON ? path.resolve(env.NEST_PYTHON) : brought ? bundled.python : ownPython,
+    bundled: !remote && brought ? bundled : null,
     dataDir,
     logsDir: path.join(dataDir, 'logs'),
     runtimeFile: path.join(dataDir, 'runtime.json'),
@@ -101,4 +121,4 @@ function loadConfig(env = process.env, connection = {}, installed = null) {
   })
 }
 
-module.exports = { loadConfig, readConnection, remoteOrigin, DEFAULT_PORT }
+module.exports = { loadConfig, readConnection, remoteOrigin, portFromDotenv, bundledBackend, DEFAULT_PORT }

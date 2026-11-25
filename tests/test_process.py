@@ -206,3 +206,46 @@ def test_a_restart_can_listen_while_old_connections_close(tmp_path: Path) -> Non
     second = cli._bind(settings)
     assert second.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
     second.close()
+
+
+def test_start_gives_up_at_once_when_the_server_exits(
+    quiet_settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli.service, "installed", lambda: False)
+    failing = [sys.executable, "-c", "raise SystemExit(3)"]
+    monkeypatch.setattr(cli, "_spawn_server", lambda _settings: subprocess.Popen(failing))
+    began = time.monotonic()
+    assert cli.start(quiet_settings, open_browser=False) == 1
+    assert time.monotonic() - began < cli.START_TIMEOUT / 2
+    assert "退出码 3" in capsys.readouterr().out
+
+
+def test_stop_mine_finds_the_nest_by_its_python_and_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # What the installer runs: the data folder and the port are the running process's, not this one's.
+    home = tmp_path / "她的 家"
+    (home / "data").mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    RuntimeInfo(4242, "127.0.0.1", 18877, "t", 0.0, "0").write(home / "data" / "runtime.json")
+
+    class Fake:
+        def __init__(self, exe: str, line: list[str], cwd: Path) -> None:
+            self.info = {"pid": 1, "exe": exe, "cmdline": [exe, *line]}
+            self._cwd = cwd
+
+        def cwd(self) -> str:
+            return str(self._cwd)
+
+    serve = ["-m", "nest", "serve", "--quiet"]
+    running = [
+        Fake(sys.executable, serve, home),
+        Fake(sys.executable, ["-m", "nest", "stop", "--mine"], other),  # this very command
+        Fake(str(tmp_path / "python.exe"), serve, other),  # another Python's nest
+    ]
+    monkeypatch.setattr(cli.psutil, "process_iter", lambda _attrs: iter(running))
+    stopped: list[Settings] = []
+    monkeypatch.setattr(cli, "stop", lambda settings: stopped.append(settings) or 0)
+    assert cli.main(["stop", "--mine"]) == 0
+    assert [(s.home, s.port) for s in stopped] == [(home, 18877)]

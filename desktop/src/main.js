@@ -11,17 +11,23 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeImage, powerMonitor, session, shell } = require('electron')
 
-const { loadConfig, readConnection, remoteOrigin } = require('./config')
+const { bundledBackend, loadConfig, readConnection, remoteOrigin } = require('./config')
+const { prepareHome } = require('./local-setup')
 const log = require('./log')
 const { Nest, detailOf } = require('./nest')
 const { Launch } = require('./launcher')
 const { Splash } = require('./splash')
 const { MainWindow } = require('./mainWindow')
 const { TrayController } = require('./tray')
+const { OpenBot } = require('./open-bot')
 const { Unread } = require('./unread')
-const { RemoteNest, pickOrigin, probe } = require('./remote')
+const { RemoteNest, pickOrigin, probe, whyNot } = require('./remote')
 const { useDoor } = require('./local-name')
 const { Pets } = require('./pets')
+const { movedAway } = require('./login-item')
+const { fixElectronLink } = require('./electron-link')
+const { Updater } = require('./update')
+const { UpdateApp } = require('./update-app')
 const { Executor } = require('./executor')
 const { ExecutorStore } = require('./executor/store')
 const { Confirmations } = require('./executor/confirm')
@@ -34,7 +40,8 @@ if (startup.profileDir) app.setPath('userData', startup.profileDir)
 const CONNECTION_FILE = path.join(app.getPath('userData'), 'connection.json')
 // A copy of its own: which of two addresses answers is found out once the app is ready (origin).
 const INSTALLED = app.isPackaged ? app.getPath('userData') : null
-const config = { ...loadConfig(process.env, readConnection(CONNECTION_FILE), INSTALLED) }
+const BUNDLED = INSTALLED ? bundledBackend(process.resourcesPath) : null // the nest that came with it
+const config = { ...loadConfig(process.env, readConnection(CONNECTION_FILE), INSTALLED, BUNDLED), version: app.getVersion() }
 const EXECUTOR_FILE = path.join(app.getPath('userData'), 'executor.json')
 // The debug harness only for a launch made for a test (debug-gate.js).
 if (INSTALLED) config.debugDir = null // not even in the installed app's files
@@ -48,7 +55,8 @@ const HIDDEN = process.argv.includes('--hidden') // started at login: stay in th
 const TEST_MARK = config.isTestCopy ? '测试副本' : ''
 const APP_TITLE = TEST_MARK ? `nest · ${TEST_MARK}` : 'nest'
 
-app.setAppUserModelId('nest')
+const APP_ID = 'nest'
+app.setAppUserModelId(APP_ID)
 // 语音输入 in the chat window: a nest on another machine is reached over plain http on the home network,
 // where Chromium offers no microphone; this one address is treated as a secure page (nothing else is).
 const PLAIN = config.origins.filter((origin) => origin.startsWith('http://'))
@@ -65,7 +73,7 @@ function run() {
   if (DEBUG_REFUSED) log.warn(`debug harness not started: ${DEBUG_REFUSED}`)
   log.info(
     `nest desktop ${app.getVersion()} (electron ${process.versions.electron}) ` +
-      (config.remote ? `remote=${config.origin}` : `home=${config.home} port=${config.port}`),
+      (config.remote ? `remote=${config.origin}` : `home=${config.home} port=${config.port}${config.bundled ? ' bundled' : ''}${config.undecided ? ' undecided' : ''}`),
   )
 
   const nest = config.remote ? new RemoteNest(config) : new Nest(config)
@@ -82,12 +90,14 @@ function run() {
     watching: () => Boolean(chatWin?.isWatched()),
     onChange: (count) => tray?.setUnread(count),
   })
+  const wanted = new OpenBot()
   let connectWin = null
   let splash = null
   let tray = null
   let pets = null
   let executor = null
   let presentNow = () => {} // tells nest at once that the user is here (and asked for quiet or not)
+  let updates = null // an installed app only
   let executorStore = null
   let executorWin = null
   let confirmations = null
@@ -214,7 +224,7 @@ function run() {
   // ---- launch / restart --------------------------------------------------------------------------
 
   function startLaunch({ restart = false, visible = true } = {}) {
-    if (config.needsAddress) return void openConnection() // nothing here to start
+    if (config.undecided) return void openConnection() // nothing to start yet
     if (launch && !launch.finished) {
       if (visible) splash.show()
       return launch
@@ -263,7 +273,7 @@ function run() {
   }
 
   function openNest() {
-    if (config.needsAddress) return openConnection()
+    if (config.undecided) return openConnection()
     if (launch && !launch.finished) {
       splash.show()
       return
@@ -272,11 +282,12 @@ function run() {
   }
 
   function openChat(botId = '') {
-    if (config.needsAddress) return openConnection()
+    if (config.undecided) return openConnection()
     if (launch && !launch.finished) {
       splash.show()
       return
     }
+    wanted.ask(botId)
     chatWin.show().then(() => {
       if (botId && chatWin.alive()) chatWin.webContents.send('nest:open-bot', botId)
     })
@@ -419,8 +430,8 @@ function run() {
     }
     connectWin = new BrowserWindow({
       width: 560,
-      height: 440,
-      resizable: false,
+      height: 680,
+      useContentSize: true,
       maximizable: false,
       minimizable: false,
       title: '连接设置',
@@ -447,48 +458,104 @@ function run() {
 
   ipcMain.handle('connect:current', (event) => {
     if (!fromConnect(event)) throw new Error('not allowed')
+    const saved = readConnection(CONNECTION_FILE)
     return {
       remote: config.remote,
       origin: config.origin,
-      saved: readConnection(CONNECTION_FILE).remote || '',
-      other: readConnection(CONNECTION_FILE).other || '',
+      saved: saved.remote || '',
+      other: saved.other || '',
       fromEnv: Boolean(remoteOrigin(process.env.NEST_REMOTE_URL)),
-      installed: Boolean(INSTALLED), // there is no nest on this computer to go back to
+      undecided: config.undecided,
+      canRunHere: config.canRunHere,
+      home: config.home,
     }
   })
+
+  /** Why an address does not work, in a line or two. */
+  async function said(origin) {
+    const why = await whyNot(origin)
+    if (!why) return `${origin} 刚才没有回应，再试一次。`
+    return [`${why.title}。${why.text}`, ...why.steps.map((step, n) => `${n + 1}. ${step}`)].join('\n')
+  }
 
   ipcMain.handle('connect:test', async (event, address) => {
     if (!fromConnect(event)) throw new Error('not allowed')
     const origin = remoteOrigin(address)
     if (!origin) return { ok: false, error: '这不像一个地址：写成 名字:端口 或 http://IP:端口' }
     const health = await probe(origin)
-    if (!health) return { ok: false, error: `${origin} 没有回应，或者那不是 nest（远程访问打开了吗？）` }
+    if (!health) return { ok: false, error: await said(origin) }
     return { ok: true, origin, version: health.version || '' }
   })
 
-  ipcMain.handle('connect:save', async (event, address, second) => {
+  ipcMain.handle('connect:save', async (event, choice) => {
     if (!fromConnect(event)) throw new Error('not allowed')
-    const text = String(address || '').trim()
-    const origin = text ? remoteOrigin(text) : null
-    if (text && !origin) return { ok: false, error: '这不像一个地址：写成 名字:端口 或 http://IP:端口' }
-    if (!text && config.needsAddress) return { ok: false, error: '先填 nest 的地址。' }
-    const otherText = String(second || '').trim()
-    const other = origin && otherText ? remoteOrigin(otherText) : null
-    if (origin && otherText && !other) return { ok: false, error: '备用地址不像一个地址：写成 名字:端口 或 http://IP:端口' }
+    const local = choice?.mode === 'local'
+    const before = readConnection(CONNECTION_FILE)
+    const saved = { mode: local ? 'local' : 'remote' }
+    if (local) {
+      if (!config.canRunHere) return { ok: false, error: '这个安装包里没有 nest 后台，只能连到另一台。' }
+      if (before.remote) saved.remote = before.remote // to come back to
+      if (before.other) saved.other = before.other
+    } else {
+      const origin = remoteOrigin(choice?.address)
+      if (!origin) return { ok: false, error: '先填 nest 的地址：写成 名字:端口 或 http://IP:端口' }
+      const otherText = String(choice?.other || '').trim()
+      const other = otherText ? remoteOrigin(otherText) : null
+      if (otherText && !other) return { ok: false, error: '备用地址不像一个地址：写成 名字:端口 或 http://IP:端口' }
+      saved.remote = origin
+      if (other) saved.other = other
+      // Not saved unseen: an address nothing answers at would leave the app with nothing to show.
+      if (!choice?.anyway && !(await probe(origin)) && !(other && (await probe(other)))) {
+        return { ok: false, unreachable: true, error: await said(origin) }
+      }
+      if (!config.remote && !(await leaveLocal())) return { ok: false, error: '' }
+    }
+    return switchTo(saved)
+  })
+
+  /** Keep which nest this app is for, and open again with it. */
+  async function switchTo(saved) {
+    const local = saved.mode === 'local'
     try {
+      if (local && BUNDLED) await prepareHome(config.home)
       fs.mkdirSync(path.dirname(CONNECTION_FILE), { recursive: true })
-      fs.writeFileSync(CONNECTION_FILE, JSON.stringify(origin ? { remote: origin, ...(other ? { other } : {}) } : {}, null, 2), 'utf8')
+      fs.writeFileSync(CONNECTION_FILE, JSON.stringify(saved, null, 2), 'utf8')
     } catch (err) {
       return { ok: false, error: `保存失败：${err.message}` }
     }
-    log.info(`connection saved: ${origin || 'local'}; relaunching`)
+    log.info(`connection saved: ${local ? 'local' : saved.remote}; relaunching`)
     setTimeout(() => {
       quitting = true
-      app.relaunch()
+      app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== '--hidden') })
       app.exit(0)
     }, 100)
     return { ok: true }
-  })
+  }
+
+  // Going over to a nest elsewhere while the one on this computer runs: its bots stay online unless it is
+  // stopped, and from then on this app does not manage it. False: not going after all.
+  async function leaveLocal() {
+    if (config.undecided || !(await nest.health()) || !(await nest.isOurs())) return true
+    const { response } = await dialog.showMessageBox(connectWin, {
+      type: 'question',
+      title: APP_TITLE,
+      message: '这台电脑上的 nest 还在运行，要停掉吗？',
+      detail: '停掉的话，它的 bot 会下线；数据都还在，以后换回来就接着用。不停的话，它们继续在线。',
+      buttons: ['停掉', '让它继续运行', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    })
+    if (response === 2) return false
+    if (response === 1) return true
+    try {
+      await nest.stop()
+      return true
+    } catch (err) {
+      dialog.showErrorBox('nest 没能停止', err.message)
+      return false
+    }
+  }
 
   async function openFolder(folder) {
     fs.mkdirSync(folder, { recursive: true })
@@ -559,6 +626,27 @@ function run() {
     })
   }
 
+  // The offline page. Nest on this computer is offered only where it came with the app: run from the sources,
+  // this folder's nest may be one the user has retired.
+  const canRunHere = Boolean(config.remote && BUNDLED && !remoteOrigin(process.env.NEST_REMOTE_URL))
+  handle('nest:why-offline', async () => {
+    const why = (await whyNot(config.origin)) || { title: '正在重新连接', text: 'nest 有回应了。', steps: [] }
+    return { ...why, canRunHere }
+  })
+  handle('nest:retry', () => {
+    for (const win of [mainWin, chatWin]) if (win?.offline) win.reload()
+  })
+  handle('nest:open-connection', () => openConnection())
+  handle('nest:use-this-computer', () => {
+    if (!canRunHere) return { ok: false, error: '这个应用里没有带 nest，只能连到另一台。' }
+    const before = readConnection(CONNECTION_FILE)
+    // The address stays, to come back to.
+    return switchTo({
+      mode: 'local',
+      ...(before.remote ? { remote: before.remote } : {}),
+      ...(before.other ? { other: before.other } : {}),
+    })
+  })
   handle('nest:restart', () => {
     if (config.remote) return false // the nest elsewhere is restarted there
     startLaunch({ restart: true, visible: true })
@@ -574,6 +662,8 @@ function run() {
     openChat()
     return true
   })
+  handle('nest:wanted-bot', () => wanted.id)
+  handle('nest:bot-shown', (botId) => wanted.shown(String(botId || '')))
   // The chat window's 「控制台」 button.
   handle('nest:open-console', () => {
     openNest()
@@ -584,11 +674,64 @@ function run() {
   handle('nest:open-data', () => openFolder(config.dataDir))
   handle('nest:get-autostart', () => getAutostart())
   handle('nest:set-autostart', (enabled) => setAutostart(Boolean(enabled)))
+  // Updates (null: this app cannot be updated). Installing asks in a window of this app, whoever calls.
+  handle('nest:get-update', () => updates?.state() ?? null)
+  handle('nest:check-update', () => updates?.check() ?? null)
+  handle('nest:download-update', () => updates?.download() ?? null)
+  handle('nest:install-update', async () => {
+    await updates?.install()
+    return updates?.state() ?? null
+  })
+  handle('nest:update-page', () => updates?.openPage())
+  handle('nest:set-update-auto', (on) => {
+    updates?.setAuto(Boolean(on))
+    return updates?.state() ?? null
+  })
   handle('nest:quit', (options) => {
     // Answer first; quitting tears the page down.
     setTimeout(() => quitApp({ stopNest: !config.remote && Boolean(options?.stopNest) }), 50)
     return true
   })
+
+  // ---- 更新 ----------------------------------------------------------------------------------------
+
+  function makeUpdates() {
+    const { updates: source } = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'))
+    return new UpdateApp({
+      updater: new Updater({
+        version: app.getVersion(),
+        source,
+        dir: path.join(INSTALLED, 'updates'),
+        get: require('./update-net').get,
+        log,
+      }),
+      remote: config.remote,
+      icon: nativeImage.createFromPath(path.join(ICONS, 'nest-64.png')),
+      title: APP_TITLE,
+      prefs: readPrefs,
+      savePrefs: writePrefs,
+      notify,
+      parent: () => [mainWin, chatWin].find((w) => w?.isVisible())?.win,
+      healthVersion: async () => (await nest.health())?.version || '',
+      stopNest: async () => {
+        if (config.remote || config.undecided || !(await nest.health()) || !(await nest.isOurs())) return false
+        tray?.setBusy('正在更新…')
+        try {
+          await nest.stop()
+          return true
+        } finally {
+          tray?.setBusy(null)
+        }
+      },
+      startNest: () => startLaunch({ restart: false, visible: false }),
+      quit: () => quitApp({ stopNest: false }),
+      onChange: () => {
+        tray?.render()
+        for (const win of [mainWin, chatWin]) if (win?.alive()) win.webContents.send('nest:update')
+      },
+      log,
+    })
+  }
 
   // ---- app lifecycle -------------------------------------------------------------------------
 
@@ -612,6 +755,10 @@ function run() {
   })
 
   app.whenReady().then(async () => {
+    if (INSTALLED && BUNDLED) {
+      updates = makeUpdates()
+      if (!(await updates.begin())) return app.exit(0)
+    }
     try {
       // Before the first request: a .local name takes Windows about 11 seconds to look up.
       await useDoor(session.defaultSession)
@@ -621,6 +768,11 @@ function run() {
     if (config.origins.length > 1) {
       config.origin = await pickOrigin(config.origins)
       log.info(`using ${config.origin}`)
+    }
+    if (!app.isPackaged) {
+      const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Electron.lnk')
+      const options = { appId: APP_ID, execPath: process.execPath, icon: APP_ICON, appPath: app.getAppPath() }
+      if (fixElectronLink(link, shell, options)) log.info('gave Electron.lnk the nest icon')
     }
     theme.load()
     Menu.setApplicationMenu(null)
@@ -701,6 +853,8 @@ function run() {
         openHome: () => openChat('@home'),
         openConnection: () => openConnection(),
         openExecutor: () => openExecutor(),
+        updateItem: () => updates?.menuItem() ?? null,
+        update: () => updates?.ask(),
         executorState: () => executor?.state ?? 'off',
         pets: () => {
           const until = pets?.quiet() ? new Date(pets.saved.quietUntil) : null
@@ -743,6 +897,9 @@ function run() {
       },
     })
     tray.start()
+    if (INSTALLED && movedAway(app.getLoginItemSettings().launchItems, APP_ID, process.execPath, fs.existsSync)) {
+      setAutostart(true) // installed into another folder since
+    }
     pets = new Pets({
       config,
       nest,
@@ -770,8 +927,9 @@ function run() {
           return shell.openPath(target)
         },
       },
-      // This app's own data, and a nest running on this PC (its .env, its database), are never touched.
-      extraForbidden: [app.getPath('userData'), config.remote ? null : config.home].filter(Boolean),
+      // This app's own data, a nest running on this PC (its .env, its database) and the nest it brings are never
+      // touched.
+      extraForbidden: [app.getPath('userData'), config.remote ? null : config.home, BUNDLED?.folder].filter(Boolean),
       // The steps taken, so one nest hands over again is not done twice (also after a restart of this app).
       stepsFile: path.join(app.getPath('userData'), 'executor-steps.json'),
       // Switched off: the windows still open are a no.
@@ -794,7 +952,7 @@ function run() {
     presentNow = present
     setTimeout(present, 5000)
     setInterval(present, 60_000)
-    if (config.needsAddress) {
+    if (config.undecided) {
       if (!HIDDEN) openConnection()
     } else if (config.remote) {
       // Loaded now even when started hidden: the chat window is what hears a companion speak.
@@ -803,6 +961,8 @@ function run() {
     } else {
       startLaunch({ restart: false, visible: !HIDDEN })
     }
+
+    updates?.start()
 
     if (config.debugDir) {
       require('./debug').install({

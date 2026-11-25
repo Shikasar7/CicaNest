@@ -65,7 +65,9 @@ src/nest/
   storage/            SQLite 与编号迁移
 tests/                全部离线；fakes/ 里是假的平台和模型
 web/                  控制台（React + Vite + Tailwind + shadcn/ui）
-desktop/              Windows 桌面外壳（Electron）；`npm run dist` 打成安装包，装在别的电脑上连远程的 nest
+desktop/              Windows 桌面外壳（Electron）；`npm run dist` 打成自带后台的安装包（scripts/build-backend.js 把
+                      Python、依赖和 web/dist 放进去，scripts/installer.nsh 管装在哪、升级前停后台），也能只连远程的 nest；
+                      src/update*.js 是应用内更新，更新源是 package.json 的 updates
 deploy/               各种部署方式：windows、mac（QQ 容器模板、每周重启脚本、launchd 配置）、docker
 Dockerfile            Docker 镜像：后端、构建好的控制台和 docker 命令
 ```

@@ -15,7 +15,7 @@ body {
 }
 
 .panel {
-  width: min(420px, calc(100vw - 48px));
+  width: min(460px, calc(100vw - 48px));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -40,10 +40,50 @@ p {
   line-height: 1.6;
 }
 
+ol {
+  margin-top: 14px;
+  padding: 14px 18px 14px 36px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+ol[hidden],
+section[hidden],
+.btn[hidden] {
+  display: none;
+}
+
 .actions {
-  margin-top: 22px;
+  margin-top: 18px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
+}
+
+section {
+  margin-top: 22px;
+  padding-top: 18px;
+  width: 100%;
+  border-top: 1px solid var(--line);
+}
+
+section p {
+  margin: 0 0 12px;
+}
+
+section b {
+  color: var(--text);
+}
+
+.note {
+  margin-top: 18px;
+  font-size: 12px;
 }
 
 @keyframes panel-in {

@@ -81,33 +81,19 @@ body {
   white-space: nowrap;
 }
 
-/* The bots: dim rings until their account connects, then a filled disc with a short soft pop. */
+/* The companions: asleep until their account is online, then they wake up, hop once and look around. */
 .glyphs {
   margin-left: auto;
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .glyph {
-  --tint: color-mix(in srgb, var(--hue) 9%, transparent);
-  --rim: color-mix(in srgb, var(--hue) 30%, transparent);
   position: relative;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  font-family: 'KaiTi', 'STKaiti', serif;
-  font-size: 16px;
-  line-height: 1;
-  color: color-mix(in srgb, var(--hue) 62%, var(--bg));
-  background: var(--tint);
-  box-shadow: inset 0 0 0 1px var(--rim);
-  transition:
-    background-color 320ms ease,
-    color 320ms ease,
-    box-shadow 320ms ease,
-    opacity 320ms ease;
 }
 
 .is-in .glyph {
@@ -115,42 +101,201 @@ body {
   animation-delay: calc(140ms + var(--i, 0) * 60ms);
 }
 
-.glyph > span {
-  transform: translateY(0.5px);
+.glyph svg {
+  width: 34px;
+  height: 34px;
+  overflow: visible;
+  transform-origin: 50% 85%;
+  filter: saturate(0.55) opacity(0.75);
+  transition: filter 420ms ease;
 }
 
-.is-in .glyphs.is-waiting .glyph:not(.is-on) {
+.glyph:not(.is-on) svg {
+  animation: doze 2.6s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * -700ms);
+}
+
+.glyph.is-on svg {
+  filter: none;
   animation:
-    glyph-appear 420ms var(--ease-out) both,
-    breathe 1.9s ease-in-out infinite;
-  animation-delay:
-    calc(140ms + var(--i, 0) * 60ms),
-    calc(var(--i, 0) * 220ms);
+    hop 620ms var(--ease-spring) both,
+    sway 3.4s ease-in-out 700ms infinite;
+  animation-delay: calc(var(--i, 0) * 90ms), calc(700ms + var(--i, 0) * 260ms);
 }
 
-.glyph.is-on {
-  color: #fff;
-  background: var(--hue);
-  box-shadow:
-    inset 0 0 0 1px transparent,
-    0 3px 10px -3px color-mix(in srgb, var(--hue) 70%, transparent);
+.face-head {
+  fill: color-mix(in oklch, var(--hue) 42%, white);
 }
 
-.is-in .glyph.is-on {
-  animation: glyph-on 520ms var(--ease-spring) both;
+.face-inner {
+  fill: color-mix(in oklch, var(--hue) 22%, white);
 }
 
-.glyph.is-on::after {
-  content: '';
+.face-open {
+  fill: #2b3640;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.face-shut,
+.face-mouth {
+  fill: none;
+  stroke: #2b3640;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.face-mouth {
+  opacity: 0;
+}
+
+.face-cheek {
+  fill: #f7a6ab;
+  opacity: 0.85;
+}
+
+.face-stem {
+  stroke: #6fae7d;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.face-leaf {
+  fill: #86c893;
+}
+
+.is-on .face-open {
+  opacity: 1;
+  animation: blink 4.2s linear infinite;
+  animation-delay: calc(900ms + var(--i, 0) * 730ms);
+}
+
+.is-on .face-shut {
+  opacity: 0;
+}
+
+.is-on .face-mouth {
+  opacity: 1;
+}
+
+/* A small z drifting up from whoever still sleeps. */
+.zzz {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
+  top: 2px;
+  right: 0;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  color: color-mix(in srgb, var(--hue) 70%, var(--text));
+  opacity: 0;
   pointer-events: none;
-  animation: glyph-ring 760ms ease-out both;
+}
+
+.glyph:not(.is-on) .zzz {
+  animation: drift 2.6s ease-out infinite;
+  animation-delay: calc(400ms + var(--i, 0) * 800ms);
 }
 
 .is-in .glyph.is-gone {
   animation: glyph-gone 220ms ease both;
+}
+
+/* Ready: everyone hops, one after another. */
+[data-phase='done'] .glyph.is-on svg {
+  animation: hop 520ms var(--ease-spring) both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+/* The mark nods while it works. */
+.mark {
+  border-radius: 9px;
+  transform-origin: 50% 90%;
+}
+
+[data-phase='running'] .is-in .mark {
+  animation: nod 2.2s ease-in-out infinite;
+}
+
+@keyframes nod {
+  0%,
+  100% {
+    transform: none;
+  }
+  30% {
+    transform: rotate(-4deg);
+  }
+  70% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes doze {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: translateY(1.4px) scale(1.04, 0.95);
+  }
+}
+
+@keyframes hop {
+  0% {
+    transform: scale(1.08, 0.88);
+  }
+  40% {
+    transform: translateY(-8px) scale(0.95, 1.06);
+  }
+  72% {
+    transform: scale(1.06, 0.93);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes sway {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+
+@keyframes blink {
+  0%,
+  93%,
+  100% {
+    transform: none;
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes drift {
+  0% {
+    opacity: 0;
+    transform: translate(-2px, 4px) scale(0.7);
+  }
+  25% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(5px, -9px) scale(1.1);
+  }
+}
+
+@keyframes glyph-gone {
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+  }
 }
 
 @keyframes glyph-appear {
@@ -164,41 +309,12 @@ body {
   }
 }
 
-@keyframes breathe {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-
-@keyframes glyph-on {
-  0% {
-    transform: scale(0.82);
-  }
-  55% {
-    transform: scale(1.07);
-  }
-  100% {
-    transform: none;
-  }
-}
-
-@keyframes glyph-ring {
-  from {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--hue) 45%, transparent);
-  }
-  to {
-    box-shadow: 0 0 0 9px color-mix(in srgb, var(--hue) 0%, transparent);
-  }
-}
-
-@keyframes glyph-gone {
-  to {
-    opacity: 0;
-    transform: scale(0.8);
+@media (prefers-reduced-motion: reduce) {
+  .glyph svg,
+  .glyph .zzz,
+  .glyph .face-open,
+  .mark {
+    animation: none !important;
   }
 }
 

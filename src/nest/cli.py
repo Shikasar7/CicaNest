@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import httpx
+import psutil
 import uvicorn
 
 from nest import __version__, hints, service
@@ -34,7 +35,8 @@ from nest.core.market import signed_text
 from nest.logs import configure
 from nest.runtime import InstanceLock, RuntimeInfo, pid_alive, terminate
 
-START_TIMEOUT = 20.0
+# The first start on a slow computer: every file of a fresh install is looked at by the antivirus.
+START_TIMEOUT = 60.0
 STOP_TIMEOUT = 15.0
 # Open streams (the console's live updates) must not hold shutdown hostage: after this long they are
 # cut and the app's shutdown (adapters, brain, database) runs. Without it a "stopped" process lingered
@@ -45,7 +47,8 @@ KEEP_ALIVE_SECONDS = 120
 
 def _client() -> httpx.Client:
     # trust_env=False: never send local control traffic through a system proxy.
-    return httpx.Client(timeout=3.0, trust_env=False)
+    # connect: Windows takes two seconds to say that nothing listens; a start asks several times.
+    return httpx.Client(timeout=httpx.Timeout(3.0, connect=0.75), trust_env=False)
 
 
 def _healthy(settings: Settings) -> bool:
@@ -156,14 +159,14 @@ def _login_url(settings: Settings, info: RuntimeInfo) -> str:
     return f"{settings.base_url}/login?token={info.token}"
 
 
-def _spawn_server(settings: Settings) -> None:
+def _spawn_server(settings: Settings) -> subprocess.Popen:
     flags = 0
     kwargs: dict = {}
     if os.name == "nt":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen(
+    return subprocess.Popen(
         [sys.executable, "-m", "nest", "serve", "--quiet"],
         cwd=settings.home,
         creationflags=flags,
@@ -179,6 +182,7 @@ def start(settings: Settings, *, open_browser: bool) -> int:
     if not _healthy(settings) and lock_for(settings).held_elsewhere():
         print(f"有一个 nest 进程还没退出（控制台连不上它），请先{hints.STOP}再启动")
         return 1
+    server: subprocess.Popen | None = None
     if not _healthy(settings):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         if service.installed():
@@ -190,9 +194,13 @@ def start(settings: Settings, *, open_browser: bool) -> int:
                 )
                 return 1
         else:
-            _spawn_server(settings)
+            server = _spawn_server(settings)
         deadline = time.monotonic() + START_TIMEOUT
         while not (_healthy(settings) and RuntimeInfo.read(settings.runtime_file)):
+            if server is not None and server.poll() is not None:
+                code, log = server.returncode, settings.log_dir / "nest.log"
+                print(f"nest 启动后又退出了（退出码 {code}），请查看 {log}")
+                return 1
             if time.monotonic() > deadline:
                 print(f"nest 没能在 {START_TIMEOUT:.0f} 秒内启动，请查看 {settings.log_dir / 'nest.log'}")
                 return 1
@@ -255,6 +263,26 @@ def stop(settings: Settings) -> int:
     return 0
 
 
+def stop_mine() -> int:
+    """Stop every nest that runs with this very Python, wherever its data is (its working folder, see
+    _spawn_server). For the Windows installer, before it replaces or removes the files they run from."""
+    mine = os.path.normcase(sys.executable)
+    failed = 0
+    for process in psutil.process_iter(["pid", "exe", "cmdline"]):
+        line = process.info["cmdline"] or []
+        if os.path.normcase(process.info["exe"] or "") != mine or line[1:4] != ["-m", "nest", "serve"]:
+            continue
+        try:
+            home = Path(process.cwd())
+        except psutil.Error:
+            continue  # gone by now, or not ours to look at
+        info = RuntimeInfo.read(home / "data" / "runtime.json")
+        # Where it really listens: a port from the environment is not in its .env.
+        where = {} if info is None else {"host": info.host, "port": info.port}
+        failed |= stop(Settings(home=home, _env_file=home / ".env", **where))
+    return failed
+
+
 def _wait_exit(pid: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while pid_alive(pid):
@@ -286,7 +314,10 @@ def main(argv: list[str] | None = None) -> int:
     serve_cmd.add_argument("--quiet", action="store_true", help="只写日志文件，不输出到终端")
     start_cmd = sub.add_parser("start", help="在后台启动并打开控制台")
     start_cmd.add_argument("--no-browser", action="store_true")
-    sub.add_parser("stop", help="停止后台服务")
+    stop_cmd = sub.add_parser("stop", help="停止后台服务")
+    stop_cmd.add_argument(
+        "--mine", action="store_true", help="停止所有用这一个 Python 运行的 nest（安装程序用）"
+    )
     sub.add_parser("status", help="查看是否在运行")
     provider_cmd = sub.add_parser("provider-add", help="添加或更新一个模型接口")
     provider_cmd.add_argument("id", help="模型的名字，例如 deepseek")
@@ -324,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
         return plugin_key(Path(args.file))
     if args.command == "plugin-sign":
         return plugin_sign(Path(args.zip), Path(args.key))
+    if args.command == "stop" and args.mine:
+        return stop_mine()
     settings = Settings()
     if args.command == "serve":
         return serve(settings, console=not args.quiet)

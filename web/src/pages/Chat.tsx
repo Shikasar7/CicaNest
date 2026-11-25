@@ -26,15 +26,17 @@ import {
 } from 'lucide-react'
 
 import { BotGlyph } from '@/components/BotGlyph'
+import { ChatSettings } from '@/components/chat/ChatSettings'
 import { Files } from '@/components/chat/Files'
 import { Home } from '@/components/chat/Home'
 import { GroupConversation, GroupGlyph, GroupSettings, NewGroup } from '@/components/chat/GroupChat'
 import { Keepsakes } from '@/components/chat/Keepsakes'
-import { MeGlyph, MyAvatar } from '@/components/chat/MyAvatar'
+import { MeGlyph } from '@/components/chat/MyAvatar'
 import { NewCompanion } from '@/components/chat/NewCompanion'
 import { Picture } from '@/components/chat/Picture'
 import { Reminders } from '@/components/chat/Reminders'
 import { RoomScene } from '@/components/chat/RoomScene'
+import { Welcome } from '@/components/chat/Samples'
 import { Search } from '@/components/chat/Search'
 import { StickerPacks } from '@/components/chat/StickerPacks'
 import { StickerPicker } from '@/components/chat/StickerPicker'
@@ -1302,7 +1304,8 @@ type Pane =
   | 'tasks'
   | 'files'
   | 'new'
-  | 'me'
+  | 'new-own'
+  | 'settings'
   | 'stickers'
   | 'group'
   | 'group-new'
@@ -1512,9 +1515,10 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
         onBack={narrow ? () => setAtList(true) : undefined}
       />
     )
-  } else if (pane === 'new') {
+  } else if (pane === 'new' || pane === 'new-own') {
     main = (
       <NewCompanion
+        own={pane === 'new-own'}
         targets={(bots ?? []).map((b) => ({ bot_id: b.bot_id, name: b.name }))}
         onCancel={backToList}
         onDone={(id) => {
@@ -1523,10 +1527,20 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
         }}
       />
     )
-  } else if (pane === 'me') {
-    main = <MyAvatar onClose={backToList} />
+  } else if (pane === 'settings') {
+    main = <ChatSettings onClose={backToList} onHome={() => open('home')} />
   } else if (pane === 'stickers') {
     main = <StickerPacks initialBot={bot?.bot_id ?? null} onClose={backToList} />
+  } else if (bots?.length === 0) {
+    main = (
+      <Welcome
+        onDone={(id) => {
+          showBot(id)
+          reload()
+        }}
+        onNew={() => open('new-own')}
+      />
+    )
   } else if (bot === null) {
     main = <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">选一个伙伴开始聊天</div>
   } else if (pane === 'reminders') {
@@ -1642,13 +1656,13 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
           </button>
           <button
             type="button"
-            onClick={() => open('me')}
-            aria-pressed={pane === 'me'}
-            title="我的头像"
-            className={cn(footer, 'w-full', pane === 'me' && 'bg-card text-foreground')}
+            onClick={() => open('settings')}
+            aria-pressed={pane === 'settings'}
+            title="设置：外观、头像、声音"
+            className={cn(footer, 'w-full', pane === 'settings' && 'bg-card text-foreground')}
           >
             <MeGlyph size="sm" />
-            <span className={phoneList ? 'inline' : 'hidden md:inline'}>我的头像</span>
+            <span className={phoneList ? 'inline' : 'hidden md:inline'}>设置</span>
           </button>
         </div>
       </aside>

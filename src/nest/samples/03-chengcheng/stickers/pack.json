@@ -1,0 +1,21 @@
+{
+  "name": "橙橙的歌单",
+  "items": [
+    {
+      "mood": "开心",
+      "file": "happy.webp"
+    },
+    {
+      "mood": "耶",
+      "file": "yeah.webp"
+    },
+    {
+      "mood": "听歌",
+      "file": "music.webp"
+    },
+    {
+      "mood": "拜托",
+      "file": "please.webp"
+    }
+  ]
+}

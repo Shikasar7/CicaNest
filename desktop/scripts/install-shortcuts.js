@@ -68,7 +68,7 @@ function main() {
     target: process.execPath,
     args: `"${APP_DIR}"`,
     cwd: APP_DIR,
-    description: 'nest：一键启动 QQ bot 和控制台',
+    description: 'nest：AI 伙伴的聊天、桌宠和控制台',
     icon: path.join(APP_DIR, 'assets', 'icons', 'nest.ico'),
     iconIndex: 0,
     appUserModelId: 'nest',

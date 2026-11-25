@@ -42,7 +42,7 @@
 | `"themes": ["themes/sakura.json", …]` | 主题：只有颜色。文件名是小写字母、数字和 `-`。格式可以在控制台「系统 → 外观」导出一份来看 | content |
 | `"pets": ["pets/xx", …]` | 桌宠：文件夹里有 `pet.json`（一只桌宠或一套皮肤）或 `acc.json`（一个配饰） | content |
 | `"stickers": ["stickers/xx", …]` | 一套表情包：文件夹里有 `pack.json`（`{"name": "…", "items": [{"mood": "开心", "file": "01.png"}]}`）和图（png、gif、webp、jpg，每张 8 MB 以内，最多 60 张）。装好后在聊天页「表情包」里拿给哪个伙伴用。在那里也能把画好的一套直接存成插件包 | content |
-| `"companion": "companion"` | 一整个伙伴（人设、说话示例），格式和控制台「导出伙伴」得到的一样 | guides |
+| `"companion": "companion"` | 一整个伙伴（人设、说话示例），格式和控制台「导出伙伴」得到的一样，`companion.json` 里还可以用 `"avatar": "avatar.png"` 带头像。在聊天页「导入伙伴包」导入：同一个包里的表情包直接归她，桌宠和技能只给她用。例子见 [src/nest/samples](../src/nest/samples) | guides |
 | `"mcp": {"command": [...], "install": [...]}` | MCP 工具服务器。`install` 是装的时候在伙伴容器里跑的命令，`command` 是启动服务器的命令和参数。它在每个伙伴自己的容器里跑（Linux，有 Python 3.12 和 Node 22），只看得到自己的插件文件夹 | code |
 | `"python": {"module": "模块名"}` | 在 nest 进程里跑的 Python 模块，用来加模型种类、聊天平台 | trusted：只有用户勾了「我信任它」才装，市场里标红 |
 

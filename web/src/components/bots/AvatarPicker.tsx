@@ -196,7 +196,7 @@ export function AvatarPicker({ bot, onDone }: { bot: Bot; onDone: () => void }) 
             <>
               <div role="radiogroup" aria-label="显示哪个头像" className="grid grid-cols-[repeat(3,minmax(0,5.5rem))] gap-2">
                 <Choice
-                  label="字"
+                  label="小脸"
                   selected={view.chosen === null}
                   busy={busy === 'glyph'}
                   disabled={busy !== null}

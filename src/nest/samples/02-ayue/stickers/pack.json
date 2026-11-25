@@ -1,0 +1,21 @@
+{
+  "name": "阿月的书签",
+  "items": [
+    {
+      "mood": "看书",
+      "file": "reading.webp"
+    },
+    {
+      "mood": "犯困",
+      "file": "sleepy.webp"
+    },
+    {
+      "mood": "我就知道",
+      "file": "told-you.webp"
+    },
+    {
+      "mood": "害羞",
+      "file": "shy.webp"
+    }
+  ]
+}

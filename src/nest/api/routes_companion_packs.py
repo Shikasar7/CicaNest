@@ -1,12 +1,15 @@
 """伙伴包 in the console: export a companion as a pack, and import one as a new companion
-on the desk — read first and shown, then made; skills and pets in the pack are installed for her only."""
+on the desk — read first and shown, then made; her picture and stickers in the pack become hers, skills and
+pets are installed for her only."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import shutil
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -21,8 +24,12 @@ from nest.core.companion_pack import Pack, PackProblem, build_pack, pack_id, rea
 from nest.core.desk import chat_of, chosen_chats
 from nest.core.keepsakes import RECORDS_MAX
 from nest.core.memory import place_key
-from nest.core.plugins import PluginError, read_manifest
+from nest.core.plugins import PluginError, read_manifest, read_sticker_pack
+from nest.core.sticker_packs import PackError
+from nest.storage.avatars import image_type
 from nest.storage.memories import MemoryStore
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
@@ -75,8 +82,8 @@ async def export(request: Request, bot_id: str, memories: bool = True, records: 
     )
 
 
-def _read(request: Request, stage: str) -> tuple[Any, Pack]:
-    manager = request.app.state.plugins
+def _read(state: Any, stage: str) -> tuple[Any, Pack]:
+    manager = state.plugins
     try:
         _, folder = manager.staged(stage)
     except PluginError as exc:
@@ -103,21 +110,63 @@ def _read(request: Request, stage: str) -> tuple[Any, Pack]:
     return manifest, pack
 
 
-def _own_id(request: Request, stage: str, bot_id: str) -> None:
+def _own_id(state: Any, stage: str, bot_id: str, was: str, name: str) -> None:
     """The pack's plugin gets an id of this companion's: the same pack imported twice is two companions,
-    each with her own skills and pets. What made her (persona, what she remembers of the user, her
-    records) is not kept with it: it is in her settings now."""
-    _, folder = request.app.state.plugins.staged(stage)
+    each with her own skills and pets (under the name she got here). What made her (persona, what she
+    remembers of the user, her records, her stickers) is not kept with it: it is in her settings now."""
+    _, folder = state.plugins.staged(stage)
     path = folder / "plugin.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     tail = re.sub(r"[^a-z0-9]", "", bot_id.lower())[-12:] or "x"
     data["id"] = f"{data['id']}.for{tail}"[:120]
-    place = (data.get("provides") or {}).pop("companion", None)
+    provides = data.get("provides") or {}
+    place = provides.pop("companion", None)
+    stickers = provides.pop("stickers", None) or []
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    if isinstance(place, str):
-        companion = (folder / place).resolve()
-        if companion.is_relative_to(folder.resolve()) and companion != folder.resolve():
-            shutil.rmtree(companion, ignore_errors=True)
+    for gone in (place, *stickers):
+        if isinstance(gone, str):
+            inside = (folder / gone).resolve()
+            if inside.is_relative_to(folder.resolve()) and inside != folder.resolve():
+                shutil.rmtree(inside, ignore_errors=True)
+    for pet in provides.get("pets") or []:
+        _rename_pet(folder / str(pet), was, name)
+
+
+def _rename_pet(folder: Path, was: str, name: str) -> None:
+    """A pet belongs to the companion of its name."""
+    path = folder / "pet.json"
+    if was == name or not path.is_file():
+        return
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(meta, dict):
+        for key in ("name", "skin_of"):
+            if meta.get(key) == was:
+                meta[key] = name
+        path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+async def _look(state: Any, bot_id: str, pack: Pack) -> None:
+    """Her picture."""
+    content_type = image_type(pack.avatar)
+    if content_type is not None:
+        await state.avatars.put(bot_id, "custom", content_type, pack.avatar)
+        state.broadcaster.publish("avatars", {"bot_id": bot_id})
+
+
+async def _stickers(state: Any, stage: str, bot_id: str, manifest: Any) -> None:
+    """Her sticker packs, hers from now on."""
+    _, folder = state.plugins.staged(stage)
+    for place in manifest.provides.get("stickers") or []:
+
+        def read(place: str = str(place)) -> tuple[str, list[tuple[str, bytes]]]:
+            found = read_sticker_pack(folder / place)
+            return found["name"], [(mood, path.read_bytes()) for mood, path in found["items"]]
+
+        try:
+            name, items = await asyncio.to_thread(read)
+            await state.sticker_packs.take_in(bot_id, name, items)
+        except (PackError, PluginError, OSError) as exc:
+            log.warning("伙伴包里的表情 %s 没拿进来：%s", place, exc)
 
 
 @router.put("/companion-packages")
@@ -128,7 +177,7 @@ async def stage(request: Request) -> dict[str, Any]:
     except PluginError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     try:
-        manifest, pack = await asyncio.to_thread(_read, request, staged["stage"])
+        manifest, pack = await asyncio.to_thread(_read, request.app.state, staged["stage"])
     except HTTPException:
         await request.app.state.plugins.discard(staged["stage"])
         raise
@@ -143,14 +192,19 @@ async def stage(request: Request) -> dict[str, Any]:
 
 @router.post("/companion-packages/{stage}/import", status_code=201)
 async def import_pack(request: Request, stage: str, body: PackImport) -> dict[str, Any]:
-    state = request.app.state
-    manifest, pack = await asyncio.to_thread(_read, request, stage)
+    return await bring(request.app.state, stage, name=body.name, provider_id=body.provider_id)
+
+
+async def bring(state: Any, stage: str, *, name: str = "", provider_id: str | None = None) -> dict[str, Any]:
+    """The companion of a staged pack, made new on the desk with all the pack has of hers."""
+    manifest, pack = await asyncio.to_thread(_read, state, stage)
+    name = name.strip() or pack.name
     made = await make_companion(
         state,
         Companion(
-            name=body.name.strip() or pack.name,
+            name=name,
             aliases=pack.aliases,
-            provider_id=body.provider_id,
+            provider_id=provider_id,
             persona=pack.persona,
             examples=pack.examples,
             user_name=pack.user_name,
@@ -158,13 +212,16 @@ async def import_pack(request: Request, stage: str, body: PackImport) -> dict[st
             records=[Record(**r) for r in pack.records[:RECORDS_MAX]],
         ),
     )
+    bot_id = made["bot_id"]
+    await _look(state, bot_id, pack)
+    await _stickers(state, stage, bot_id, manifest)
     plugin_id = None
-    if any(k != "companion" for k in manifest.view()["kinds"]):
+    if any(k not in ("companion", "stickers") for k in manifest.view()["kinds"]):
         # Her skills and pets: a plugin of hers alone. Another of the same pack upgrades it, so it is kept
         # under an id of its own per companion.
-        await asyncio.to_thread(_own_id, request, stage, made["bot_id"])
+        await asyncio.to_thread(_own_id, state, stage, bot_id, pack.name, name)
         installed = await state.plugins.install(stage)
-        await state.plugins.configure(installed.id, enabled=True, bots=[made["bot_id"]])
+        await state.plugins.configure(installed.id, enabled=True, bots=[bot_id])
         plugin_id = installed.id
         state.broadcaster.publish("plugins", {})
     else:

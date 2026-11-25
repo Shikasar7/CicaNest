@@ -23,10 +23,28 @@ contextBridge.exposeInMainWorld('nestDesktop', {
   titleBarHeight: 40,
   captionWidth: 140,
   restartNest: () => ipcRenderer.invoke('nest:restart'),
+  // The offline page: why, and the ways out.
+  whyOffline: () => ipcRenderer.invoke('nest:why-offline'),
+  retry: () => ipcRenderer.invoke('nest:retry'),
+  openConnection: () => ipcRenderer.invoke('nest:open-connection'),
+  useThisComputer: () => ipcRenderer.invoke('nest:use-this-computer'),
   openLogsFolder: () => ipcRenderer.invoke('nest:open-logs'),
   openDataFolder: () => ipcRenderer.invoke('nest:open-data'),
   getAutostart: () => ipcRenderer.invoke('nest:get-autostart'),
   setAutostart: (enabled) => ipcRenderer.invoke('nest:set-autostart', Boolean(enabled)),
+  // Newer versions of this app (null: it cannot be updated, run from the sources say). Each gives the state after it.
+  getUpdate: () => ipcRenderer.invoke('nest:get-update'),
+  checkUpdate: () => ipcRenderer.invoke('nest:check-update'),
+  downloadUpdate: () => ipcRenderer.invoke('nest:download-update'),
+  installUpdate: () => ipcRenderer.invoke('nest:install-update'),
+  openUpdatePage: () => ipcRenderer.invoke('nest:update-page'),
+  setUpdateAuto: (on) => ipcRenderer.invoke('nest:set-update-auto', Boolean(on)),
+  // Something about it changed: ask again. Returns the unsubscribe.
+  onUpdate: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('nest:update', listener)
+    return () => ipcRenderer.removeListener('nest:update', listener)
+  },
   quit: (options) => ipcRenderer.invoke('nest:quit', { stopNest: Boolean(options && options.stopNest) }),
   // A companion said something while this window was not in front: a Windows notification.
   notify: (note) =>
@@ -45,10 +63,23 @@ contextBridge.exposeInMainWorld('nestDesktop', {
       mode: String(theme && theme.mode ? theme.mode : 'system'),
       colors: theme && theme.colors ? JSON.parse(JSON.stringify(theme.colors)) : null,
     }),
-  // The notification was clicked: show this bot's chat.
+  // A notification or a pet was clicked: show this bot's chat. Also one asked for while the page was still
+  // loading (the chat window only: the console is not what was opened).
   onOpenBot: (callback) => {
-    const listener = (_event, botId) => callback(String(botId))
+    let on = true
+    const show = (botId) => {
+      if (!on || !botId) return
+      ipcRenderer.invoke('nest:bot-shown', botId).catch(() => {})
+      callback(botId)
+    }
+    const listener = (_event, botId) => show(String(botId))
     ipcRenderer.on('nest:open-bot', listener)
-    return () => ipcRenderer.removeListener('nest:open-bot', listener)
+    if (argument('nest-view') === 'chat') {
+      ipcRenderer.invoke('nest:wanted-bot').then((botId) => show(String(botId || ''))).catch(() => {})
+    }
+    return () => {
+      on = false
+      ipcRenderer.removeListener('nest:open-bot', listener)
+    }
   },
 })

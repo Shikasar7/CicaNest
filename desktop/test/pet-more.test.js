@@ -96,13 +96,13 @@ test('of two addresses the first that answers is used', async () => {
   assert.deepEqual(loadConfig({}, { other: 'mac.local' }).origins, []) // a spare without a first is nothing
 })
 
-test('installed: its own folder, and an address is needed; from the sources nothing changes', () => {
+test('installed: its own folder, and nothing is chosen yet; from the sources nothing changes', () => {
   const profile = path.join(os.tmpdir(), 'nest-profile')
   const fresh = loadConfig({}, {}, profile)
   assert.equal(fresh.home, path.join(profile, 'home'))
-  assert.equal(fresh.needsAddress, true)
+  assert.equal(fresh.undecided, true)
   assert.equal(fresh.isTestCopy, false)
-  assert.equal(loadConfig({}, { remote: 'mac.local' }, profile).needsAddress, false)
-  assert.equal(loadConfig({ NEST_HOME: profile }, {}, profile).needsAddress, false)
-  assert.equal(loadConfig({}, {}).needsAddress, false)
+  assert.equal(loadConfig({}, { remote: 'mac.local' }, profile).undecided, false)
+  assert.equal(loadConfig({ NEST_HOME: profile }, {}, profile).undecided, false)
+  assert.equal(loadConfig({}, {}).undecided, false)
 })

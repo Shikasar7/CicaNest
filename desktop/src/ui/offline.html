@@ -15,12 +15,20 @@
     <div class="drag" aria-hidden="true"></div>
     <main class="panel">
       <img class="mark" src="../../assets/icons/nest-128.png" width="44" height="44" alt="" />
-      <h1>nest 后台没有响应</h1>
-      <p>bot 现在可能都不在线。后台恢复后，这个窗口会自动重新连上。</p>
+      <h1 id="title">nest 后台没有响应</h1>
+      <p id="text">bot 现在可能都不在线。后台恢复后，这个窗口会自动重新连上。</p>
+      <ol id="steps" hidden></ol>
       <div class="actions">
+        <button class="btn ghost" type="button" id="retry" hidden>再试一次</button>
+        <button class="btn ghost" type="button" id="change" hidden>换一个地址…</button>
         <button class="btn ghost" type="button" id="logs">打开日志文件夹</button>
         <button class="btn primary" type="button" id="restart">重启 nest</button>
       </div>
+      <section id="here" hidden>
+        <p><b>没有另一台电脑？</b>nest 可以直接在这台电脑上运行，不用另装别的。</p>
+        <button class="btn primary" type="button" id="use-here">就在这台电脑上用</button>
+      </section>
+      <p id="note" class="note" role="status"></p>
     </main>
   </body>
 </html>

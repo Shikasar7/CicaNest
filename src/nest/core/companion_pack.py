@@ -5,10 +5,12 @@ A pack is a plugin zip (nest.core.plugins) whose provides.companion names a fold
 
     {"format": 1, "name": "…", "aliases": [], "user_name": "…", "persona": "…", "examples": "…",
      "points": [{"kind": "like" | "fact" | "promise", "content": "…", "due": ""}],
-     "records": [{"title": "…", "file": "records/001.md", "source": "…"}]}
+     "records": [{"title": "…", "file": "records/001.md", "source": "…"}],
+     "avatar": "avatar.png"}
 
-and the records' Markdown files beside it. The same pack may also carry skills and pets: imported, those
-are installed as a plugin for the new companion only. Importing a pack makes a new companion that lives
+and the records' Markdown files and her picture (if any) beside it. The same pack may also carry sticker
+packs (they become hers), and skills and pets: those are installed as a plugin for the new companion
+only. Importing a pack makes a new companion that lives
 on the desk (the same way 「新伙伴 / 搬一个进来」 keeps one), never changes one that exists.
 """
 
@@ -26,10 +28,12 @@ from typing import Any
 from nest.core.companion_import import EXAMPLES_MAX, PERSONA_MAX, POINTS_MAX
 from nest.core.keepsakes import BODY_MAX, RECORDS_MAX, TITLE_MAX
 from nest.core.memory import CONTENT_MAX
+from nest.storage.avatars import image_type
 
 FORMAT = 1
 KINDS = ("like", "fact", "promise")
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+AVATAR_MAX = 5 * 1024**2
 
 
 class PackProblem(ValueError):
@@ -45,6 +49,7 @@ class Pack:
     examples: str = ""
     points: list[dict[str, str]] = field(default_factory=list)
     records: list[dict[str, str]] = field(default_factory=list)  # title, body, source
+    avatar: bytes = b""
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -60,6 +65,27 @@ class Pack:
 
 def _text(value: Any, limit: int) -> str:
     return str(value or "").replace("\r\n", "\n").strip()[:limit]
+
+
+def _file(base: Path, relative: Any, what: str) -> Path:
+    """A file of the pack's companion folder, never one outside it."""
+    pure = PurePosixPath(str(relative or ""))
+    path = (base / Path(*pure.parts)).resolve() if pure.parts else base
+    if pure.is_absolute() or ".." in pure.parts or not path.is_relative_to(base) or not path.is_file():
+        raise PackProblem(f"{what}找不到或路径不对：{relative}")
+    return path
+
+
+def _avatar(base: Path, relative: Any) -> bytes:
+    if not relative:
+        return b""
+    path = _file(base, relative, "头像")
+    if path.stat().st_size > AVATAR_MAX:
+        raise PackProblem(f"头像不能超过 {AVATAR_MAX // 1024**2} MB")
+    data = path.read_bytes()
+    if image_type(data) is None:
+        raise PackProblem("头像要是 PNG、JPEG、WebP 或 GIF 图片")
+    return data
 
 
 def read_pack(folder: Path) -> Pack:
@@ -90,10 +116,7 @@ def read_pack(folder: Path) -> Pack:
     for item in (data.get("records") or [])[:RECORDS_MAX]:
         if not isinstance(item, dict):
             continue
-        pure = PurePosixPath(str(item.get("file") or ""))
-        path = (base / Path(*pure.parts)).resolve() if pure.parts else base
-        if pure.is_absolute() or ".." in pure.parts or not path.is_relative_to(base) or not path.is_file():
-            raise PackProblem(f"回忆文件找不到或路径不对：{item.get('file')}")
+        path = _file(base, item.get("file"), "回忆文件")
         body = _text(path.read_text(encoding="utf-8", errors="replace"), BODY_MAX)
         title = _text(item.get("title"), TITLE_MAX) or path.stem
         if body:
@@ -107,6 +130,7 @@ def read_pack(folder: Path) -> Pack:
         examples=_text(data.get("examples"), EXAMPLES_MAX),
         points=points[:POINTS_MAX],
         records=records,
+        avatar=_avatar(base, data.get("avatar")),
     )
 
 

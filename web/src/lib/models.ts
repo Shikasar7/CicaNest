@@ -104,3 +104,8 @@ export function isInsecureRemote(url: string): boolean {
 export function liveUsers(provider: ProviderView): string[] {
   return provider.used_by.filter((u) => u.mode === 'live').map((u) => u.name)
 }
+
+/** The models a companion can talk with. */
+export function usable(providers: ProviderView[] | null) {
+  return (providers ?? []).filter((p) => p.health !== null)
+}

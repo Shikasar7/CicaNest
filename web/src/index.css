@@ -10,7 +10,6 @@
     --font-sans: 'Geist Variable', 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
         'Noto Sans SC', sans-serif;
     /* The bots' marks: one brush-style character each. */
-    --font-glyph: 'KaiTi', 'STKaiti', 'Kaiti SC', 'Noto Serif SC', serif;
     --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
     --color-ok: var(--ok);
     --color-warn: var(--warn);

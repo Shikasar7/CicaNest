@@ -128,7 +128,8 @@ class TrayController {
     const busy = Boolean(this.busy)
     const pets = this.actions.pets?.() ?? { items: [], hidden: false, onTop: true }
     const executor = this.actions.executorState?.() ?? 'off'
-    const key = JSON.stringify([summary, down, busy, autostart, pets, executor, this.unread])
+    const update = this.actions.updateItem?.() ?? null
+    const key = JSON.stringify([summary, down, busy, autostart, pets, executor, this.unread, update])
     if (!force && key === this.menuKey) return
     this.menuKey = key
     const local = !this.remote
@@ -233,6 +234,7 @@ class TrayController {
       },
       { label: '连接设置…', click: () => this.actions.openConnection() },
       { label: '打开日志文件夹', click: () => this.actions.openLogs() },
+      ...(update ? [{ ...update, click: () => this.actions.update() }] : []),
       { type: 'separator' },
       ...(local
         ? [

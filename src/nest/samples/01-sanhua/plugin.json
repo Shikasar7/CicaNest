@@ -1,0 +1,16 @@
+{
+  "id": "cicanest.sanhua",
+  "name": "三花",
+  "version": "1.0.0",
+  "author": "CicaNest",
+  "description": "三花猫耳女仆，勤快嘴甜，做完事会邀功",
+  "provides": {
+    "companion": "companion",
+    "pets": [
+      "pets/sanhua"
+    ],
+    "stickers": [
+      "stickers"
+    ]
+  }
+}

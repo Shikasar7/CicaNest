@@ -98,24 +98,15 @@ function renderGlyphs(glyphs, waiting) {
   const existing = new Map([...glyphBox.children].filter((g) => !g.classList.contains('is-gone')).map((g) => [g.dataset.key, g]))
   glyphs.forEach((glyph, index) => {
     let node = existing.get(glyph.key)
-    // A placeholder glyph is replaced by the real account with the same character, without a flicker.
-    if (!node) {
-      node = [...existing.values()].find((g) => g.dataset.char === glyph.char && g.dataset.placeholder === '1')
-      if (node) existing.delete(node.dataset.key)
-    } else {
-      existing.delete(glyph.key)
-    }
+    existing.delete(glyph.key)
     if (!node) {
       node = el('span', 'glyph')
-      node.append(el('span', '', glyph.char))
+      node.append(window.nestFace.draw(glyph.face), el('span', 'zzz', 'z'))
       glyphBox.append(node)
     }
     node.dataset.key = glyph.key
-    node.dataset.char = glyph.char
-    node.dataset.placeholder = glyph.name ? '0' : '1'
     node.style.setProperty('--hue', glyph.hue)
     node.style.setProperty('--i', String(index))
-    node.firstChild.textContent = glyph.char
     node.classList.toggle('is-on', Boolean(glyph.online))
     node.title = glyph.name ? `${glyph.name} · ${glyph.online ? '在线' : '还没上线'}` : ''
     if (glyphBox.children[index] !== node) glyphBox.insertBefore(node, glyphBox.children[index] || null)

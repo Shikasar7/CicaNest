@@ -3,6 +3,7 @@ import { ArrowDown, FolderOpen, Search } from 'lucide-react'
 
 import { AccountConnections } from '@/components/AccountConnections'
 import { AppearanceSettings } from '@/components/Appearance'
+import { DesktopOptions } from '@/components/DesktopOptions'
 import { FirstLoad, StaleNotice } from '@/components/Feedback'
 import { QRLogin } from '@/components/QRLogin'
 import { RemoteAccess } from '@/components/RemoteAccess'
@@ -11,7 +12,6 @@ import { StatusDot, type Tone } from '@/components/StatusDot'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Segmented } from '@/components/Segmented'
 import { checkProxy } from '@/components/models/form'
 import { ApiError, getJson, sendJson, type AuthInfo, type LogLine, type QQContainer, type SystemSettings, type SystemView } from '@/lib/api'
@@ -672,33 +672,6 @@ function Logs() {
           </button>
         )}
       </div>
-    </div>
-  )
-}
-
-function DesktopOptions() {
-  const [autostart, setAutostart] = useState<boolean | null>(null)
-  const [error, setError] = useState('')
-  useEffect(() => {
-    desktop?.getAutostart().then(setAutostart, () => setAutostart(null))
-  }, [])
-  if (!desktop) return null
-  const toggle = async (next: boolean) => {
-    setError('')
-    setAutostart(next)
-    try {
-      await desktop!.setAutostart(next)
-    } catch (e) {
-      setAutostart(!next)
-      setError((e as Error).message)
-    }
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <Switch checked={autostart ?? false} disabled={autostart === null} onCheckedChange={(v) => void toggle(v)} aria-label="开机时自动启动 nest" />
-      <span className="text-sm">开机时自动启动 nest</span>
-      <span className="text-xs text-muted-foreground">登录 Windows 后在后台打开，右下角会出现 nest 图标</span>
-      {error && <p role="alert" className="w-full text-xs text-destructive">{error}</p>}
     </div>
   )
 }

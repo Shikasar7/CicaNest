@@ -16,8 +16,9 @@ NOT_BUILT = (
 # Files under assets/ carry a hash of their content in the name (Vite): a new build gets new names, so the
 # browser may keep them for good instead of asking again on every page load.
 FOREVER = "public, max-age=31536000, immutable"
-# 加到主屏幕: the web app manifest, by its registered type (not every system knows the extension).
+# Types not every system knows by the extension: the web app manifest (加到主屏幕) and WebP pictures.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("image/webp", ".webp")
 
 
 def mount_console(app: FastAPI, dist: Path) -> None:

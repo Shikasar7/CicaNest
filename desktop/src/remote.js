@@ -6,6 +6,7 @@
 
 const { net, session } = require('electron')
 const { NestError } = require('./nest')
+const { explain, kindOf } = require('./why')
 
 const DEFAULT_TIMEOUT = 8000
 
@@ -67,6 +68,19 @@ async function probe(origin, timeout = 4000) {
   }
 }
 
+/** Why `origin` cannot be reached, in words (why.js); null when it can. */
+async function whyNot(origin, timeout = 5000) {
+  let seen
+  try {
+    const res = await request(origin, 'GET', '/api/health', { timeout, cookies: false })
+    if (res.status === 200 && res.json?.app === 'nest') return null
+    seen = { status: res.status }
+  } catch (error) {
+    seen = { error }
+  }
+  return explain(kindOf(seen), origin)
+}
+
 /** Which of these addresses to use: the first that answers, in their order (all are asked at once); the first
  * one when none does. `ask` is probe, replaced in tests. */
 async function pickOrigin(origins, ask = probe) {
@@ -97,4 +111,4 @@ class RemoteNest {
   }
 }
 
-module.exports = { RemoteNest, pickOrigin, probe }
+module.exports = { RemoteNest, pickOrigin, probe, whyNot }

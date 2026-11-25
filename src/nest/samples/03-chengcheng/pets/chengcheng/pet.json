@@ -1,0 +1,88 @@
+{
+  "name": "橙橙",
+  "label": "手绘",
+  "rendering": "smooth",
+  "frame": 336,
+  "baseline": 324,
+  "figure": 252,
+  "actions": {
+    "idle": {
+      "file": "idle.png",
+      "frames": 1,
+      "fps": 2,
+      "loop": true
+    },
+    "blink": {
+      "file": "blink.png",
+      "frames": 1,
+      "fps": 10,
+      "loop": false
+    },
+    "happy": {
+      "file": "happy.png",
+      "frames": 1,
+      "fps": 3,
+      "loop": true
+    },
+    "wave": {
+      "file": "wave.png",
+      "frames": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "sit": {
+      "file": "sit.png",
+      "frames": 1,
+      "fps": 1,
+      "loop": true
+    },
+    "sleep": {
+      "file": "sleep.png",
+      "frames": 1,
+      "fps": 0.7,
+      "loop": true
+    },
+    "talk": {
+      "file": "talk.png",
+      "frames": 1,
+      "fps": 4,
+      "loop": true
+    },
+    "shy": {
+      "file": "shy.png",
+      "frames": 1,
+      "fps": 1.5,
+      "loop": true
+    },
+    "walk": {
+      "file": "walk.png",
+      "frames": 4,
+      "fps": 10,
+      "loop": true
+    },
+    "think": {
+      "file": "think.png",
+      "frames": 1,
+      "fps": 1.5,
+      "loop": true
+    },
+    "pout": {
+      "file": "pout.png",
+      "frames": 1,
+      "fps": 3,
+      "loop": false
+    },
+    "yawn": {
+      "file": "yawn.png",
+      "frames": 1,
+      "fps": 1,
+      "loop": false
+    },
+    "lifted": {
+      "file": "lifted.png",
+      "frames": 1,
+      "fps": 2,
+      "loop": true
+    }
+  }
+}

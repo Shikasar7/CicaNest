@@ -1,7 +1,7 @@
 {
   "name": "nest-desktop",
   "productName": "nest",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "nest 桌面外壳：一键启动后台、托盘常驻、控制台窗口",
   "main": "src/main.js",
@@ -11,13 +11,15 @@
     "icons": "python scripts/make_icons.py",
     "shortcuts": "electron scripts/install-shortcuts.js",
     "test": "node --test \"test/*.test.js\"",
-    "dist": "electron-builder --win nsis --publish never"
+    "backend": "node scripts/build-backend.js",
+    "dist": "npm run backend && electron-builder --win nsis --publish never"
   },
   "devDependencies": {
     "electron": "45.0.0",
     "electron-builder": "26.18.0"
   },
   "author": "nest",
+  "updates": "https://api.github.com/repos/Shikasar7/CicaNest/releases/latest",
   "build": {
     "appId": "nest",
     "productName": "nest",
@@ -34,6 +36,12 @@
       "assets/icons/nest-{16,24,32,48,64,128,256,512}.png",
       "assets/icons/tray-*"
     ],
+    "extraResources": [
+      {
+        "from": "out/backend",
+        "to": "backend"
+      }
+    ],
     "win": {
       "target": [
         {
@@ -46,9 +54,10 @@
       "icon": "assets/icons/nest.ico"
     },
     "nsis": {
+      "include": "scripts/installer.nsh",
+      "differentialPackage": false,
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": false,
       "shortcutName": "nest",
       "deleteAppDataOnUninstall": false,

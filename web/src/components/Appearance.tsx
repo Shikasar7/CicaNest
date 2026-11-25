@@ -95,8 +95,9 @@ async function exportTheme(body: { theme: string; accent: string | null; name: s
 }
 
 /** 系统 page → 外观: light or dark for this screen; the theme, an accent colour of your own, and sharing
- * themes (they are plugins: exported as a zip, put in from a zip or a .json, or found on a market). */
-export function AppearanceSettings() {
+ * themes (they are plugins: exported as a zip, put in from a zip or a .json, or found on a market). 设置 in
+ * the chat shows it without the sharing. */
+export function AppearanceSettings({ sharing = true }: { sharing?: boolean }) {
   const { data, error, missing, reload } = useAppearance()
   const mode = useTheme()
   const dark = useDark()
@@ -172,7 +173,7 @@ export function AppearanceSettings() {
         {data.missing && (
           <p className="text-xs text-warn">原来选的主题所在的插件被关掉或卸载了，现在显示的是 nest 自己的样子。</p>
         )}
-        <div role="radiogroup" aria-labelledby={ids.themes} className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div role="radiogroup" aria-labelledby={ids.themes} className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
           {data.themes.map((entry) => (
             <Swatch
               key={entry.id}
@@ -217,56 +218,58 @@ export function AppearanceSettings() {
         </p>
       </div>
 
-      <div className="space-y-3 border-t pt-5">
-        <p className="text-sm font-medium">分享和导入</p>
-        <p className="text-xs text-muted-foreground">
-          主题就是一种插件：导出的 .zip 能装到别的 nest 上，也能放进插件市场给别人下载；装上的主题在「插件」页可以关掉或卸载。
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <label htmlFor={ids.name} className="text-xs text-muted-foreground">
-              主题名字
-            </label>
-            <Input id={ids.name} className="w-40" value={name} onChange={(e) => setName(e.target.value)} placeholder={current?.name ?? '我的主题'} maxLength={40} />
+      {sharing && (
+        <div className="space-y-3 border-t pt-5">
+          <p className="text-sm font-medium">分享和导入</p>
+          <p className="text-xs text-muted-foreground">
+            主题就是一种插件：导出的 .zip 能装到别的 nest 上，也能放进插件市场给别人下载；装上的主题在「插件」页可以关掉或卸载。
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <label htmlFor={ids.name} className="text-xs text-muted-foreground">
+                主题名字
+              </label>
+              <Input id={ids.name} className="w-40" value={name} onChange={(e) => setName(e.target.value)} placeholder={current?.name ?? '我的主题'} maxLength={40} />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={ids.author} className="text-xs text-muted-foreground">
+                作者（可不填）
+              </label>
+              <Input id={ids.author} className="w-32" value={author} onChange={(e) => setAuthor(e.target.value)} maxLength={40} />
+            </div>
+            <Button
+              variant="outline"
+              disabled={busy !== ''}
+              onClick={() =>
+                void run('export', () =>
+                  exportTheme({ theme: data.theme, accent: data.accent, name: name.trim() || current?.name || '我的主题', author }),
+                )
+              }
+            >
+              {busy === 'export' ? <LoaderCircle className="animate-spin" /> : <Download />}
+              导出现在的配色
+            </Button>
+            <Button variant="outline" disabled={busy !== ''} onClick={() => file.current?.click()}>
+              {busy === 'import' ? <LoaderCircle className="animate-spin" /> : <Upload />}
+              导入主题（.zip 或 .json）
+            </Button>
+            <input
+              ref={file}
+              id={ids.file}
+              type="file"
+              accept=".zip,.json,application/zip,application/json"
+              hidden
+              onChange={(e) => {
+                putIn(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
           </div>
-          <div className="space-y-1">
-            <label htmlFor={ids.author} className="text-xs text-muted-foreground">
-              作者（可不填）
-            </label>
-            <Input id={ids.author} className="w-32" value={author} onChange={(e) => setAuthor(e.target.value)} maxLength={40} />
-          </div>
-          <Button
-            variant="outline"
-            disabled={busy !== ''}
-            onClick={() =>
-              void run('export', () =>
-                exportTheme({ theme: data.theme, accent: data.accent, name: name.trim() || current?.name || '我的主题', author }),
-              )
-            }
-          >
-            {busy === 'export' ? <LoaderCircle className="animate-spin" /> : <Download />}
-            导出现在的配色
-          </Button>
-          <Button variant="outline" disabled={busy !== ''} onClick={() => file.current?.click()}>
-            {busy === 'import' ? <LoaderCircle className="animate-spin" /> : <Upload />}
-            导入主题（.zip 或 .json）
-          </Button>
-          <input
-            ref={file}
-            id={ids.file}
-            type="file"
-            accept=".zip,.json,application/zip,application/json"
-            hidden
-            onChange={(e) => {
-              putIn(e.target.files?.[0])
-              e.target.value = ''
-            }}
-          />
+          <p className="text-xs text-muted-foreground">
+            想从市场下载主题，去「插件」页的插件市场；要上传到市场，就把导出的 .zip 交给市场的维护者（或放进你自己的市场仓库）。
+          </p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          想从市场下载主题，去「插件」页的插件市场；要上传到市场，就把导出的 .zip 交给市场的维护者（或放进你自己的市场仓库）。
-        </p>
-      </div>
+      )}
 
       {problem && (
         <p role="alert" className="text-sm text-destructive">
