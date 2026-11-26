@@ -14,7 +14,7 @@
 ![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-8a8f98)
 ![Python](https://img.shields.io/badge/Python-3.12-e6a15c)
 
-[快速开始](#快速开始) · [能做什么](#能做什么) · [接上平台](#接上平台) · [插件](docs/plugins.md) · [开发](docs/development.md)
+[快速开始](#快速开始) · [能做什么](#能做什么) · [一起玩](#一起玩) · [接上平台](#接上平台) · [插件](docs/plugins.md) · [开发](docs/development.md)
 
 </div>
 
@@ -56,6 +56,20 @@
 
 她会记得你的喜好和约定。命令默认在她自己的 Docker 容器里跑；装了桌面端，还能在你的 Windows 上读写你授权的文件夹、跑命令：动手之前先问你，哪些能自动做由你在那台电脑上定。
 
+### 一起玩
+
+聊天里点「一起玩」：五子棋、黑白棋、海龟汤、你画我猜。她边玩边聊，你也能随时跟她说话；海龟汤她现编题目、一句句答你「是」「不是」；你画的她真的会看着猜，也可以换她来画、你来猜。
+
+<table>
+<tr>
+<td width="62%"><img src="docs/images/game-draw.webp" alt="你画我猜：画了一只猫，三花第二次就猜中了"></td>
+<td width="38%" rowspan="2"><img src="docs/images/game-gomoku.webp" alt="和三花下五子棋，她在棋盘上方说话"></td>
+</tr>
+<tr>
+<td><img src="docs/images/game-soup.webp" alt="海龟汤：三花出题，一句句回答「是」「不是」，最后猜中汤底"></td>
+</tr>
+</table>
+
 ### 会看场合的群友
 
 <table>
@@ -68,6 +82,7 @@
 - 认真答题：联网查、翻聊天记录，或者[照项目资料回答](docs/knowledge.md)
 - 收集群里的表情包，学群里的黑话
 - 盯着订阅、网页和价格，有变化就来报信
+- 群里冷场时主动开口：闲聊、卖萌，或者叫大家玩猜数字、海龟汤、成语接龙
 - 可以先「只看不说」，看看她本来会说什么
 
 </td>
@@ -78,14 +93,16 @@
 
 <table>
 <tr>
-<td width="72%"><img src="docs/images/bots.webp" alt="控制台的 Bot 设置"></td>
-<td width="28%"><img src="docs/images/phone.webp" alt="手机上的聊天"></td>
+<td width="50%"><img src="docs/images/overview.webp" alt="控制台首页：每位伙伴在哪、最近说了什么"></td>
+<td width="50%"><img src="docs/images/bots.webp" alt="伙伴页：群和私聊的开关"></td>
 </tr>
 <tr>
-<td>人设、模型、每个群的开关、用量、监控、备份都在网页里。人设能存成方案，一键整套换。</td>
-<td>手机浏览器也能用：局域网或 Tailscale，密码登录。</td>
+<td><b>首页</b>：每位伙伴在哪、最近说了什么，哪里需要你看一下都列在这里。</td>
+<td><b>伙伴</b>：状态、接入的平台、每个群和私聊、人设方案、模型，分开放在一页里。</td>
 </tr>
 </table>
+
+人设、模型、用量、监控、备份都在网页里。人设方案连名字、头像、声音和模型一起存，同一个号一键换成另一个角色，QQ 昵称和头像也跟着换。手机浏览器也能用：局域网或 Tailscale，密码登录。
 
 主题、桌宠、表情包、Skill、MCP 服务器、新的模型和平台都能[做成插件](docs/plugins.md)。
 
@@ -141,9 +158,9 @@ nest 跑在常开的另一台电脑上，Windows 只当聊天窗口和桌宠：
 | Discord、Telegram、Slack | 填官方 Bot 的 Token，支持代理 |
 | 企业微信 | 智能机器人，填 BotID 和 Secret |
 
-都在控制台「Bot」页点「增加 bot」。桌面上的伙伴也能接一个账号，带着聊天和记忆搬过去。
+在控制台「伙伴」页点「添伙伴」，选「从号开始加」。桌面上的伙伴也能在她的「接入」里接一个平台，聊天和记忆跟着过去。接好的号在「平台接入」页看连接和在线情况。
 
-模型支持 OpenAI 兼容接口（Chat Completions、Responses）、Anthropic，以及 ChatGPT 的 Codex 订阅。每个 bot 可以再设一个备用模型。
+模型支持 OpenAI 兼容接口（Chat Completions、Responses）、Anthropic、Gemini（Gemini API 和 Vertex AI），以及 ChatGPT 的 Codex 订阅。每个 bot 可以再设一个备用模型。
 
 > [!WARNING]
 > QQ 是用 NapCat 这类程序登录个人号，不是腾讯官方的机器人接口，违反 QQ 的用户协议。号可能被提示「风险设备」、限制功能甚至冻结。请用专门的小号，不要用主号。
