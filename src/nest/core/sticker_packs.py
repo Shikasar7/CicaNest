@@ -3,7 +3,9 @@
 A pack is a list of moods (开心, 卖萌, 害羞…), one picture each. nest draws them one at a time with the model
 that can draw (nest.core.stickers.StickerKeeper.draw, her picture as the reference), or the user uploads
 one for a mood. A companion may have several packs; the one in use is what she picks from in the desk chat
-(nest.core.brain offers its stickers there and nowhere else: what she sends in QQ groups is unchanged).
+(nest.core.brain offers its stickers there). In the groups of a platform she sends from the collection, where
+the pictures of every pack are kept out, unless 「群里只发专属表情包」 is on for her: then her own are all she
+sends there too.
 
 The pictures are ordinary rows of the sticker collection (owned by her, kind "drawn" or "upload", kept,
 described by their mood so no vision call is needed). A picture replaced or a pack deleted takes its
@@ -69,6 +71,9 @@ DESK_SETTING = "desk_stickers"  # {bot id: False}: she sends no stickers in the 
 # {bot id: False}: in the desk chat she may also pick from the whole collection, her own first (default: only
 # her own, 「只用专属表情包」).
 OWN_ONLY_SETTING = "desk_stickers_own_only"
+# {bot id: True}: in the groups of a platform (QQ…) she sends her own stickers only (default: the collection,
+# without anyone's pack), 「群里只发专属表情包」.
+GROUP_OWN_SETTING = "group_stickers_own_only"
 NAME_MAX = 20
 MOOD_MAX = 12
 EXTRA_MAX = 200
@@ -202,6 +207,20 @@ class PackKeeper:
         else:
             values[bot_id] = False
         await repo.set_many({OWN_ONLY_SETTING: values})
+        self._changed(bot_id)
+
+    async def group_own_only(self, bot_id: str) -> bool:
+        values = (await SettingsRepo(self.db).all()).get(GROUP_OWN_SETTING) or {}
+        return values.get(bot_id) is True
+
+    async def set_group_own_only(self, bot_id: str, on: bool) -> None:
+        repo = SettingsRepo(self.db)
+        values = dict((await repo.all()).get(GROUP_OWN_SETTING) or {})
+        if on:
+            values[bot_id] = True
+        else:
+            values.pop(bot_id, None)
+        await repo.set_many({GROUP_OWN_SETTING: values})
         self._changed(bot_id)
 
     async def all_pictures(self) -> set[int]:

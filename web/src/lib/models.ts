@@ -6,6 +6,7 @@ export const MODEL_KINDS: { kind: ProviderKind; label: string }[] = [
   { kind: 'openai_chat', label: 'OpenAI Chat 格式' },
   { kind: 'openai_responses', label: 'Responses 格式' },
   { kind: 'anthropic', label: 'Claude（Anthropic）' },
+  { kind: 'gemini', label: 'Gemini 原生' },
   { kind: 'codex', label: 'Codex 订阅' },
 ]
 
@@ -46,6 +47,7 @@ export const KIND_OPTIONS: Record<ProviderKind, string[]> = {
   openai_chat: ['proxy', 'timeout', 'temperature', 'extra_body', 'tools'],
   openai_responses: ['proxy', 'timeout', 'extra_body', 'input_format'],
   anthropic: ['proxy', 'timeout', 'extra_body', 'auth_header', 'effort', 'web_search'],
+  gemini: ['proxy', 'timeout', 'temperature', 'extra_body', 'effort'],
   codex: ['proxy', 'timeout', 'auth_file'],
 }
 

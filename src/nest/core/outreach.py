@@ -42,7 +42,7 @@ from nest.core.events import Segment
 from nest.core.groups import GroupError
 from nest.core.initiative import DAY_STARTS, into_day, quiet_now
 from nest.core.life import BEDROOM, block_at, today_key
-from nest.core.prompt import clock_label
+from nest.core.prompt import clock_label, speaker
 from nest.llm.base import ChatMessage, ProviderError
 from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderUnavailable
@@ -113,7 +113,8 @@ REASONS = {
     "miss": "你和对方有两天没聊天了，你有点想对方。",
     "follow": "你记得对方说过：{content}（{when}）。你想问问对方这件事怎么样了。",
     "play": (
-        "你有点无聊，想叫对方一起玩个小游戏（成语接龙、猜数字、二十个问题、真心话里挑一个），"
+        "你有点无聊，想叫对方一起玩个小游戏（成语接龙、猜数字、二十个问题、真心话，"
+        "或者桌面上「一起玩」里的五子棋、黑白棋、海龟汤，挑一个），"
         "用你的语气邀请一下。"
     ),
 }
@@ -372,7 +373,7 @@ class OutreachKeeper:
 
     def _talk(self, bot: BotConfig, rows: list[dict[str, Any]]) -> str:
         def show(row: dict[str, Any]) -> str:
-            who = f"你（{bot.name}）" if row["from_self"] else row["sender_name"]
+            who = speaker(row, bot.name) if row["from_self"] else row["sender_name"]
             return f"{who}：{' '.join(str(row.get('text') or '').split())[:200]}"
 
         return "\n".join(show(r) for r in rows) or "（还没聊过）"

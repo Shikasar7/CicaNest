@@ -15,6 +15,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from nest.proc import NO_WINDOW
+
 SKIP_DIRS = {"node_modules", "dist", "build", "out", "vendor", "coverage", "__pycache__", "venv"}
 MAX_FILE = 512 * 1024  # bytes: bigger files are generated or bundled, not read
 MATCHES = 40  # search results returned at most
@@ -130,6 +132,7 @@ class SourceTree:
                 text=True,
                 timeout=10,
                 check=False,
+                creationflags=NO_WINDOW,
             )
         except (OSError, subprocess.TimeoutExpired):
             return Revision("", "")

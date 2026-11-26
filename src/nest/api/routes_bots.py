@@ -16,6 +16,7 @@ from nest.api.auth import require_token
 from nest.api.routes_persona_sets import set_views
 from nest.api.text import has_bad_chars
 from nest.core.events import ChannelInfo, ChannelRef
+from nest.core.groups import is_desk_group
 from nest.core.speech import split_ref
 from nest.storage.bots import MAX_REPLY_LINES, UNSET
 from nest.storage.tones import ToneRepo
@@ -77,6 +78,10 @@ class ChannelPatch(BaseModel):
     welcome_note: Annotated[str, Field(max_length=MAX_WELCOME_NOTE)] | None = None  # "" removes it
     birthday: bool | None = None  # 生日祝福 (groups whose platform shows birthdays)
     remember: bool | None = None  # 长期记忆
+    # 冷场时主动开口 (groups of a platform that can speak first): minutes of silence, times a day
+    opener: bool | None = None
+    opener_quiet: Annotated[int, Field(strict=True, ge=30, le=1440)] | None = None
+    opener_daily: Annotated[int, Field(strict=True, ge=1, le=10)] | None = None
 
 
 class ChannelCreate(BaseModel):
@@ -203,6 +208,9 @@ async def bots(request: Request) -> list[dict[str, Any]]:
                         "welcome_note": ch.welcome_note,
                         "birthday": ch.birthday,
                         "remember": ch.remember,
+                        "opener": ch.opener,
+                        "opener_quiet": ch.opener_quiet,
+                        "opener_daily": ch.opener_daily,
                     }
                     for ch in sorted(bot.channels.values(), key=lambda c: names.get(c.channel_id) or c.name)
                 ],
@@ -318,6 +326,8 @@ def _within_capabilities(account: str, patch: ChannelPatch | ChannelCreate) -> N
         refuse("这个平台不告诉 nest 有人进群，没法欢迎")
     if not can(account, "birthdays") and patch.birthday:
         refuse("这个平台看不到群友的生日，没法祝生日快乐")
+    if not can(account, "proactive") and patch.opener:
+        refuse("这个平台的 bot 不能自己先开口")
 
 
 @router.patch("/bots/{bot_id}/channels/{channel_id}")
@@ -339,6 +349,9 @@ async def update_bot_channel(
             raise HTTPException(status_code=400, detail="只有群里才有人进来")
         if patch.birthday and bot.channels[channel_id].channel.kind != "group":
             raise HTTPException(status_code=400, detail="生日祝福只在群里发")
+        where = bot.channels[channel_id].channel
+        if patch.opener and (where.kind != "group" or is_desk_group(where)):
+            raise HTTPException(status_code=400, detail="冷场时主动开口只在平台上的群里")
         note = patch.welcome_note.strip() if patch.welcome_note is not None else None
         if note and has_bad_chars(note):
             raise _invalid("欢迎后的那句话里不能有换行或控制字符")
@@ -369,6 +382,9 @@ async def update_bot_channel(
             welcome_note=note,
             birthday=patch.birthday,
             remember=patch.remember,
+            opener=patch.opener,
+            opener_quiet=patch.opener_quiet,
+            opener_daily=patch.opener_daily,
         )
         await state.brain.load()
         state.broadcaster.publish("bots", {"bot_id": bot_id})

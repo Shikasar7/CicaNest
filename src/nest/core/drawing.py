@@ -61,11 +61,8 @@ class Drawing:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
-    def start(self, bot: BotConfig, channel: BotChannel, idea: str, *, herself: bool) -> str:
-        """Begin drawing; what she is told."""
-        idea = " ".join(idea.split())[:IDEA_MAX]
-        if not idea:
-            return "没画：要写清楚画什么"
+    def claim(self, bot: BotConfig) -> str:
+        """Take one of her pictures for today and mark her busy; why not ('' when she may draw)."""
         if not self.ready:
             return "没画：现在没有能画图的模型"
         if bot.id in self._busy:
@@ -76,6 +73,27 @@ class Drawing:
         self._drawn = {k: n for k, n in self._drawn.items() if k[1] == day}
         self._drawn[(bot.id, day)] = self._drawn.get((bot.id, day), 0) + 1
         self._busy.add(bot.id)
+        return ""
+
+    def release(self, bot: BotConfig) -> None:
+        self._busy.discard(bot.id)
+
+    async def picture(self, prompt: str) -> bytes:
+        """A picture for something else than her chat (小游戏's 她画你猜), after `claim`. Raises
+        ProviderUnavailable or ProviderError."""
+        runtime = self.providers.drawing()
+        if runtime is None:
+            raise ProviderUnavailable("没有能画图的模型")
+        with using("draw"):
+            return await runtime.draw(prompt, ())
+
+    def start(self, bot: BotConfig, channel: BotChannel, idea: str, *, herself: bool) -> str:
+        """Begin drawing; what she is told."""
+        idea = " ".join(idea.split())[:IDEA_MAX]
+        if not idea:
+            return "没画：要写清楚画什么"
+        if why := self.claim(bot):
+            return why
         task = asyncio.create_task(self._draw(bot, channel, idea, herself), name=f"drawing:{bot.id}")
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)

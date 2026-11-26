@@ -6,7 +6,8 @@ import { sendJson, type Bot } from '@/lib/api'
 import { platformName } from '@/lib/platforms'
 
 /** 接上平台账号: a companion who lives only on the desk moves into a bot with an account, with everything of hers
- * (nest.core.move_in). The bot is added first with 「增加 bot」; which ones can take her, nest says. */
+ * (nest.core.move_in). The account is added first (伙伴页: 接一个平台, or 从号开始加); which ones can take her, nest
+ * says. */
 export function MoveIn({ bot, bots, reload }: { bot: Bot; bots: Bot[]; reload: () => void }) {
   const rooms = bots.filter((b) => b.id !== bot.id && (b.platform ?? 'qq') !== 'desk')
   const [to, setTo] = useState('')
@@ -34,8 +35,8 @@ export function MoveIn({ bot, bots, reload }: { bot: Bot; bots: Bot[]; reload: (
   return (
     <div className="space-y-2 text-sm">
       <p className="text-muted-foreground">
-        想让{bot.name}也能在 QQ、Telegram 这些地方说话：先用「增加 bot」给她加好账号（什么都不用设），再在这里选它搬进去。
-        搬过去以后群里还是什么都没开，要去哪个群、用什么群聊人设，到它的「群」里再设。
+        已经有一个加好、还没人住的号：选它，{bot.name}就搬进去。
+        搬过去以后群里还是什么都没开，要去哪个群、用什么群聊人设，到「群和私聊」里再设。
       </p>
       {rooms.length === 0 ? (
         <p>还没有有平台账号的 bot。</p>

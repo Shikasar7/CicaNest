@@ -42,6 +42,7 @@ const KIND_HINT: Record<ProviderKind, string> = {
   openai_chat: '大多数接口都是这种，例如 DeepSeek 官方、本地代理',
   openai_responses: '例如火山方舟的 Responses 接口',
   anthropic: 'Claude 官方接口，默认思考强度 low，回得快；想改就在额外参数里写 output_config',
+  gemini: 'Google 自己的 generateContent 接口：Gemini API（AI Studio）或 Vertex AI',
   codex: '用这台电脑上 Codex 的登录，不用密钥',
 }
 
@@ -49,6 +50,8 @@ const URL_HINT: Record<ProviderKind, string> = {
   openai_chat: '填到 /chat/completions 前面那一段，例如 https://api.deepseek.com/v1',
   openai_responses: '填到 /responses 前面那一段',
   anthropic: '填到 /messages 前面那一段，官方是 https://api.anthropic.com/v1，中转站填它给的地址',
+  gemini:
+    '填到 /models 前面那一段：Gemini API 是 https://generativelanguage.googleapis.com/v1beta；Vertex AI 是 https://aiplatform.googleapis.com/v1/projects/项目/locations/global/publishers/google，用 JSON 凭据时只填 https://aiplatform.googleapis.com 也行',
   codex: 'Codex 订阅只能用这个地址',
 }
 
@@ -214,6 +217,7 @@ export function ModelForm({
           ? '现在：密钥已设置'
           : '现在：没有密钥'
         : '本地接口不需要密钥时留空',
+    form.kind === 'gemini' ? 'Vertex AI 可以填 API Key，也可以把服务账号的 JSON 密钥整段粘进来' : '',
     provider && provider.key_shared_with.length > 0
       ? `这个密钥也给 ${provider.key_shared_with.join('、')} 用，改了会一起变`
       : '',
@@ -294,6 +298,42 @@ export function ModelForm({
             />
           )}
         </Field>
+        {form.kind !== 'codex' && (
+          <div className="space-y-2 sm:col-span-2">
+            <Field label="密钥" hint={keyHint} error={errorFor('key')}>
+              {(control) => (
+                <Input
+                  {...control}
+                  type="password"
+                  name={keyName}
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  placeholder={provider ? '留空表示不修改' : '留空表示不用密钥'}
+                  value={form.key}
+                  disabled={fromEnv || form.clearKey}
+                  onChange={(e) => update({ key: e.target.value, keyTouched: true })}
+                />
+              )}
+            </Field>
+            {provider && (provider.key_set || fromEnv) && (
+              <div className="flex items-center gap-2">
+                <input
+                  id={clearId}
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={form.clearKey}
+                  disabled={fromEnv}
+                  onChange={(e) => update({ clearKey: e.target.checked, key: '', keyTouched: false })}
+                />
+                <Label htmlFor={clearId} className="font-normal">
+                  清除已保存的密钥
+                </Label>
+              </div>
+            )}
+          </div>
+        )}
         <Field
           label="模型名"
           hint={
@@ -372,7 +412,7 @@ export function ModelForm({
             />
           )}
         </Field>
-        {form.kind === 'openai_chat' && (
+        {(form.kind === 'openai_chat' || form.kind === 'gemini') && (
           <Field label="温度" hint="0–2，留空用模型默认" error={errorFor('temperature')}>
             {(control) => (
               <Input
@@ -416,8 +456,15 @@ export function ModelForm({
             )}
           </Field>
         )}
-        {form.kind === 'anthropic' && (
-          <Field label="思考档" hint="低最快，但常跳过思考，偶尔会把“该怎么接”写进回复；中和高回复前先想一下，稍慢，也多用一点 token">
+        {(form.kind === 'anthropic' || form.kind === 'gemini') && (
+          <Field
+            label="思考档"
+            hint={
+              form.kind === 'gemini'
+                ? '低最快，聊天够用；中和高想得更久，稍慢，也多用一点 token（Gemini 2.x 按思考预算换算）'
+                : '低最快，但常跳过思考，偶尔会把“该怎么接”写进回复；中和高回复前先想一下，稍慢，也多用一点 token'
+            }
+          >
             {(control) => (
               <NativeSelect
                 {...control}
@@ -501,42 +548,6 @@ export function ModelForm({
               />
             )}
           </Field>
-        )}
-        {form.kind !== 'codex' && (
-          <div className="space-y-2 sm:col-span-2">
-            <Field label="密钥" hint={keyHint} error={errorFor('key')}>
-              {(control) => (
-                <Input
-                  {...control}
-                  type="password"
-                  name={keyName}
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  data-1p-ignore
-                  data-lpignore="true"
-                  placeholder={provider ? '留空表示不修改' : '留空表示不用密钥'}
-                  value={form.key}
-                  disabled={fromEnv || form.clearKey}
-                  onChange={(e) => update({ key: e.target.value, keyTouched: true })}
-                />
-              )}
-            </Field>
-            {provider && (provider.key_set || fromEnv) && (
-              <div className="flex items-center gap-2">
-                <input
-                  id={clearId}
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={form.clearKey}
-                  disabled={fromEnv}
-                  onChange={(e) => update({ clearKey: e.target.checked, key: '', keyTouched: false })}
-                />
-                <Label htmlFor={clearId} className="font-normal">
-                  清除已保存的密钥
-                </Label>
-              </div>
-            )}
-          </div>
         )}
       </div>
       {dropped.length > 0 && (

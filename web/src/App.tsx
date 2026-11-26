@@ -12,12 +12,13 @@ import {
   Library,
   ListChecks,
   MessageCircleHeart,
-  MessageSquareQuote,
   MessagesSquare,
   Monitor,
   Moon,
   NotebookPen,
+  Palette,
   Pause,
+  Plug,
   Puzzle,
   Radar,
   Server,
@@ -40,13 +41,15 @@ import { useLiveData } from '@/lib/live-data'
 import { setTheme, useTheme, type ThemeChoice } from '@/lib/theme'
 import { UnsavedProvider, useConfirmLeave } from '@/lib/unsaved'
 import { Bots } from '@/pages/Bots'
+import { Character } from '@/pages/Character'
 import { Chat } from '@/pages/Chat'
 import { Knowledge } from '@/pages/Knowledge'
+import { Look } from '@/pages/Look'
 import { Memories } from '@/pages/Memories'
 import { Messages } from '@/pages/Messages'
 import { Models } from '@/pages/Models'
 import { Overview } from '@/pages/Overview'
-import { Personas } from '@/pages/Personas'
+import { Platforms } from '@/pages/Platforms'
 import { Plugins } from '@/pages/Plugins'
 import { Issues } from '@/pages/Issues'
 import { Slang } from '@/pages/Slang'
@@ -54,31 +57,42 @@ import { Speech } from '@/pages/Speech'
 import { Stickers } from '@/pages/Stickers'
 import { System } from '@/pages/System'
 import { TasksPage } from '@/pages/Tasks'
-import { Tones } from '@/pages/Tones'
 import { Usage } from '@/pages/Usage'
 import { Watches } from '@/pages/Watches'
 
-type PageDef = { hash: string; label: string; Icon: ComponentType<{ className?: string }>; Page: ComponentType }
+type PageDef = {
+  hash: string
+  label: string
+  Icon: ComponentType<{ className?: string }>
+  Page: ComponentType
+  /** The sidebar heading it sits under; none for the two at the top. */
+  group?: string
+  /** Other addresses that open this page (an older link, a tab of it). */
+  aliases?: string[]
+}
 
+/** Companions first: who they are, what they do, what happened, then the settings. QQ and the other platforms are
+ * one page among the settings, not the frame of the whole app. */
 const PAGES: PageDef[] = [
-  { hash: '#/', label: '总览', Icon: House, Page: Overview },
+  { hash: '#/', label: '首页', Icon: House, Page: Overview },
   { hash: '#/chat', label: '聊天', Icon: MessageCircleHeart, Page: Chat },
-  { hash: '#/messages', label: '消息', Icon: MessagesSquare, Page: Messages },
-  { hash: '#/bots', label: 'Bot', Icon: SquareUserRound, Page: Bots },
-  { hash: '#/personas', label: '人设', Icon: IdCard, Page: Personas },
-  { hash: '#/tones', label: '语气', Icon: MessageSquareQuote, Page: Tones },
-  { hash: '#/models', label: '模型', Icon: Cpu, Page: Models },
-  { hash: '#/tasks', label: '任务', Icon: ListChecks, Page: TasksPage },
-  { hash: '#/usage', label: '用量', Icon: ChartColumn, Page: Usage },
-  { hash: '#/watches', label: '监控', Icon: Radar, Page: Watches },
-  { hash: '#/stickers', label: '表情包', Icon: Smile, Page: Stickers },
-  { hash: '#/speech', label: '语音', Icon: AudioLines, Page: Speech },
-  { hash: '#/slang', label: '黑话', Icon: BookOpen, Page: Slang },
-  { hash: '#/memories', label: '记忆', Icon: Brain, Page: Memories },
-  { hash: '#/knowledge', label: '资料', Icon: Library, Page: Knowledge },
-  { hash: '#/issues', label: '问题记录', Icon: NotebookPen, Page: Issues },
-  { hash: '#/plugins', label: '插件', Icon: Puzzle, Page: Plugins },
-  { hash: '#/system', label: '系统', Icon: Server, Page: System },
+  { hash: '#/bots', label: '伙伴', Icon: SquareUserRound, Page: Bots, group: '伙伴' },
+  { hash: '#/personas', label: '人设和语气', Icon: IdCard, Page: Character, group: '伙伴', aliases: ['#/tones'] },
+  { hash: '#/memories', label: '记忆', Icon: Brain, Page: Memories, group: '伙伴' },
+  { hash: '#/stickers', label: '表情包', Icon: Smile, Page: Stickers, group: '伙伴' },
+  { hash: '#/speech', label: '语音', Icon: AudioLines, Page: Speech, group: '伙伴' },
+  { hash: '#/tasks', label: '任务', Icon: ListChecks, Page: TasksPage, group: '她们会做的' },
+  { hash: '#/watches', label: '监控', Icon: Radar, Page: Watches, group: '她们会做的' },
+  { hash: '#/knowledge', label: '资料库', Icon: Library, Page: Knowledge, group: '她们会做的' },
+  { hash: '#/slang', label: '黑话', Icon: BookOpen, Page: Slang, group: '她们会做的' },
+  { hash: '#/messages', label: '消息记录', Icon: MessagesSquare, Page: Messages, group: '记录' },
+  { hash: '#/usage', label: '用量', Icon: ChartColumn, Page: Usage, group: '记录' },
+  { hash: '#/issues', label: '问题记录', Icon: NotebookPen, Page: Issues, group: '记录' },
+  { hash: '#/models', label: '模型', Icon: Cpu, Page: Models, group: '设置' },
+  { hash: '#/platforms', label: '平台接入', Icon: Plug, Page: Platforms, group: '设置' },
+  { hash: '#/plugins', label: '插件', Icon: Puzzle, Page: Plugins, group: '设置' },
+  { hash: '#/look', label: '外观', Icon: Palette, Page: Look, group: '设置' },
+  { hash: '#/system', label: '系统', Icon: Server, Page: System, group: '设置' },
 ]
 
 /** Installed plugins with a newer version in the market (looked at once a day). */
@@ -88,7 +102,11 @@ function usePluginUpdates(): number {
 }
 
 function useHashPage(): PageDef {
-  const read = () => PAGES.find((p) => p.hash === window.location.hash) ?? PAGES[0]
+  const read = () => {
+    // '#/chat?bot=…': the part after ? is for the page itself.
+    const hash = window.location.hash.split('?')[0]
+    return PAGES.find((p) => p.hash === hash || p.aliases?.includes(hash)) ?? PAGES[0]
+  }
   const [page, setPage] = useState<PageDef>(read)
   useEffect(() => {
     const update = () => setPage(read())
@@ -158,14 +176,16 @@ function ThemeSwitch() {
   return <Segmented options={THEMES} value={useTheme()} onChange={setTheme} label="颜色" iconOnly />
 }
 
-/** Emergency stop, reachable from every page. No undo on purpose: bots are resumed one by one on the Bot page. */
+/** Emergency stop, reachable from every page while someone speaks on a platform (a group can hear her there); a
+ * nest used only on the desk has nothing to stop in a hurry. No undo on purpose: companions are resumed one by one
+ * on the 伙伴 page. */
 function PauseAll({ compact = false }: { compact?: boolean }) {
   const { data: bots } = useBots<Bot[]>('/api/bots')
   const [state, setState] = useState<'idle' | 'busy' | string>('idle')
   // Not knowing the bots (not loaded, or the fetch failed) must not hide the emergency stop.
-  if (bots !== null && bots.every((b) => b.mode === 'paused')) return null
+  if (bots !== null && bots.every((b) => b.mode === 'paused' || b.platform === 'desk')) return null
   const pause = async () => {
-    if (!window.confirm('暂停全部 bot？暂停后不再判断、不调用模型、也不会发言。恢复要在 Bot 页逐个打开。')) return
+    if (!window.confirm('暂停全部伙伴？暂停后她们不再判断、不调用模型，群里和桌面上都不会说话。恢复要在伙伴页逐个打开。')) return
     setState('busy')
     try {
       await sendJson('POST', '/api/bots/pause-all')
@@ -202,8 +222,14 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
       aria-label="页面"
       className={cn(layout === 'column' ? 'flex flex-col gap-0.5' : 'flex min-w-0 flex-1 gap-1 overflow-x-auto')}
     >
-      {PAGES.map((p) => {
+      {PAGES.map((p, i) => {
         const current = p.hash === page.hash
+        // A heading where a group starts; the narrow top bar has no room for them.
+        const heading = layout === 'column' && p.group && p.group !== PAGES[i - 1]?.group && (
+          <p key={`${p.group}-heading`} className="px-3 pt-3 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground/80">
+            {p.group}
+          </p>
+        )
         const link = (
           <a
             key={p.hash}
@@ -214,7 +240,8 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
               if (!current && !confirmLeave()) e.preventDefault()
             }}
             className={cn(
-              'group flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-[background-color,color,box-shadow] duration-200',
+              'group flex shrink-0 items-center gap-2.5 rounded-lg px-3 text-sm transition-[background-color,color,box-shadow] duration-200',
+              layout === 'column' ? 'py-1.5' : 'py-2',
               current
                 ? 'bg-sidebar-accent font-medium text-foreground shadow-[var(--shadow-lift)]'
                 : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
@@ -234,7 +261,7 @@ function NavLinks({ page, layout }: { page: PageDef; layout: 'column' | 'row' })
             )}
           </a>
         )
-        if (p.hash !== '#/chat' || layout !== 'column') return link
+        if (p.hash !== '#/chat' || layout !== 'column') return heading ? [heading, link] : link
         // Beside the link, not in it: it opens another window and leaves this page as it is.
         return (
           <div key={p.hash} className="relative grid">
@@ -268,7 +295,7 @@ function ChatWindow() {
         <button
           type="button"
           onClick={openConsole}
-          title="打开控制台：Bot、模型、插件、外观这些设置都在那里"
+          title="打开控制台：伙伴、模型、插件、外观这些设置都在那里"
           className="ml-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <LayoutDashboard className="size-3.5" />
@@ -330,7 +357,7 @@ function Shell() {
           className="drag-region flex h-14 shrink-0 items-center gap-4 px-6 md:px-8"
           style={desktop ? { paddingRight: desktop.captionWidth + 16 } : undefined}
         >
-          <h1 className="text-lg font-semibold tracking-tight">{page.label === 'Bot' ? 'Bot 设置' : page.label}</h1>
+          <h1 className="text-lg font-semibold tracking-tight">{page.label}</h1>
           {page.hash === '#/chat' && (
             <button
               type="button"

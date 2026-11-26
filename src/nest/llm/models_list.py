@@ -38,6 +38,8 @@ async def list_models(
     """Model ids, sorted. Raises ProviderError (secret-free) when the interface can't be asked."""
     headers: dict[str, str] = {}
     params: dict[str, Any] = {}
+    if kind == "gemini":
+        return await _gemini_models(base_url, key, proxy=proxy, wait=wait, transport=transport)
     if kind == "anthropic":
         headers["anthropic-version"] = API_VERSION
         params["limit"] = 1000
@@ -54,9 +56,57 @@ async def list_models(
             raise transport_error(exc) from exc
     if response.status_code == 404:  # e.g. Volcengine Ark's coding plan has no /models
         raise ProviderError("这个接口不提供模型列表（HTTP 404），模型名请照接口文档填", retryable=False)
+    if response.status_code in (401, 403):
+        # The usual first try: the address is filled in, the key not yet.
+        if not key:
+            raise ProviderError(
+                "这个接口要密钥：先在「密钥」里填上 API Key，再点「获取列表」", retryable=False
+            )
+        raise ProviderError(
+            f"密钥没通过（HTTP {response.status_code}）：检查有没有复制完整、是不是这家的密钥、有没有过期",
+            retryable=False,
+        )
     if response.status_code >= 400:
         raise status_error(response, key)
     try:
         return _ids(response.json())
     except ValueError:
         raise ProviderError("返回的不是 JSON，这个地址可能不支持获取模型列表", retryable=False) from None
+
+
+async def _gemini_models(
+    base_url: str, key: str, *, proxy: str | None, wait: float, transport: httpx.AsyncBaseTransport | None
+) -> list[str]:
+    """Gemini's API lists its models ({"models": [{"name": "models/…", "supportedGenerationMethods": …}]});
+    Vertex AI lists none at its address."""
+    if "aiplatform.googleapis.com" in base_url or key.lstrip().startswith("{"):
+        raise ProviderError(
+            "Vertex AI 不提供模型列表，模型名照 Google 的文档填，例如 gemini-4-argon", retryable=False
+        )
+    headers = {"x-goog-api-key": key} if key else {}
+    async with client(timeout=wait, proxy=proxy, transport=transport) as http:
+        try:
+            response = await http.get(
+                base_url.rstrip("/") + "/models", headers=headers, params={"pageSize": 1000}
+            )
+        except httpx.HTTPError as exc:
+            raise transport_error(exc) from exc
+    if response.status_code in (400, 401, 403) and not key:
+        raise ProviderError("这个接口要密钥：先在「密钥」里填上 API Key，再点「获取列表」", retryable=False)
+    if response.status_code >= 400:
+        raise status_error(response, key)
+    try:
+        data = response.json()
+    except ValueError:
+        raise ProviderError("返回的不是 JSON，这个地址可能不支持获取模型列表", retryable=False) from None
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        raise ProviderError("返回的内容里没有模型列表", retryable=False)
+    names = {
+        str(m["name"]).removeprefix("models/")
+        for m in models
+        if isinstance(m, dict)
+        and isinstance(m.get("name"), str)
+        and "generateContent" in (m.get("supportedGenerationMethods") or ["generateContent"])
+    }
+    return sorted(names)[:MAX_MODELS]

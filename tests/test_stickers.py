@@ -868,3 +868,51 @@ async def test_api_uploads_and_draws_stickers(api_world: ApiWorld) -> None:  # n
     drawn = await http.post("/api/stickers/draw", json={"idea": " 一只  猫 "})
     assert drawn.status_code == 200, drawn.text
     assert drawn.json()["kind"] == "drawn" and "一只 猫" in provider.drawn[0][0]
+
+
+class Packs:
+    """What the brain asks of the 表情包套装 in a group: her own, every pack's pictures, her switch."""
+
+    def __init__(self, own: list[int], pictures: set[int]) -> None:
+        self.mine, self.pictures, self.group_only = own, pictures, False
+
+    async def own(self, bot_id: str) -> list[int]:
+        return self.mine
+
+    async def all_pictures(self) -> set[int]:
+        return self.pictures
+
+    async def group_own_only(self, bot_id: str) -> bool:
+        return self.group_only
+
+
+async def test_in_a_group_she_sends_her_own_only_when_told_to(kit: Kit) -> None:
+    w = kit.w
+    await kit.add(1, description="熊猫头捂脸")
+    hers = await kit.add(2, description="阿喵傲娇扭头")
+    others = await kit.add(3, description="阿马得意")
+    async with w.db.transaction() as conn:
+        await conn.execute("UPDATE stickers SET bot_id = 'qq:10001' WHERE id = ?", (hers["id"],))
+        await conn.execute("UPDATE stickers SET bot_id = 'qq:10002' WHERE id = ?", (others["id"],))
+    packs = Packs([hers["id"]], {hers["id"], others["id"]})
+    w.brain.packs = packs  # type: ignore[assignment]
+    await sticker_mode(w, "trial", ["10001"])
+
+    # Off (the default): the collection, without anyone's pack.
+    await w.say("阿鲸 你好", to=["10001"], accounts=["10001"])
+    await w.settle(1)
+    user = w.providers["10001"].requests[0][1].content
+    assert "熊猫头捂脸" in user and "阿喵傲娇扭头" not in user and "阿马得意" not in user
+
+    # 「群里只发专属表情包」: hers only.
+    packs.group_only = True
+    await w.say("阿鲸 再说一句", to=["10001"], accounts=["10001"])
+    await w.settle(2)
+    user = w.providers["10001"].requests[1][1].content
+    assert "[表情1] 阿喵傲娇扭头" in user and "熊猫头捂脸" not in user and "阿马得意" not in user
+
+    # Nothing of hers: none offered.
+    packs.mine = []
+    await w.say("阿鲸 第三句", to=["10001"], accounts=["10001"])
+    await w.settle(3)
+    assert "你可以发的表情" not in w.providers["10001"].requests[2][1].content

@@ -22,6 +22,8 @@ from typing import Literal
 
 import psutil
 
+from nest.proc import NO_WINDOW
+
 log = logging.getLogger(__name__)
 
 Kind = Literal["local", "lan", "tailscale"]
@@ -106,6 +108,7 @@ def bonjour_name() -> str | None:
             text=True,
             timeout=3,
             check=False,
+            creationflags=NO_WINDOW,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -134,7 +137,11 @@ def tailscale_self() -> tuple[str, list[str]] | None:
         return None
     try:
         done = subprocess.run(
-            [exe, "status", "--json"], capture_output=True, timeout=TAILSCALE_TIMEOUT, check=False
+            [exe, "status", "--json"],
+            capture_output=True,
+            timeout=TAILSCALE_TIMEOUT,
+            check=False,
+            creationflags=NO_WINDOW,
         )
         status = json.loads(done.stdout) if done.returncode == 0 else None
     except (OSError, subprocess.SubprocessError, ValueError):

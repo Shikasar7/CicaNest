@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from nest.storage.db import Database
 from nest.storage.messages import MessageStore
 from tests.fakes.llm import FakeProvider
 from tests.helpers import eventually
+from tests.test_gemini import rsa_pem, service_account
 
 TOKEN = "t"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -824,3 +826,31 @@ async def test_listing_models_reuses_a_saved_key_only_for_its_own_server(
     codex = await nest.call("POST", "/api/providers/models", {"kind": "codex", "base_url": ""})
     assert codex.status_code == 422 and "Codex 订阅不能获取模型列表" in codex.text
     assert all("ark-secret" not in text for text in nest.bodies)
+
+
+async def test_a_gemini_model_takes_an_api_key_or_a_pasted_json_credential(nest: Nest) -> None:
+    vertex = "https://aiplatform.googleapis.com"
+    body = chat(
+        "vertex", kind="gemini", base_url=vertex, model="gemini-4-argon", options={"effort": "medium"}
+    )
+    pasted = service_account(rsa_pem()[0])
+    created = await nest.call("POST", "/api/providers", body | {"key": pasted})
+    assert created.status_code == 201, created.text
+    view = await nest.view("vertex")
+    assert view["kind"] == "gemini" and view["options"] == {"effort": "medium"} and view["key_set"] is True
+    # Kept on one line, cut down to what a token needs, and read back whole.
+    stored = nest.factory.seen_keys["vertex"]
+    assert stored.startswith('{"type":"service_account"') and "private_key_id" not in stored
+    assert json.loads(stored)["private_key"] == json.loads(pasted)["private_key"]
+    assert pasted not in "".join(nest.bodies)
+
+    refused = await nest.call("PATCH", "/api/providers/vertex", {"key": '{"type": "service_account"}'})
+    assert refused.status_code == 422 and "不是 Google 的 JSON 凭据" in refused.json()["detail"]
+    plain = await nest.call("PATCH", "/api/providers/vertex", {"key": "AIza-plain-key"})
+    assert plain.status_code == 200 and nest.factory.seen_keys["vertex"] == "AIza-plain-key"
+    # Only Gemini's key field takes JSON.
+    other = await nest.call("POST", "/api/providers", chat("other", key=pasted))
+    assert other.status_code == 422
+    assert (
+        await nest.call("PATCH", "/api/providers/vertex", {"options": {"effort": "max"}})
+    ).status_code == 422

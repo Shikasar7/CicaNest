@@ -26,6 +26,7 @@ from typing import Any
 from nest.core.desk import APP, PROACTIVE, chat_of, chosen_chats, unanswered
 from nest.core.events import Segment
 from nest.core.initiative import quiet_now
+from nest.core.prompt import speaker
 from nest.core.reminders import now_label, one_line
 from nest.llm.base import ChatMessage, ProviderError
 from nest.llm.purpose import for_purpose
@@ -139,7 +140,7 @@ class ChatterKeeper:
         mine = [r["text"] for r in rows if str(r["external_id"]).startswith(f"{APP}{KIND}")][-3:]
 
         def show(row: dict[str, Any]) -> str:
-            who = f"你（{bot.name}）" if row["from_self"] else row["sender_name"]
+            who = speaker(row, bot.name) if row["from_self"] else row["sender_name"]
             return f"{who}：{' '.join(str(row.get('text') or '').split())[:200]}"
 
         parts = []

@@ -15,7 +15,7 @@ export type Palette = { light: Colors; dark: Colors }
 export type Appearance = {
   theme: string
   accent: string | null
-  /** The picked theme's plugin was switched off or removed: nest's own look is shown. */
+  /** The picked theme's plugin was switched off or removed: the default one (软糖) is shown. */
   missing: boolean
   /** nest's own look: nothing to lay over the stylesheet. */
   plain: boolean

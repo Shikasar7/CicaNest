@@ -243,3 +243,35 @@ async def test_only_her_own_stickers_unless_you_let_her_use_the_collection(world
     )
     ids = [s["id"] for s in offered]
     assert set(ids[: len(own)]) == set(own) and common["id"] in ids[len(own) :]
+
+
+async def test_she_can_be_told_to_send_her_own_only_in_the_groups(world: World) -> None:  # noqa: F811
+    listed = (await world.http.get(f"/api/sticker-packs/bots/{WHALE}")).json()
+    assert listed["group_own_only"] is False and not await packs(world).group_own_only(WHALE)
+    on = await world.http.put(f"/api/sticker-packs/bots/{WHALE}/group-own-only", json={"on": True})
+    assert on.status_code == 200 and on.json() == {"group_own_only": True}
+    assert await packs(world).group_own_only(WHALE) and not await packs(world).group_own_only("qq:10002")
+    assert (await world.http.get(f"/api/sticker-packs/bots/{WHALE}")).json()["group_own_only"] is True
+    await world.http.put(f"/api/sticker-packs/bots/{WHALE}/group-own-only", json={"on": False})
+    assert not await packs(world).group_own_only(WHALE)
+    missing = await world.http.put("/api/sticker-packs/bots/qq:1/group-own-only", json={"on": True})
+    assert missing.status_code == 404
+
+
+async def test_the_collection_is_shown_by_whose_stickers_they_are(world: World) -> None:  # noqa: F811
+    pack = await drawn_pack(world)
+    keeper = world.state.stickers
+    common, _ = await keeper.add_own(picture("yellow"), "upload")
+    hers = {s["sticker_id"] for s in pack["slots"]}
+
+    def ids(listing: dict[str, Any]) -> set[int]:
+        return {s["id"] for s in listing["items"]}
+
+    everyone = (await world.http.get("/api/stickers")).json()
+    assert ids(everyone) == hers | {common["id"]}
+    assert everyone["owners"] == {WHALE: len(hers), "": 1}
+    mine = (await world.http.get("/api/stickers", params={"owner": WHALE})).json()
+    assert ids(mine) == hers and mine["total"] == len(hers)
+    public = (await world.http.get("/api/stickers", params={"owner": ""})).json()
+    assert ids(public) == {common["id"]}
+    assert (await world.http.get("/api/stickers", params={"owner": "qq:10002"})).json()["items"] == []

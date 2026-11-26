@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
-import { sendJson, type ConnectionTrial, type PlatformView, type ProviderView } from '@/lib/api'
+import { sendJson, type Bot, type ConnectionTrial, type PlatformView, type ProviderView } from '@/lib/api'
 import { usePlatforms } from '@/lib/live'
 import { cn } from '@/lib/utils'
 
@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 const blank = (platform: PlatformView) => Object.fromEntries(platform.fields.map((f) => [f.name, f.default]))
 
 const AFTER_ADDING: Record<string, string> = {
-  discord: '在它的「群」里打开要去的频道，看过效果再改成正式发言。',
+  discord: '在她的「群和私聊」里打开要去的频道，看过效果再改成正式发言。',
   telegram: '把它拉进群，群里说一句话，群就会出现在「在其他群启用」里；看过效果再改成正式发言。',
   slack: '在频道里 /invite 它，频道就会出现在「在其他群启用」里；看过效果再改成正式发言。',
   wecom: '先去群里 @ 它一次，群才会出现在「在其他群启用」里；回来给群起个名字再开启。它只收得到 @ 它的话。',
@@ -66,10 +66,27 @@ function NameAndModel({
 }
 
 /** 增加 bot: pick the platform, then its form. QQ: nest sets up the account's container on its machine and shows the
- * login code to scan. Others connect with what is filled in here; secrets are cleared from the page once used. */
-export function AddBot({ providers, reload }: { providers: ProviderView[] | null; reload: () => void }) {
+ * login code to scan. Others connect with what is filled in here; secrets are cleared from the page once used.
+ *
+ * With `companion` (one who lives only on the desk) it is 接一个平台: no name or model to ask, the account is made
+ * with hers and she moves into it at once (POST /api/bots/{id}/move-in), keeping everything of hers. */
+export function AddBot({
+  providers,
+  reload,
+  companion,
+  onAdded,
+  onMoved,
+}: {
+  providers: ProviderView[] | null
+  reload: () => void
+  companion?: Bot
+  /** A bot was added (not for a companion): its id. */
+  onAdded?: (botId: string) => void
+  /** The companion moved into the new account: her new id, and the QQ container to scan the login code of. */
+  onMoved?: (botId: string, container: string) => void
+}) {
   const [open, setOpen] = useState(false)
-  const [key, setKey] = useState('qq')
+  const [picked, setKey] = useState('')
   const [name, setName] = useState('')
   const [qq, setQq] = useState('')
   const [aliases, setAliases] = useState('')
@@ -80,7 +97,10 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
   const [scanning, setScanning] = useState<string | null>(null) // the new bot's container
   const [added, setAdded] = useState(false)
   const { busy, error, setError, run } = useAction(reload)
-  const { data: platforms } = usePlatforms()
+  const { data: all } = usePlatforms()
+  // The desk is where everyone already is, not a platform to add.
+  const platforms = all?.filter((p) => p.key !== 'desk') ?? null
+  const key = picked || (platforms?.some((p) => p.key === 'qq') ? 'qq' : (platforms?.[0]?.key ?? 'qq'))
   const id = useId()
   const platform = platforms?.find((p) => p.key === key) ?? null
   const others = key !== 'qq' && platform !== null
@@ -95,7 +115,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
     setProviderId('')
     setFields({})
     setTrial(null)
-    setKey('qq')
+    setKey('')
   }
   const choose = (next: string) => {
     setKey(next)
@@ -123,20 +143,37 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     let container = ''
+    let made = ''
     const ok = await run(async () => {
       const body = others
         ? { platform: key, fields }
         : { self_id: qq.trim() }
-      const made = await sendJson<{ bot_id: string; container: string }>('POST', '/api/bots', {
-        name: name.trim(),
-        aliases: parseAliases(aliases),
-        provider_id: providerId || null,
+      const done = await sendJson<{ bot_id: string; container: string }>('POST', '/api/bots', {
+        name: companion ? companion.name : name.trim(),
+        aliases: companion ? companion.aliases : parseAliases(aliases),
+        provider_id: companion ? companion.provider_id : providerId || null,
         ...body,
       })
-      container = made.container
+      container = done.container
+      made = done.bot_id
+      if (companion) {
+        try {
+          await sendJson('POST', `/api/bots/${encodeURIComponent(made)}/move-in`, { companion: companion.id })
+        } catch (e) {
+          throw new Error(
+            `号已经加好了，但${companion.name}没搬进去：${(e as Error).message}。可以在下面「搬进一个现有的号」里再试一次。`,
+          )
+        }
+      }
     })
     if (!ok) return
     setFields({}) // no secret stays on the page
+    if (companion) {
+      onMoved?.(made, others ? '' : container)
+      close()
+      return
+    }
+    onAdded?.(made)
     if (others) setAdded(true)
     else setScanning(container)
   }
@@ -146,7 +183,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
       <div>
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
           <Plus />
-          增加 bot
+          {companion ? '接一个平台' : '从号开始加'}
         </Button>
       </div>
     )
@@ -157,7 +194,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
         <h2 className="text-sm font-semibold">{name.trim()} 已经加好了，扫码登录 QQ</h2>
         <p className="text-xs text-muted-foreground">
           QQ 容器 {scanning} 已经建好。用 {qq.trim()} 这个号的手机 QQ 扫下面的码；登录过一次以后，容器重启也会自己登上。
-          新 bot 先是「只看不说」：在它的「群」里打开要去的群，看过效果再改成正式发言。
+          新伙伴先是「只看不说」：在她的「群和私聊」里打开要去的群，看过效果再改成正式发言。
         </p>
         <QRLogin container={scanning} onClose={close} />
       </section>
@@ -167,7 +204,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
     return (
       <section className="space-y-3 rounded-2xl border bg-card p-5">
         <h2 className="text-sm font-semibold">{name.trim()} 已经加好了</h2>
-        <p className="text-xs text-muted-foreground">新 bot 先是「只看不说」。{AFTER_ADDING[key] ?? ''}</p>
+        <p className="text-xs text-muted-foreground">新伙伴先是「只看不说」。{AFTER_ADDING[key] ?? ''}</p>
         <Button size="sm" variant="outline" onClick={close}>
           知道了
         </Button>
@@ -177,7 +214,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
   const missing = others && platform.fields.some((f) => f.required && !fields[f.name]?.trim())
   return (
     <form onSubmit={(e) => void submit(e)} className="space-y-3 rounded-2xl border bg-card p-5">
-      <h2 className="text-sm font-semibold">增加 bot</h2>
+      <h2 className="text-sm font-semibold">{companion ? `给${companion.name}接一个平台` : '从一个号开始加伙伴'}</h2>
       {platforms && platforms.length > 1 && (
         <Segmented
           label="平台"
@@ -188,7 +225,7 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
         />
       )}
       <div className="grid gap-3 sm:grid-cols-2">
-        <NameAndModel
+        {!companion && <NameAndModel
           providers={providers}
           name={name}
           setName={setName}
@@ -196,11 +233,11 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
           setAliases={setAliases}
           providerId={providerId}
           setProviderId={setProviderId}
-        />
+        />}
         {!others && (
           <div className="space-y-1">
             <Label htmlFor={`${id}-qq`}>QQ 号</Label>
-            <Input id={`${id}-qq`} inputMode="numeric" value={qq} maxLength={12} placeholder="这个 bot 用的 QQ 号" onChange={(e) => setQq(e.target.value)} />
+            <Input id={`${id}-qq`} inputMode="numeric" value={qq} maxLength={12} placeholder={companion ? `${companion.name}用的 QQ 号` : '这个号的 QQ 号'} onChange={(e) => setQq(e.target.value)} />
           </div>
         )}
         {others &&
@@ -241,9 +278,9 @@ export function AddBot({ providers, reload }: { providers: ProviderView[] | null
         </p>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={busy || testing || !name.trim() || (others ? missing : !qq.trim())}>
+        <Button type="submit" size="sm" disabled={busy || testing || (!companion && !name.trim()) || (others ? missing : !qq.trim())}>
           {busy && <LoaderCircle className="animate-spin" />}
-          {busy ? (others ? '正在连接…' : '正在建 QQ 容器…') : '增加'}
+          {busy ? (others ? '正在连接…' : '正在建 QQ 容器…') : companion ? '接上' : '增加'}
         </Button>
         {others && (
           <Button type="button" size="sm" variant="outline" disabled={busy || testing || missing} onClick={() => void test()}>

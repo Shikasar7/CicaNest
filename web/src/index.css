@@ -265,6 +265,72 @@ html[data-desktop].dark {
     animation: dot-pulse 1.4s ease-in-out infinite;
 }
 
+/* 小游戏: a stone lands with a little bounce; the five that won glow. */
+@keyframes stone-drop {
+    0% {
+        opacity: 0;
+        transform: scale(1.45) translateY(-6px);
+    }
+    60% {
+        opacity: 1;
+        transform: scale(0.92);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+.stone-drop {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: stone-drop 320ms var(--ease-out-soft) both;
+}
+@keyframes stone-glow {
+    50% {
+        opacity: 0.25;
+        transform: scale(1.25);
+    }
+}
+.stone-glow {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: stone-glow 1.6s ease-in-out infinite;
+}
+/* 黑白棋: a disc turning over. */
+@keyframes disc-flip {
+    0% {
+        transform: scaleX(1);
+    }
+    50% {
+        transform: scaleX(0.05);
+    }
+    100% {
+        transform: scaleX(1);
+    }
+}
+.disc-flip {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: disc-flip 380ms var(--ease-out-soft) both;
+}
+@keyframes shout-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.9);
+    }
+}
+.shout-in {
+    transform-origin: top center;
+    animation: shout-in 220ms var(--ease-out-soft) both;
+}
+@media (prefers-reduced-motion: reduce) {
+    .stone-drop,
+    .stone-glow,
+    .disc-flip,
+    .shout-in {
+        animation: none;
+    }
+}
+
 /* 小窝: she breathes while she stands or sits there. */
 @keyframes home-breath {
     50% {

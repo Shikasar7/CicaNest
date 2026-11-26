@@ -105,6 +105,7 @@ function Summary({ channel }: { channel: BotChannel }) {
   if (channel.enabled && !isPrivate(channel) && channel.welcome) chips.push('进群欢迎')
   if (channel.enabled && !isPrivate(channel) && channel.birthday) chips.push('生日祝福')
   if (channel.enabled && channel.remember) chips.push('长期记忆')
+  if (channel.enabled && !isPrivate(channel) && channel.opener) chips.push('冷场开口')
   return (
     <span className="flex min-w-0 flex-wrap gap-1">
       {chips.map((chip) => (
@@ -646,6 +647,84 @@ function BirthdayControl({ bot, channel, reload }: { bot: Bot; channel: BotChann
   )
 }
 
+const QUIET_CHOICES = [30, 60, 120, 180, 240, 360]
+const DAILY_CHOICES = [1, 2, 3, 4, 5]
+
+/** 冷场时主动开口: whether she starts talking on her own when the group has been quiet a while, after how
+ * long, and how often a day. */
+function OpenerControl({ bot, channel, reload }: { bot: Bot; channel: BotChannel; reload: () => void }) {
+  const { busy, error, run } = useAction(reload)
+  const on = useJustSaved(channel.opener ?? false)
+  const id = useId()
+  const save = (body: ChannelPatch) => run(() => sendJson<Ok>('PATCH', channelPath(bot.id, channel.channel_id), body))
+
+  const toggle = async (next: boolean) => {
+    on.mark(next)
+    if (!(await save({ opener: next }))) on.drop()
+  }
+
+  if (channel.opener === undefined) return null // a nest from before 冷场开口
+  const quiet = channel.opener_quiet ?? 120
+  const daily = channel.opener_daily ?? 3
+  const waiting = !channel.enabled
+    ? '这个群现在关着，打开后才会开口。'
+    : bot.mode !== 'live'
+      ? '要正式发言才会开口。'
+      : ''
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Switch checked={on.value} disabled={busy} onCheckedChange={(next) => void toggle(next)} aria-describedby={`${id}-hint`} />
+        群里冷场时主动开口
+      </label>
+      {on.value && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>没人说话</span>
+          <NativeSelect
+            aria-label="冷场多久后开口"
+            value={String(quiet)}
+            disabled={busy}
+            onChange={(e) => void save({ opener_quiet: Number(e.target.value) })}
+          >
+            {[...new Set([...QUIET_CHOICES, quiet])]
+              .sort((a, b) => a - b)
+              .map((m) => (
+                <option key={m} value={m}>
+                  {m < 60 ? `${m} 分钟` : `${m / 60} 小时`}
+                </option>
+              ))}
+          </NativeSelect>
+          <span>后，每天最多</span>
+          <NativeSelect
+            aria-label="每天最多开口几次"
+            value={String(daily)}
+            disabled={busy}
+            onChange={(e) => void save({ opener_daily: Number(e.target.value) })}
+          >
+            {[...new Set([...DAILY_CHOICES, daily])]
+              .sort((a, b) => a - b)
+              .map((n) => (
+                <option key={n} value={n}>
+                  {n} 次
+                </option>
+              ))}
+          </NativeSelect>
+        </div>
+      )}
+      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        {on.value
+          ? `群里一阵没人说话时，${bot.name}会自己说点什么：闲聊、发发牢骚、卖个萌，或者叫大家玩猜数字、海龟汤、成语接龙（答案由 nest 记着，她不会忘也不会耍赖）。只在早上 9 点到晚上 11 点；连着两次没人理，当天就不再说。${waiting}`
+          : `关闭：群里冷场时${bot.name}不会自己开口`}
+      </p>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /** 长期记忆: whether this bot remembers people here (likes, how they are, what they agreed with it). */
 function RememberControl({ bot, channel, reload }: { bot: Bot; channel: BotChannel; reload: () => void }) {
   const { busy, error, run } = useAction(reload)
@@ -910,6 +989,11 @@ export function ChannelRow({
         {!privateChat && channel.birthday !== undefined && can(bot, 'birthdays') && (
           <Part title="生日祝福">
             <BirthdayControl bot={bot} channel={channel} reload={reload} />
+          </Part>
+        )}
+        {!privateChat && channel.opener !== undefined && can(bot, 'proactive') && (
+          <Part title="冷场开口">
+            <OpenerControl bot={bot} channel={channel} reload={reload} />
           </Part>
         )}
         {channel.remember !== undefined && (

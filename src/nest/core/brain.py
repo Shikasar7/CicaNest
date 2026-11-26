@@ -39,6 +39,8 @@ from nest.core.desk import Desk, bubbles, from_app, sticker_segment, voice_segme
 from nest.core.desk_files import with_files
 from nest.core.desk_stream import DeskStream
 from nest.core.events import CaughtUp, ChannelRef, MemberJoined, MessageEvent, Segment, SendMessage
+from nest.core.group_games import END_MARK, GroupGames
+from nest.core.group_games import KINDS as GROUP_GAMES
 from nest.core.groups import GROUP_MARK_HINT, create_group_tool, is_desk_group, split_group
 from nest.core.issues import RECORDER_HINT
 from nest.core.keepsakes import KeepsakeKeeper
@@ -61,6 +63,7 @@ from nest.core.prompt import (
     fit_lines,
     parse_sorting,
     readable,
+    speaker,
     split_sticker,
     split_voice,
     worth_sorting,
@@ -172,6 +175,25 @@ class ChannelState:
     again: str = ""  # 重说: what she had answered, which the user took back
 
 
+# 冷场时主动开口 (nest.core.openers): what she is asked, and how long her line may be.
+OPENER_ASK = """群里有{gap}没人说话了。{what}
+{game}最近的聊天：
+{talk}
+
+用你自己的语气在群里说一两句，自然一点，像群友随口说的，不要解释你为什么开口。觉得现在不合适就只输出 SKIP。"""
+OPENER_MOODS = {
+    "chat": "你想找大家闲聊，起个话头：说说你正在干什么、刚想到的事，或者问大家一个问题。",
+    "grumble": "你有点无聊，想发几句小牢骚（嫌群里太安静、没人陪你之类），可爱一点，不要真的怪谁。",
+    "cute": "你想卖个萌，让大家注意到你。",
+    "game": "你有点无聊，想叫大家一起玩{game}，用你的语气邀请一下，说清楚怎么玩。",
+}
+OPENER_NAMES = {"chat": "找话题", "grumble": "发牢骚", "cute": "卖萌", "game": "叫大家玩小游戏"}
+OPENER_CONTEXT = 12
+OPENER_LINES = 3
+OPENER_CHARS = 300
+OPENER_TOKENS = 1200  # a thinking model thinks first, inside this limit
+
+
 @dataclass
 class Draft:
     outcome: str
@@ -230,6 +252,7 @@ class Brain:
         # Optional modules, set by the app: 表情包 and 黑话. Off per bot and group by default.
         self.stickers: StickerKeeper | None = None
         self.packs: PackKeeper | None = None  # 表情包套装: what she sends in the desk chat
+        self.group_games: GroupGames | None = None  # 群里的小游戏 (nest.core.group_games)
         self.desk_media: Any = None  # 桌面聊天的图片和语音 (nest.core.desk_media.DeskMedia)
         self.groups: Any = None  # 桌面群 (nest.core.groups.DeskGroups): 她拉群
         self.life: Any = (
@@ -243,6 +266,7 @@ class Brain:
         self.keepsakes: KeepsakeKeeper | None = None  # 回忆档案 (伙伴模式)
         self.reminders: Any = None  # 提醒 (伙伴模式, nest.core.reminders.ReminderKeeper)
         self.tools: Any = None  # 做事 (伙伴模式, nest.core.tools.CompanionTools)
+        self.games: Any = None  # 小游戏 (伙伴模式, nest.core.games.GameKeeper): a game on, in her answers
         self.tasks: Any = None  # 任务 (伙伴模式, nest.core.tasks.TaskKeeper)
         self.routines: Any = None  # 定时任务 (伙伴模式, nest.core.routines.RoutineKeeper)
         self.knowledge: KnowledgeService | None = None
@@ -484,6 +508,69 @@ class Brain:
         except Exception:
             log.exception("%s 欢迎新人出错", bot.name)
 
+    @for_purpose("group")
+    async def open_group(
+        self,
+        bot: BotConfig,
+        channel: BotChannel,
+        mood: str,
+        rows: list[dict[str, Any]],
+        *,
+        quiet: float,
+        game: str = "",
+    ) -> str | None:
+        """冷场时主动开口 (nest.core.openers): one line of hers in a quiet group — `mood` one of OPENER_MOODS
+        ("game": inviting the group to `game`, a nest.core.group_games kind, set up here). `rows`: the chat
+        there, the last message last; `quiet`: seconds since it. The line when it went out (or may have), None
+        when she said nothing."""
+        games = self.group_games
+        invited = await games.invite(bot, channel, game) if mood == "game" and games and game else None
+        if mood == "game" and invited is None:
+            mood = "chat"
+        gap = f"{quiet / 3600:.0f} 个小时" if quiet >= 3600 else f"{quiet / 60:.0f} 分钟"
+        talk = "\n".join(
+            f"{speaker(r, bot.name) if r.get('from_self') else r['sender_name']}："
+            + " ".join(str(r.get("text") or "").split())[:100]
+            for r in rows[-OPENER_CONTEXT:]
+        )
+        ask = OPENER_ASK.format(
+            gap=gap,
+            what=OPENER_MOODS[mood].format(game=GROUP_GAMES.get(game, "")),
+            game=(games.told(invited) + "\n") if games and invited else "",
+            talk=talk,
+        )
+        messages = [ChatMessage("system", self._persona(bot, channel)), ChatMessage("user", ask)]
+        try:
+            completion, call_id, _ = await self._complete(bot, messages, max_tokens=OPENER_TOKENS)
+        except (ProviderUnavailable, ProviderError) as exc:
+            log.info("%s 想在群里开口，模型没写出来（%s）", bot.name, exc)
+            completion, call_id = None, None
+        text = "" if completion is None or completion.cut else after_drafting(completion.text)[0]
+        lines = [line.strip() for line in text.replace(END_MARK, "").splitlines() if line.strip()]
+        line = "\n".join(lines[:OPENER_LINES])[:OPENER_CHARS].strip().strip('「」"')
+        if not line or line.upper().startswith("SKIP"):
+            if invited is not None and games is not None:
+                await games.drop(channel.channel_id)
+            return None
+        draft = Draft(
+            outcome="would_reply",
+            reason=f"群里 {gap}没人说话，主动{OPENER_NAMES[mood]}",
+            reply=line,
+            llm_call_id=call_id,
+        )
+        sent = await self._send(bot, channel, draft)
+        sent = replace(sent, reason=f"{draft.reason}：{sent.reason}")
+        try:
+            await self._record(bot, channel.channel_id, sent, "opener", rows[-1])
+        except Exception:
+            log.exception("%s 记录冷场开口出错", bot.name)
+        if sent.outcome == "replied" or sent.maybe_sent:
+            log.info("%s 在群里冷场时开口：%s", bot.name, OPENER_NAMES[mood])
+            return line
+        if invited is not None and games is not None:
+            await games.drop(channel.channel_id)
+        return None
+
     def birthday_wishers(self) -> dict[str, list[tuple[BotConfig, BotChannel]]]:
         """生日祝福 (nest.core.birthday): by group key, the bots with it on there, live or observing, whose
         accounts are running."""
@@ -543,10 +630,21 @@ class Brain:
             return True
         if _named(bot, typed_text(event.segments)):
             return True
+        if self._in_her_game(bot, channel, event.from_self, event.sender_id):
+            return True
         if event.reply_to:
             replied = await self.store.by_external_id(channel.channel_id, event.reply_to)
             return bool(replied and replied["from_self"])
         return False
+
+    def _in_her_game(self, bot: BotConfig, channel: BotChannel, from_self: bool, sender: str) -> bool:
+        """群里的小游戏: while hers is on in this group, what a person there says is for her."""
+        return (
+            self.group_games is not None
+            and not from_self
+            and sender not in self._our_accounts
+            and self.group_games.active(bot.id, channel.channel_id) is not None
+        )
 
     def _wants_to_chime_in(
         self, channel: BotChannel, state: ChannelState, now: float, event: MessageEvent
@@ -789,6 +887,8 @@ class Brain:
             or _named(bot, typed_text(row.get("segments") or [], row["text"]))
         ):
             return True
+        if self._in_her_game(bot, channel, bool(row.get("from_self")), str(row.get("sender_id"))):
+            return True
         if row.get("reply_to"):
             replied = await self.store.by_external_id(channel.channel_id, row["reply_to"])
             return bool(replied and replied["from_self"])
@@ -961,7 +1061,7 @@ class Brain:
             if original is None:
                 out.append(row)
                 continue
-            who = "你" if original["from_self"] else original["sender_name"]
+            who = speaker(original) if original["from_self"] else original["sender_name"]
             words = " ".join(str(original["text"] or "").split())[:QUOTE_CHARS]
             out.append(row | {"quoted": f"{who}：{words}"})
         return out
@@ -1048,7 +1148,9 @@ class Brain:
                 labels = await self.stickers.labels([*context, *batch])
                 context, shown = relabel(context, labels), relabel(batch, labels)
                 packs = self.packs
-                own = await packs.own(bot.id) if at_desk and packs else []
+                # 「群里只发专属表情包」: in a platform's group too, hers only.
+                group_own = in_group and packs is not None and await packs.group_own_only(bot.id)
+                own = await packs.own(bot.id) if (at_desk or group_own) and packs else []
                 own_only = at_desk and packs is not None and await packs.own_only(bot.id)
                 choices, _ = await self.stickers.candidates(
                     channel.channel,
@@ -1056,9 +1158,10 @@ class Brain:
                     "\n".join(row["text"] for row in shown),
                     exclude=sticker_keys(batch),
                     # 「只用专属表情包」 (the default): hers only, none when she has none.
-                    only=own if own_only else None,
+                    only=own if own_only or group_own else None,
                     prefer=own,
-                    hide=await packs.all_pictures() if in_group and packs else (),
+                    # In a group the packs' pictures stay out, but for hers when she sends only her own.
+                    hide=await packs.all_pictures() if in_group and packs and not group_own else (),
                 )
             if self.screenshots is not None and not answering:
                 context, shown = await self.screenshots.noted(context, shown, bot.account_id)
@@ -1163,7 +1266,8 @@ class Brain:
                     now=time.time(),
                     stickers=[self.stickers.describe_choice(s) for s in choices] if self.stickers else None,
                     life=(await self.life.line(bot) if self.life is not None else "")
-                    + games_hint([*context, *shown]),
+                    + games_hint([*context, *shown])
+                    + (await self.games.hint(bot.id) if self.games is not None else ""),
                     bubbles=self.desk is not None and from_app(target.get("external_id")),
                 )
             else:
@@ -1186,7 +1290,11 @@ class Brain:
                     life=(await self.life.line(bot) if self.life is not None else "")
                     + games_hint([*context, *shown])
                     if is_desk_group(channel.channel)
-                    else "",
+                    else (
+                        await self.group_games.hint(bot, channel, [*context, *shown], called)
+                        if self.group_games is not None
+                        else ""
+                    ),
                     for_all=is_desk_group(channel.channel)
                     and target["sender_id"] not in self._our_accounts
                     and not target.get("from_self"),
@@ -1233,6 +1341,8 @@ class Brain:
                     sorted_as = f"{sorted_as}；拉群：{made}" if sorted_as else f"拉群：{made}"
             offered = [self.stickers.describe_choice(s) for s in choices] if self.stickers else []
             raw, number = split_sticker(raw, offered)
+            if self.group_games is not None and not _private(channel) and not is_desk_group(channel.channel):
+                raw = await self.group_games.finish(bot.id, channel.channel_id, raw)
             sticker = choices[number - 1] if number else None
             answer = answering and (sorting is not None or completion.searches > 0 or _long(raw))
             gap: dict[str, Any] | None = None

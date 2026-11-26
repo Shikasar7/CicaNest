@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { getJson, sendJson } from '@/lib/api'
 import { formatTime } from '@/lib/format'
 import { useLive } from '@/lib/live'
+import { platformName } from '@/lib/platforms'
 
 import { STATUS_LABEL, type TaskStatus } from './Tasks'
 
@@ -173,7 +174,7 @@ function RoutineRow({ routine, open, onToggle, onChanged }: {
             <span className="block text-xs text-muted-foreground">
               {routine.rule}
               {routine.enabled ? ` · 下次 ${routine.next}` : ' · 停着'}
-              {routine.also_qq && ' · 汇报也发 QQ'}
+              {routine.also_qq && ' · 汇报也发到平台'}
               {routine.source === 'chat' &&
                 (routine.enabled ? ' · 聊天里让她设的' : ' · 她在聊天里设的：展开看过要做的事，再打开开关')}
             </span>
@@ -331,10 +332,12 @@ function NewRoutine({ botId, onDone, onCancel }: { botId: string; onDone: () => 
           <Label htmlFor={ids.time}>{repeat.startsWith('every_') ? '从几点起' : '几点'}</Label>
           <Input id={ids.time} type="time" className="w-28" value={time} onChange={(e) => setTime(e.target.value)} />
         </div>
-        <label htmlFor={ids.qq} className="flex items-center gap-2 pb-2 text-xs">
-          <Switch id={ids.qq} size="sm" checked={alsoQq} onCheckedChange={setAlsoQq} />
-          汇报也发到 QQ
-        </label>
+        {!botId.startsWith('desk:') && (
+          <label htmlFor={ids.qq} className="flex items-center gap-2 pb-2 text-xs">
+            <Switch id={ids.qq} size="sm" checked={alsoQq} onCheckedChange={setAlsoQq} />
+            汇报也发到{platformName(botId.split(':')[0])}
+          </label>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <Button size="sm" disabled={!title.trim() || !time || state === 'busy'} onClick={() => void add()}>

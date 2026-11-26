@@ -304,10 +304,16 @@ class StickerStore:
         return [sticker_dict(row) for row in rows]
 
     async def page(
-        self, *, status: str | None, query: str, offset: int, limit: int
+        self, *, status: str | None, query: str, offset: int, limit: int, owner: str | None = None
     ) -> tuple[list[dict[str, Any]], int]:
-        """Newest first, filtered by status and by words in the description, caption or tags."""
+        """Newest first, filtered by status, by words in the description, caption or tags, and by whose they
+        are (owner: a bot id, its own; "" those any bot may send; None all)."""
         where, params = ["1 = 1"], []
+        if owner == "":
+            where.append("bot_id IS NULL")
+        elif owner is not None:
+            where.append("bot_id = ?")
+            params.append(owner)
         if status:
             where.append("status = ?")
             params.append(status)
@@ -323,6 +329,13 @@ class StickerStore:
         )
         total = await self.db.fetchone(f"SELECT count(*) FROM stickers WHERE {clause}", params)
         return [sticker_dict(row) for row in rows], int(total[0]) if total else 0
+
+    async def owners(self) -> dict[str, int]:
+        """How many stickers each bot has to itself ("": those any bot may send)."""
+        rows = await self.db.fetchall(
+            "SELECT coalesce(bot_id, '') AS owner, count(*) FROM stickers GROUP BY 1"
+        )
+        return {row[0]: int(row[1]) for row in rows}
 
     # -- what the bots sent (decisions.sticker_id / sticker_state) ----------------------------------
 

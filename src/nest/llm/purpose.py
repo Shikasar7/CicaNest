@@ -18,6 +18,7 @@ PURPOSES = {
     "desk_group": "桌面群",
     "chatter": "桌宠碎碎念",
     "outreach": "主动找你",
+    "game": "小游戏",
     "life": "她们的日子",
     "task": "后台任务",
     "reminder": "提醒",

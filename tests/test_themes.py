@@ -98,9 +98,12 @@ def test_a_plugin_with_a_broken_theme_is_refused(tmp_path: Path) -> None:
 
 async def test_picking_a_theme_and_an_accent(world: World) -> None:  # noqa: F811
     shown = (await world.http.get("/api/appearance")).json()
-    assert shown["theme"] == themes.DEFAULT_ID and shown["accent"] is None and shown["plain"] is True
+    # Nothing picked yet: 软糖.
+    assert shown["theme"] == themes.CHOSEN_ID == "nest.candy" and shown["accent"] is None
+    assert shown["plain"] is False and shown["colors"]["light"]["background"] == "#fdf4ec"
     assert {t["id"] for t in shown["themes"]} == set(themes.BUILTIN)
-    assert shown["colors"] == themes.DEFAULT
+    ink = (await world.http.put("/api/appearance", json={"theme": themes.DEFAULT_ID})).json()
+    assert ink["plain"] is True and ink["colors"] == themes.DEFAULT
 
     picked = await world.http.put("/api/appearance", json={"theme": "nest.sea"})
     assert picked.status_code == 200 and picked.json()["plain"] is False
@@ -134,11 +137,11 @@ async def test_theme_plugins_from_a_zip_a_json_and_back_out(world: World) -> Non
     picked = (await world.http.put("/api/appearance", json={"theme": "demo.sakura/sakura"})).json()
     assert picked["colors"]["light"]["background"] == "#f7f1f3"
 
-    # Switched off on the 插件 page: no longer offered, and the look falls back to nest's own.
+    # Switched off on the 插件 page: no longer offered, and the look falls back to the default one.
     await world.http.put("/api/plugins/demo.sakura", json={"enabled": False})
     off = (await world.http.get("/api/appearance")).json()
     assert off["theme"] == "demo.sakura/sakura" and off["missing"] is True
-    assert off["colors"] == themes.DEFAULT
+    assert off["colors"] == themes.resolve(themes.BUILTIN[themes.CHOSEN_ID])
     assert "demo.sakura/sakura" not in {t["id"] for t in off["themes"]}
 
     # A single theme file becomes a plugin of its own.

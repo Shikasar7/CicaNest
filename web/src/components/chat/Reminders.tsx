@@ -10,7 +10,8 @@ import { getJson, sendJson } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 /** 提醒: what she reminds you of, and when. Also made in the chat by saying 「明天三点提醒我开会」. At its time she
- * says it in her own words: on the desk when the desktop app is open, else on QQ (and on QQ too when asked). */
+ * says it in her own words: on the desk when the desktop app is open, else on her platform (and there too when
+ * asked). */
 
 type Repeat = '' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
 type Reminder = {
@@ -41,10 +42,11 @@ function inAnHour(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export function Reminders({ botId, name, hasQQ, onClose }: {
+export function Reminders({ botId, name, platform, onClose }: {
   botId: string
   name: string
-  hasQQ: boolean
+  /** The platform her chat with you is also on (QQ, Discord…); null: only on the desk. */
+  platform: string | null
   onClose: () => void
 }) {
   const [listing, setListing] = useState<Listing | null>(null)
@@ -87,11 +89,11 @@ export function Reminders({ botId, name, hasQQ, onClose }: {
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
         {error && <p role="alert" className="text-destructive">{error}</p>}
-        {listing && hasQQ && (
+        {listing && platform && (
           <p className="text-xs text-muted-foreground">
             {listing.desk_open
-              ? '桌面端开着：提醒出现在桌面上；勾了「也发 QQ」的同时发到 QQ。'
-              : '桌面端没开：到点会发到 QQ 私聊。'}
+              ? `桌面端开着：提醒出现在桌面上；勾了「也发到${platform}」的同时发到${platform}。`
+              : `桌面端没开：到点会发到${platform}私聊。`}
           </p>
         )}
         {listing?.reminders.length === 0 && <p className="text-muted-foreground">还没有提醒。</p>}
@@ -108,7 +110,7 @@ export function Reminders({ botId, name, hasQQ, onClose }: {
                 <div className="text-xs text-muted-foreground">
                   {r.active ? `下次：${r.when}` : '已经提醒过 / 已关'}
                   {r.repeat && ` · ${repeatLabel(r.repeat)}`}
-                  {r.also_qq && ' · 也发 QQ'}
+                  {r.also_qq && platform && ` · 也发到${platform}`}
                   {r.source === 'chat' && ' · 聊天里说的'}
                 </div>
               </div>
@@ -123,13 +125,13 @@ export function Reminders({ botId, name, hasQQ, onClose }: {
             </li>
           ))}
         </ul>
-        <NewReminder botId={botId} hasQQ={hasQQ} onAdded={reload} />
+        <NewReminder botId={botId} platform={platform} onAdded={reload} />
       </div>
     </div>
   )
 }
 
-function NewReminder({ botId, hasQQ, onAdded }: { botId: string; hasQQ: boolean; onAdded: () => void }) {
+function NewReminder({ botId, platform, onAdded }: { botId: string; platform: string | null; onAdded: () => void }) {
   const [text, setText] = useState('')
   const [due, setDue] = useState(inAnHour)
   const [repeat, setRepeat] = useState<Repeat>('')
@@ -179,10 +181,10 @@ function NewReminder({ botId, hasQQ, onAdded }: { botId: string; hasQQ: boolean;
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        {hasQQ && (
+        {platform && (
           <label htmlFor={ids.qq} className="flex items-center gap-2 text-xs text-muted-foreground">
             <Switch id={ids.qq} checked={alsoQQ} onCheckedChange={setAlsoQQ} />
-            重要：桌面端开着也同时发到 QQ
+            重要：桌面端开着也同时发到{platform}
           </label>
         )}
         <Button size="sm" className="ml-auto" disabled={!text.trim() || !due || state === 'busy'} onClick={() => void add()}>

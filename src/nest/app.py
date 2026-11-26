@@ -31,6 +31,7 @@ from nest.api.routes_companions import router as companions_router
 from nest.api.routes_desk import router as desk_router
 from nest.api.routes_desk_groups import router as desk_groups_router
 from nest.api.routes_executor import router as executor_router
+from nest.api.routes_games import router as games_router
 from nest.api.routes_issues import digest_settings
 from nest.api.routes_issues import router as issues_router
 from nest.api.routes_knowledge import router as knowledge_router
@@ -71,6 +72,8 @@ from nest.core.desk_media import DeskMedia
 from nest.core.drawing import Drawing
 from nest.core.egress import is_online
 from nest.core.executor import ExecutorHub
+from nest.core.games import GameKeeper
+from nest.core.group_games import GroupGames
 from nest.core.groups import DeskGroups
 from nest.core.hub import AdapterFactory, Hub
 from nest.core.initiative import InitiativeKeeper, apply_to
@@ -82,6 +85,7 @@ from nest.core.market import MarketWatch
 from nest.core.mcp_plugins import McpHub
 from nest.core.memory import MemoryKeeper
 from nest.core.offline_alert import OfflineAlert
+from nest.core.openers import OpenerKeeper
 from nest.core.outreach import OutreachKeeper
 from nest.core.plugins import PluginManager
 from nest.core.reminders import ReminderKeeper
@@ -212,6 +216,7 @@ def create_app(
             app.state.repo = repo
             app.state.secrets = secrets
             app.state.store = MessageStore(db)
+            await app.state.store.load_switches()
             app.state.avatars = AvatarStore(db)
             app.state.remote = RemoteAccess(db)
             if settings.remote:
@@ -312,6 +317,15 @@ def create_app(
             app.state.brain.tasks = app.state.tasks
             app.state.routines = RoutineKeeper(db, app.state.brain, app.state.broadcaster)
             app.state.brain.routines = app.state.routines
+            app.state.games = GameKeeper(
+                db,
+                app.state.brain,
+                app.state.broadcaster,
+                media=settings.data_dir / "games",
+                vision=lambda: app.state.stickers.vision(),
+                drawing=app.state.drawing,
+            )
+            app.state.brain.games = app.state.games
             app.state.stickers = StickerKeeper(
                 db,
                 app.state.providers,
@@ -413,6 +427,11 @@ def create_app(
             await app.state.issues.start()
             app.state.birthdays = BirthdayKeeper(BirthdayStore(db), app.state.brain)
             await app.state.birthdays.start()
+            app.state.group_games = GroupGames(db, app.state.brain)
+            await app.state.group_games.load()
+            app.state.brain.group_games = app.state.group_games
+            app.state.openers = OpenerKeeper(db, app.state.brain, app.state.group_games)
+            await app.state.openers.start()
             await app.state.reminders.start()
             app.state.outreach = OutreachKeeper(
                 app.state.brain,
@@ -456,6 +475,7 @@ def create_app(
                 if learner is not None:
                     learner.cancel()
                 await app.state.routines.stop()
+                await app.state.games.stop()
                 await app.state.tasks.stop()
                 await app.state.drawing.stop()
                 await app.state.mcp.close()
@@ -466,6 +486,7 @@ def create_app(
                 await app.state.initiative.rhythm.save()
                 await app.state.market.stop()
                 await app.state.reminders.stop()
+                await app.state.openers.stop()
                 await app.state.birthdays.stop()
                 await app.state.issues.stop()
                 await app.state.offline_alert.stop()
@@ -520,6 +541,7 @@ def create_app(
     app.include_router(reminders_router)
     app.include_router(tasks_router)
     app.include_router(routines_router)
+    app.include_router(games_router)
     app.include_router(plugins_router)
     app.include_router(appearance_router)
     app.include_router(approvals_router)

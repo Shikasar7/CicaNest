@@ -28,7 +28,8 @@ import zipfile
 from typing import Any
 
 SETTING = "appearance"  # {"theme": theme id, "accent": "#rrggbb" | None}
-DEFAULT_ID = "nest.ink"
+DEFAULT_ID = "nest.ink"  # the stylesheet's own colours, which every theme is resolved against
+CHOSEN_ID = "nest.candy"  # what is shown until another one is picked
 MODES = ("light", "dark")
 # What a theme may set. The first eight are its own; the rest follow from them when left out.
 BASE = ("accent", "background", "surface", "card", "sidebar", "text", "muted", "border")
@@ -388,7 +389,7 @@ def catalogue(plugins: Any) -> dict[str, dict[str, Any]]:
 
 def choice_of(stored: Any) -> dict[str, Any]:
     stored = stored if isinstance(stored, dict) else {}
-    theme = stored.get("theme") if isinstance(stored.get("theme"), str) else DEFAULT_ID
+    theme = stored.get("theme") if isinstance(stored.get("theme"), str) else CHOSEN_ID
     return {"theme": theme, "accent": hex_colour(stored.get("accent"))}
 
 
@@ -397,7 +398,7 @@ def view(choice: dict[str, Any], themes: dict[str, dict[str, Any]]) -> dict[str,
     every colour of the picked one. "plain": nest's own look, nothing to change."""
     picked = themes.get(choice["theme"])
     missing = picked is None
-    theme = picked or themes[DEFAULT_ID]
+    theme = picked or themes.get(CHOSEN_ID) or themes[DEFAULT_ID]
     listed = []
     for tid, t in themes.items():
         swatch = resolve(t)

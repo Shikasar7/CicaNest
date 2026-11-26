@@ -30,7 +30,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 KIND = re.compile(r"[a-z][a-z0-9_]{1,30}")
-BUILTIN_KINDS = ("openai_chat", "openai_responses", "anthropic", "codex")
+BUILTIN_KINDS = ("openai_chat", "openai_responses", "anthropic", "gemini", "codex")
 BUILTIN_PLATFORMS = ("qq", "discord", "telegram", "slack", "wecom", "desk")
 GENERIC_OPTIONS = ("proxy", "timeout", "temperature", "extra_body")
 

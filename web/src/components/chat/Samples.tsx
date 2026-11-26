@@ -119,7 +119,7 @@ export function Samples({ onDone }: { onDone: (botId: string) => void }) {
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        请过来以后就是你的伙伴了：人设、名字、头像都能改，不想要了在控制台的 Bot 页删掉。
+        请过来以后就是你的伙伴了：人设、名字、头像都能改，不想要了在控制台的伙伴页删掉。
       </p>
     </div>
   )

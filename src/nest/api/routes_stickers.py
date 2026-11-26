@@ -155,10 +155,14 @@ async def stickers(
     q: Annotated[str, Query(max_length=40)] = "",
     offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 60,
+    owner: Annotated[str | None, Query(max_length=80)] = None,
 ) -> dict[str, Any]:
+    """owner: a bot id (the stickers that are hers alone, her packs' included), "" (those any bot may send),
+    or left out (all). owners: how many each has."""
     state = request.app.state
-    items, total = await state.stickers.store.page(status=status, query=q.strip(), offset=offset, limit=limit)
-    return {"items": items, "total": total, **await settings_view(state)}
+    store = state.stickers.store
+    items, total = await store.page(status=status, query=q.strip(), offset=offset, limit=limit, owner=owner)
+    return {"items": items, "total": total, "owners": await store.owners(), **await settings_view(state)}
 
 
 @router.get("/stickers/{sticker_id}/image")

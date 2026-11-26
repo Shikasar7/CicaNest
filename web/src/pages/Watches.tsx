@@ -83,7 +83,7 @@ export function Watches() {
       {!empty && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
-            定时查看订阅、网页和价格，有新内容时让 bot 发一条短消息到 QQ。新加的监控先试运行，不会真的发出去。
+            定时查看订阅、网页和价格，有新内容时让伙伴告诉你：发到桌面聊天，或她接的平台。新加的监控先试运行，不会真的发出去。
           </p>
           {!creating.editing && (
             <Button ref={addButton} onClick={creating.start}>

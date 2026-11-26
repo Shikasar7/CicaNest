@@ -8,6 +8,7 @@ import {
   type AccountStatus,
   type AvatarView,
   type Decision,
+  type GameView,
   type LogLine,
   type Message,
   type Persona,
@@ -37,6 +38,8 @@ export type LiveItem =
   | { kind: 'workspace'; botId: string }
   /** A step waiting for the user's nod appeared or was answered. */
   | { kind: 'approval'; botId: string; approvalId: number; status: string }
+  /** A 小游戏 with a companion changed: a move, her turn, its end. */
+  | { kind: 'game'; game: GameView }
 
 type Listener = (item: LiveItem) => void
 
@@ -208,6 +211,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     source.addEventListener('workspace', (event) => {
       emit({ kind: 'workspace', botId: (json(event) as { bot_id: string }).bot_id })
     })
+    source.addEventListener('game', (event) => emit({ kind: 'game', game: json(event) as GameView }))
     for (const name of ['task', 'task_step']) {
       source.addEventListener(name, (event) => {
         const update = json(event) as { bot_id: string; id: number }

@@ -573,3 +573,37 @@ async def test_api_preview_says_why_it_cannot(api_world: ApiWorld) -> None:  # n
     assert refused.status_code == 502 and "还没填密钥" in refused.json()["detail"]
     assert (await http.post("/api/speech/voices", json={"service": "fish"})).status_code == 502
     assert (await http.post("/api/speech/voices", json={"service": "tts"})).status_code == 422
+
+
+def test_a_quiet_voice_is_made_louder() -> None:
+    _, _, body = request_spec(FISH, "abc", "你好", 10)
+    assert body["prosody"] == {"speed": 1.0, "volume": 10}
+    assert "prosody" not in request_spec(FISH, "abc", "你好")[2]
+    _, _, body = request_spec(MINIMAX, "v", "你好", 6)
+    assert body["voice_setting"]["vol"] == 2.0
+    assert request_spec(MINIMAX, "v", "你好")[2]["voice_setting"]["vol"] == 1.0
+    assert request_spec(MINIMAX, "v", "你好", 40)[2]["voice_setting"]["vol"] == 10.0
+
+
+async def test_api_keeps_a_volume_per_voice_and_speaking_uses_it(api_world: ApiWorld) -> None:  # noqa: F811
+    http = api_world.http
+    view = (await http.patch("/api/speech", json={"volumes": {"fish:lily": 10, "minimax:x": -3}})).json()
+    assert view["settings"]["volumes"] == {"fish:lily": 10.0, "minimax:x": -3.0}
+    # Only the voices sent change; 0 takes one out.
+    view = (await http.patch("/api/speech", json={"volumes": {"minimax:x": 0}})).json()
+    assert view["settings"]["volumes"] == {"fish:lily": 10.0}
+    for wrong in ({"nope:x": 3}, {"fish:lily": 25}, {"fish:lily": -11}):
+        assert (await http.patch("/api/speech", json={"volumes": wrong})).status_code == 422
+
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, content=MP3, headers={"content-type": "audio/mpeg"})
+
+    keeper = api_world.state.speech
+    keeper._transport = httpx.MockTransport(handler)
+    await http.patch("/api/speech", json={"fish_key": "fish-key-123456"})
+    await keeper.say("fish:lily", "喵")
+    await keeper.say("fish:other", "喵")
+    assert bodies[0]["prosody"] == {"speed": 1.0, "volume": 10.0} and "prosody" not in bodies[1]

@@ -510,7 +510,12 @@ async def test_listing_models() -> None:
             "anthropic", "https://relay.example/v1", "k-123", auth_header="bearer", transport=mock(handler)
         )
     assert seen["headers"]["authorization"] == "Bearer k-123" and "x-api-key" not in seen["headers"]
-    assert "401" in str(failure.value) and "k-123" not in str(failure.value)
+    assert "密钥没通过（HTTP 401）" in str(failure.value) and "k-123" not in str(failure.value)
+
+    # No key yet: say so, not the interface's own words.
+    with pytest.raises(ProviderError, match="先在「密钥」里填上") as failure:
+        await list_models("openai_chat", "https://relay.example/v1", transport=mock(handler))
+    assert "authorization" not in seen["headers"] and "bad key" not in str(failure.value)
 
     missing = mock(lambda request: httpx.Response(404, text="Not Found"))
     with pytest.raises(ProviderError, match="不提供模型列表"):

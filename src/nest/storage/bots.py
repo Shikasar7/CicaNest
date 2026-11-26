@@ -81,6 +81,11 @@ class BotChannel:
     # 长期记忆: this bot remembers people here (their likes, how they are, what they agreed with it) and is
     # told what it remembers of whoever it is talking with (nest.core.memory).
     remember: bool = False
+    # 冷场时主动开口 (groups of a platform, nest.core.openers): after `opener_quiet` minutes of silence she
+    # may start talking on her own, at most `opener_daily` times a day.
+    opener: bool = False
+    opener_quiet: int = 120
+    opener_daily: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +101,17 @@ class BotConfig:
     voice: str = ""  # 发语音: "<service>:<voice id>"
     backup_provider_id: str | None = None  # 备用模型: speaks when the bot's own model cannot
     task_provider_id: str | None = None  # 做事模型: her tasks and routines run on it (None: her own model)
+
+
+@dataclass(frozen=True, slots=True)
+class Switched:
+    """What switching to a 人设方案 did. name: who the set makes the bot (None: a set that does not keep
+    it); avatar: the set's profile picture (content type, bytes) to put on the account, if it has one."""
+
+    changed: int  # places whose persona changed
+    renamed: bool  # the bot's name, aliases, voice or model changed
+    name: str | None
+    avatar: tuple[str, bytes] | None
 
 
 def _with_examples(persona: str, examples: str) -> str:
@@ -278,18 +294,64 @@ class BotRepo:
     # -- 人设方案 ----------------------------------------------------------------------------------
 
     async def persona_sets(self) -> dict[str, list[dict[str, Any]]]:
-        """Bot id -> its sets by name: {id, name, items: {channel_id: persona_id or None}}."""
-        sets = await self.db.fetchall("SELECT id, bot_id, name FROM persona_sets ORDER BY name, id")
+        """Bot id -> its sets by name: {id, name, items: {channel_id: persona_id or None}, identity}.
+        identity: {name, aliases, voice, provider_id, avatar (whether it has a picture), updated_at}, or
+        None for a set
+        saved before sets kept who the bot is."""
+        sets = await self.db.fetchall(
+            """SELECT id, bot_id, name, bot_name, aliases, voice, provider_id,
+                      avatar IS NOT NULL AS has_avatar, updated_at
+               FROM persona_sets ORDER BY name, id"""
+        )
         items = await self.db.fetchall("SELECT set_id, channel_id, persona_id FROM persona_set_items")
         by_set: dict[int, dict[int, int | None]] = {}
         for row in items:
             by_set.setdefault(row["set_id"], {})[row["channel_id"]] = row["persona_id"]
         views: dict[str, list[dict[str, Any]]] = {}
         for row in sets:
+            identity = None
+            if row["bot_name"] is not None:
+                identity = {
+                    "name": row["bot_name"],
+                    "aliases": json.loads(row["aliases"] or "[]"),
+                    "voice": row["voice"] or "",
+                    "provider_id": row["provider_id"],
+                    "avatar": bool(row["has_avatar"]),
+                    "updated_at": row["updated_at"],
+                }
             views.setdefault(row["bot_id"], []).append(
-                {"id": row["id"], "name": row["name"], "items": by_set.get(row["id"], {})}
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "items": by_set.get(row["id"], {}),
+                    "identity": identity,
+                }
             )
         return views
+
+    async def persona_set_avatar(self, bot_id: str, set_id: int) -> tuple[str, bytes] | None:
+        """The set's profile picture (content type, bytes), None when it has none or there is no such set."""
+        row = await self.db.fetchone(
+            "SELECT avatar_type, avatar FROM persona_sets WHERE id = ? AND bot_id = ? AND avatar IS NOT NULL",
+            (set_id, bot_id),
+        )
+        return (row["avatar_type"], bytes(row["avatar"])) if row else None
+
+    async def set_persona_set_avatar(
+        self, bot_id: str, set_id: int, picture: tuple[str, bytes] | None
+    ) -> bool:
+        """Give the set this profile picture (None: no picture, switching leaves the account's alone). False
+        when the bot has no such set."""
+        content_type, data = picture if picture is not None else (None, None)
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                """UPDATE persona_sets SET avatar_type = ?, avatar = ?, updated_at = ?
+                   WHERE id = ? AND bot_id = ?""",
+                (content_type, data, time.time(), set_id, bot_id),
+            )
+            updated = cursor.rowcount > 0
+            await cursor.close()
+        return updated
 
     async def create_persona_set(self, bot_id: str, name: str) -> int:
         """Save the persona the bot uses in each of its places as a new set; NameTaken when the bot already
@@ -311,13 +373,15 @@ class BotRepo:
             await cursor.close()
             assert set_id is not None
             await conn.execute(SNAPSHOT, (set_id, bot_id))
+            await conn.execute(SNAPSHOT_IDENTITY, {"set_id": set_id, "bot_id": bot_id})
         return set_id
 
     async def update_persona_set(
         self, bot_id: str, set_id: int, *, name: str | None = None, resave: bool = False
     ) -> bool:
-        """Rename the set and/or save the bot's current personas over it. False when the bot has no such
-        set; NameTaken on a rename onto another of its sets."""
+        """Rename the set and/or save the bot's current personas, name, aliases, voice and model over it
+        (and its current QQ avatar, when one is stored). False when the bot has no such set; NameTaken on a
+        rename onto another of its sets."""
         async with self.db.transaction() as conn:
             if not await _own_set(conn, bot_id, set_id):
                 return False
@@ -334,16 +398,43 @@ class BotRepo:
             if resave:
                 await conn.execute("DELETE FROM persona_set_items WHERE set_id = ?", (set_id,))
                 await conn.execute(SNAPSHOT, (set_id, bot_id))
+                await conn.execute(SNAPSHOT_IDENTITY, {"set_id": set_id, "bot_id": bot_id})
             await conn.execute("UPDATE persona_sets SET updated_at = ? WHERE id = ?", (time.time(), set_id))
         return True
 
-    async def apply_persona_set(self, bot_id: str, set_id: int) -> int | None:
+    async def apply_persona_set(self, bot_id: str, set_id: int) -> Switched | None:
         """Give each of the bot's places the persona the set has for it; places the set does not know
-        (added after it was saved) keep theirs. Returns how many places changed, None when the bot has no
-        such set."""
+        (added after it was saved) keep theirs. A set that keeps who the bot is also gives it its name,
+        aliases, voice and model. None when the bot has no such set."""
         async with self.db.transaction() as conn:
-            if not await _own_set(conn, bot_id, set_id):
+            cursor = await conn.execute(
+                """SELECT s.bot_name, s.aliases, s.voice, s.provider_id, s.avatar_type, s.avatar,
+                          b.name, b.aliases, b.voice, b.provider_id
+                   FROM persona_sets s JOIN bots b ON b.id = s.bot_id WHERE s.id = ? AND s.bot_id = ?""",
+                (set_id, bot_id),
+            )
+            found = await cursor.fetchone()
+            await cursor.close()
+            if found is None:
                 return None
+            name, aliases, voice, provider, avatar_type, avatar = found[:6]
+            provider = provider or found[9]  # none saved: she keeps the model she has
+            renamed = False
+            if name is not None and (name, aliases, voice, provider) != tuple(found[6:]):
+                await conn.execute(
+                    """UPDATE bots SET name = ?, aliases = ?, voice = ?, provider_id = ?, updated_at = ?
+                       WHERE id = ?""",
+                    (name, aliases or "[]", voice or "", provider, time.time(), bot_id),
+                )
+                renamed = True
+            if name is not None and name != found[6]:
+                # Someone else from now on: what the account said before is no longer hers.
+                await conn.execute(
+                    """INSERT INTO identity_switches (bot_id, self_id, at, before, after)
+                       SELECT b.id, a.self_id, ?, ?, ? FROM bots b JOIN accounts a ON a.id = b.account_id
+                       WHERE b.id = ?""",
+                    (time.time(), found[6], name, bot_id),
+                )
             chosen = (
                 "(SELECT i.persona_id FROM persona_set_items i"
                 " WHERE i.set_id = ? AND i.channel_id = bc.channel_id)"
@@ -357,7 +448,8 @@ class BotRepo:
             )
             changed = cursor.rowcount
             await cursor.close()
-        return changed
+        picture = (avatar_type, bytes(avatar)) if avatar is not None else None
+        return Switched(changed=changed, renamed=renamed, name=name, avatar=picture)
 
     async def delete_persona_set(self, bot_id: str, set_id: int) -> bool:
         async with self.db.transaction() as conn:
@@ -503,6 +595,9 @@ class BotRepo:
         welcome_note: str | None = None,
         birthday: bool | None = None,
         remember: bool | None = None,
+        opener: bool | None = None,
+        opener_quiet: int | None = None,
+        opener_daily: int | None = None,
     ) -> None:
         """None (UNSET for persona_id) leaves a setting as it is; persona_id=None removes the persona.
         recorder=True takes 问题记录官 away from any other bot in the same group."""
@@ -553,6 +648,12 @@ class BotRepo:
             columns["birthday"] = int(birthday)
         if remember is not None:
             columns["remember"] = int(remember)
+        if opener is not None:
+            columns["opener"] = int(opener)
+        if opener_quiet is not None:
+            columns["opener_quiet"] = opener_quiet
+        if opener_daily is not None:
+            columns["opener_daily"] = opener_daily
         async with self.db.transaction() as conn:
             if recorder:
                 await conn.execute(
@@ -586,7 +687,7 @@ class BotRepo:
                       bc.sticker_mode, bc.voice_mode, bc.voice_rate, bc.reply_lines, bc.split_rate,
                       bc.use_slang, bc.answer_questions, bc.answer_tone, bc.chat_tone, bc.recorder,
                       bc.welcome, bc.welcome_voice, bc.welcome_delay, bc.welcome_note,
-                      bc.birthday, bc.remember,
+                      bc.birthday, bc.remember, bc.opener, bc.opener_quiet, bc.opener_daily,
                       c.kind,
                       c.external_id, c.name,
                       coalesce(p.name, '') AS persona_name,
@@ -623,6 +724,9 @@ class BotRepo:
                     welcome_note=ch["welcome_note"],
                     birthday=bool(ch["birthday"]),
                     remember=bool(ch["remember"]),
+                    opener=bool(ch["opener"]),
+                    opener_quiet=ch["opener_quiet"],
+                    opener_daily=ch["opener_daily"],
                 )
                 for ch in channel_rows
                 if ch["bot_id"] == row["id"]
@@ -843,6 +947,17 @@ PERSONA_IN_SETS = """SELECT DISTINCT b.name AS bot_name, s.name AS set_name
 # Each of a bot's places with the persona it uses now, into one set (set id, bot id).
 SNAPSHOT = """INSERT INTO persona_set_items (set_id, channel_id, persona_id)
               SELECT ?, channel_id, persona_id FROM bot_channels WHERE bot_id = ?"""
+# Who the bot is now, into the set: its name, aliases, voice, and the QQ avatar it wears (when nest has
+# fetched one; otherwise the set keeps the picture it had).
+SNAPSHOT_IDENTITY = """UPDATE persona_sets SET
+        bot_name = (SELECT name FROM bots WHERE id = :bot_id),
+        aliases = (SELECT aliases FROM bots WHERE id = :bot_id),
+        voice = (SELECT voice FROM bots WHERE id = :bot_id),
+        provider_id = (SELECT provider_id FROM bots WHERE id = :bot_id),
+        avatar_type = coalesce(
+            (SELECT content_type FROM bot_avatars WHERE bot_id = :bot_id AND source = 'qq'), avatar_type),
+        avatar = coalesce((SELECT data FROM bot_avatars WHERE bot_id = :bot_id AND source = 'qq'), avatar)
+    WHERE id = :set_id"""
 
 
 async def _own_set(conn: Any, bot_id: str, set_id: int) -> bool:

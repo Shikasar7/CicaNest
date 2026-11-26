@@ -50,11 +50,13 @@ export function BotForm({
 
   const remove = async () => {
     const question =
-      ((bot.platform ?? 'qq') === 'qq'
+      (bot.platform === 'desk'
+        ? `删除 ${bot.name}？她会从这里消失，桌面上也不能再和她聊天。`
+        : (bot.platform ?? 'qq') === 'qq'
         ? `删除 ${bot.name}？它会从这里消失、不再连 QQ，它的 QQ 容器也会删掉。` +
-          '聊天记录、判断记录、用量和 QQ 登录数据都保留：以后用同一个 QQ 号再「增加 bot」，就能接着用，一般不用重新扫码。'
+          '聊天记录、判断记录、用量和 QQ 登录数据都保留：以后用同一个 QQ 号再加回来，就能接着用，一般不用重新扫码。'
         : `删除 ${bot.name}？它会从这里消失、不再连接，保存的密钥也会删掉。` +
-          '聊天记录、判断记录和用量都保留：以后再「增加 bot」填同一个账号，就能接着用。')
+          '聊天记录、判断记录和用量都保留：以后再用同一个账号加回来，就能接着用。')
     if (!window.confirm(question)) return
     setSaving(true)
     setServerError('')

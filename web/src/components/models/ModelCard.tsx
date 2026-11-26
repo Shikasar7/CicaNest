@@ -82,7 +82,9 @@ function OptionRows({ provider }: { provider: ProviderView }) {
       {provider.kind === 'anthropic' && (
         <Row label="密钥请求头">{options.auth_header === 'bearer' ? 'Authorization: Bearer' : 'x-api-key'}</Row>
       )}
-      {provider.kind === 'anthropic' && <Row label="思考档">{EFFORT_LABEL[effortOf(options.effort)]}</Row>}
+      {(provider.kind === 'anthropic' || provider.kind === 'gemini') && (
+        <Row label="思考档">{EFFORT_LABEL[effortOf(options.effort)]}</Row>
+      )}
       {provider.kind === 'anthropic' && <Row label="联网搜索">{options.web_search === true ? '开' : '关'}</Row>}
       {provider.kind === 'openai_chat' && <Row label="工具调用">{options.tools === true ? '开' : '关'}</Row>}
       {extra !== undefined && extra !== null && (
@@ -236,7 +238,7 @@ export function ModelCard({
               <ResultText result={testResult} />
               {provider.used_by.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  还有 bot 在用，不能删除：{users}。先在「Bot」页给它们换个模型。
+                  还有伙伴在用，不能删除：{users}。先在「伙伴」页给她们换个模型。
                 </p>
               )}
               {deleteError && (

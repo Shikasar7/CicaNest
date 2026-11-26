@@ -24,4 +24,4 @@ export function userProblem(user: string, bot: Bot, platforms: PlatformView[] | 
 }
 
 /** A hint for fields that say who gets told something: QQ by number, anything else with its platform. */
-export const RECIPIENT_HINT = 'QQ 号直接填；别的平台写成 discord:用户 ID、telegram:用户 ID、slack:成员 ID、wecom:userid'
+export const RECIPIENT_HINT = '写成「平台:ID」，比如 discord:用户 ID、telegram:用户 ID、slack:成员 ID、wecom:userid；QQ 号也可以直接填'

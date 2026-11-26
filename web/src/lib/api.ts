@@ -302,6 +302,100 @@ export type Message = {
   recalled_at: number | null
 }
 
+/** 小游戏: a game with a companion, as GET /api/games/current and the "game" event show it. */
+export type GameKind = 'gomoku' | 'reversi' | 'soup' | 'draw'
+export type GameStatus = 'playing' | 'won' | 'lost' | 'draw' | 'resigned' | 'left'
+export type GameLevel = 'easy' | 'normal' | 'hard'
+export type SoupFlavor = 'clear' | 'red' | 'funny'
+/** One question of a 海龟汤 and her answer (null while she thinks). */
+export type SoupQuestion = {
+  q: string
+  guess: boolean
+  answer: '是' | '不是' | '无关' | '是也不是' | null
+  solved: boolean | null
+  close?: boolean
+  line?: string
+  sticker_id?: number
+  sticker_label?: string
+  at: number
+}
+export type SoupView = {
+  flavor: SoupFlavor
+  title: string
+  surface: string
+  questions: SoupQuestion[]
+  hints: string[]
+  hints_left: number
+  preparing: boolean
+  error: string
+  /** Only once it is over. */
+  bottom?: string
+  keys?: string[]
+}
+/** 你画我猜: one time you handed the drawing over, and what she guessed (null while she looks). */
+export type DrawGuess = {
+  n: number
+  guess: string | null
+  right: boolean
+  line?: string
+  sticker_id?: number
+  sticker_label?: string
+  at: number
+}
+export type DrawView = {
+  /** you: you draw and she guesses; her: she draws and you guess. */
+  mode: 'you' | 'her'
+  /** What you draw (she does not know it); when she draws, '' until it is over. */
+  word: string
+  /** A word of your own, not one from the list. */
+  own: boolean
+  guesses: DrawGuess[]
+  tries_left: number
+  looking: boolean
+  /** She is drawing (about a minute); painted: her picture is ready (/api/games/{id}/sketches/0). */
+  painting: boolean
+  painted: boolean
+  hints: string[]
+  hints_left: number
+  /** Her word when it is over (she drew). */
+  line: string
+  line_sticker: { id: number; label: string } | null
+  error: string
+}
+export type GameView = {
+  id: number
+  bot_id: string
+  kind: GameKind
+  level: GameLevel
+  /** won / lost: from your side. 海龟汤: won = you solved it, resigned = you gave up. */
+  status: GameStatus
+  turn: 'you' | 'her' | null
+  /** Her move coming, her puzzle being written, or her answer to your question. */
+  thinking: boolean
+  undos: number
+  record: { won: number; lost: number; draw: number }
+  created_at: number
+  /** Which of two views of the same game is newer (with thinking: false winning a tie). */
+  updated_at: number
+  // Board games:
+  size?: number
+  /** In order, black first: [x, y] with y from the top; a pass (黑白棋) is [-1, -1]. */
+  moves?: [number, number][]
+  /** Row by row: 0 empty, 1 black, 2 white. */
+  board?: number[][]
+  /** 1 black (she began), 2 white. */
+  her_color?: 1 | 2
+  win?: [number, number][]
+  /** 黑白棋: discs of each colour ("1", "2"). */
+  score?: Record<string, number> | null
+  /** 黑白棋: where you may play now. */
+  options?: [number, number][]
+  // 海龟汤:
+  soup?: SoupView
+  // 你画我猜 (won: she guessed it; lost: three wrong guesses; resigned: you told her):
+  draw?: DrawView
+}
+
 export type Activity = 'mentions' | 'occasional' | 'active'
 export type BotMode = 'observe' | 'live' | 'paused'
 
@@ -344,6 +438,8 @@ export type SpeechSettings = {
   max_chars: number
   /** 音色库: the voices written down for each service. */
   library: Partial<Record<SpeechServiceId, SpeechVoice[]>>
+  /** 音量: "<service>:<voice id>" -> dB louder than the service makes it (absent: as made). */
+  volumes?: Record<string, number>
 }
 
 /** GET /api/speech. */
@@ -398,6 +494,12 @@ export type BotChannel = {
   birthday?: boolean
   /** 长期记忆: this bot remembers people here and is told it when they talk. Absent on an older nest. */
   remember?: boolean
+  /** 冷场时主动开口 (groups of a platform): after `opener_quiet` minutes of silence she may start talking
+   * (small talk, a grumble, being cute, a little game), at most `opener_daily` times a day. Absent on an
+   * older nest. */
+  opener?: boolean
+  opener_quiet?: number
+  opener_daily?: number
 }
 
 /** A 语气 (GET /api/tones): built-in ones can be rewritten and reset, added ones deleted when unused. */
@@ -446,13 +548,30 @@ export type Bot = {
 }
 
 /** 人设方案: the persona a bot used in each of its places when the set was saved (only places it still has;
- * persona_id null: 不用人设). current: every such place uses that persona now. */
+ * persona_id null: 不用人设). current: every such place uses that persona now (and the bot has the set's name).
+ * identity: who the bot was when the set was saved, put back when switching; null for sets saved before
+ * sets kept it. */
 export type PersonaSet = {
   id: number
   name: string
   items: { channel_id: number; persona_id: number | null }[]
   current: boolean
+  identity: PersonaSetIdentity | null
 }
+
+/** The name (QQ nickname too), aliases, voice and model a 人设方案 gives the bot, and whether it has a
+ * profile picture (QQ avatar) to put on; updated_at versions that picture's URL. */
+export type PersonaSetIdentity = {
+  name: string
+  aliases: string[]
+  voice: string
+  provider_id: string | null
+  avatar: boolean
+  updated_at: number
+}
+
+/** What switching to a 人设方案 did; problems: what could not be done to the account's profile. */
+export type PersonaSetSwitched = { changed: number; renamed: boolean; problems: string[] }
 
 /** Where a bot's console picture comes from: its QQ avatar or one the user uploaded. */
 export type AvatarSource = 'qq' | 'custom'
@@ -473,7 +592,7 @@ export type Decision = {
   bot_name: string
   channel_id: number
   trigger_id: number | null
-  trigger: 'mention' | 'chime_in' | 'source' | 'welcome' | 'birthday'
+  trigger: 'mention' | 'chime_in' | 'source' | 'welcome' | 'birthday' | 'opener'
   outcome: Outcome
   reason: string
   reply: string | null
@@ -542,6 +661,9 @@ export type ChannelPatch = {
   welcome_note?: string
   birthday?: boolean
   remember?: boolean
+  opener?: boolean
+  opener_quiet?: number
+  opener_daily?: number
 }
 
 // ---- 问题记录 (/api/issues) ----
@@ -643,6 +765,8 @@ export type StickerList = {
   bytes: number
   counts: Partial<Record<StickerStatus, number>>
   groups: { key: string; name: string; collect: boolean }[]
+  /** How many stickers each bot has to itself ("": those any bot may send). */
+  owners: Record<string, number>
 }
 
 export type SlangEntry = {
@@ -741,7 +865,7 @@ export type PrivateCreate = { user_id: string; persona_id?: number }
 
 // ---- Models (/api/providers) ----
 
-export type ProviderKind = 'openai_chat' | 'openai_responses' | 'anthropic' | 'codex'
+export type ProviderKind = 'openai_chat' | 'openai_responses' | 'anthropic' | 'gemini' | 'codex'
 
 /** Options the backend accepts, per kind (anything else is rejected). Omitted = default. */
 export type ProviderOptions = {
@@ -749,15 +873,15 @@ export type ProviderOptions = {
   proxy?: string
   /** All kinds: 1–300 seconds (default 40). */
   timeout?: number
-  /** openai_chat only: 0–2; omitted = the model's default. */
+  /** openai_chat and gemini: 0–2; omitted = the model's default. */
   temperature?: number
-  /** openai_chat, openai_responses and anthropic: a JSON object merged into the request body. */
+  /** openai_chat, openai_responses, anthropic and gemini: a JSON object merged into the request body. */
   extra_body?: Record<string, unknown>
   /** openai_responses only (default "text"). */
   input_format?: 'text' | 'messages'
   /** anthropic only (default "x-api-key"): how the key is sent; some relays want a Bearer header. */
   auth_header?: 'x-api-key' | 'bearer'
-  /** anthropic only (default "low"): how much the model thinks before replying. */
+  /** anthropic and gemini (default "low"): how much the model thinks before replying. */
   effort?: 'low' | 'medium' | 'high'
   /** anthropic only (default off): search the web when answering a question; billed per search. */
   web_search?: boolean

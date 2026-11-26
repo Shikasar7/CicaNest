@@ -8,6 +8,7 @@
 ; The uninstaller itself may be run from there.
 
 !include "getProcessInfo.nsh"
+!include "nsDialogs.nsh"
 Var pid
 
 !macro nestProcesses _DO _RETURN
@@ -71,6 +72,49 @@ Var pid
 
 !macro customPageAfterChangeDir
   Var nestDir ; where it goes; "" when there is no good place
+  Var nestDesktop ; "1": a shortcut on the desktop
+  Var nestMenu ; "1": one in the Start menu
+  Var nestDesktopBox
+  Var nestMenuBox
+
+  ; Where the shortcuts go. Not asked again on an update: the last answer stands.
+  Function nestLinksShow
+    ${if} ${isUpdated}
+      Abort
+    ${endIf}
+    !insertmacro MUI_HEADER_TEXT "快捷方式" "选择要在哪里放 nest 的图标"
+    nsDialogs::Create 1018
+    Pop $0
+    ${if} $0 == error
+      Abort
+    ${endIf}
+    ${NSD_CreateCheckbox} 0 0 100% 12u "在桌面创建快捷方式"
+    Pop $nestDesktopBox
+    ${if} $nestDesktop == "1"
+      ${NSD_Check} $nestDesktopBox
+    ${endIf}
+    ${NSD_CreateCheckbox} 0 20u 100% 12u "添加到开始菜单"
+    Pop $nestMenuBox
+    ${if} $nestMenu == "1"
+      ${NSD_Check} $nestMenuBox
+    ${endIf}
+    ${NSD_CreateLabel} 12u 34u -12u 20u "开始菜单里有图标，Windows 才会弹出 nest 的提醒通知。"
+    Pop $0
+    nsDialogs::Show
+  FunctionEnd
+
+  Function nestLinksLeave
+    ${NSD_GetState} $nestDesktopBox $0
+    StrCpy $nestDesktop "0"
+    ${if} $0 == ${BST_CHECKED}
+      StrCpy $nestDesktop "1"
+    ${endIf}
+    ${NSD_GetState} $nestMenuBox $0
+    StrCpy $nestMenu "0"
+    ${if} $0 == ${BST_CHECKED}
+      StrCpy $nestMenu "1"
+    ${endIf}
+  FunctionEnd
 
   ; $0: a folder. $1: "1" when there are other things in it than nest.
   Function nestTaken
@@ -158,11 +202,26 @@ Var pid
   !insertmacro skipPageIfUpdated
   !define MUI_PAGE_CUSTOMFUNCTION_LEAVE nestDirLeave
   !insertmacro MUI_PAGE_DIRECTORY
+  Page custom nestLinksShow nestLinksLeave
   !define MUI_PAGE_CUSTOMFUNCTION_PRE nestFilesPre ; of the page that follows, the installing
 !macroend
 
 ; Silent (/S /D=folder): the same places, without the questions.
 !macro customInit
+  ; The last answer (kept with the install's own registry entries, which go with it), else both: but an update from
+  ; a version that never asked keeps what it made, the Start menu only.
+  ReadRegStr $nestDesktop SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" NestDesktopShortcut
+  ${if} $nestDesktop == ""
+    StrCpy $nestDesktop "1"
+    ${if} ${isUpdated}
+      StrCpy $nestDesktop "0"
+    ${endIf}
+  ${endIf}
+  ReadRegStr $nestMenu SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" NestStartMenuShortcut
+  ${if} $nestMenu == ""
+    StrCpy $nestMenu "1"
+  ${endIf}
+
   ${if} ${Silent}
     Call nestPlace
     StrLen $2 $nestDir
@@ -187,4 +246,36 @@ Var pid
   ${if} $installMode == "all"
     SetShellVarContext all
   ${endif}
+
+  ; electron-builder has just made both shortcuts.
+  ${if} $nestDesktop != "1"
+    WinShell::UninstShortcut "$newDesktopLink"
+    Delete "$newDesktopLink"
+  ${endIf}
+  ${if} $nestMenu != "1"
+    WinShell::UninstShortcut "$newStartMenuLink"
+    Delete "$newStartMenuLink"
+    StrCpy $launchLink "$appExe"
+  ${endIf}
+  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+  WriteRegStr SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" NestDesktopShortcut $nestDesktop
+  WriteRegStr SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" NestStartMenuShortcut $nestMenu
+!macroend
+
+; The last page: start nest now, ticked. From the Start menu shortcut when there is one (it carries the app's ID),
+; else the program itself.
+!macro customFinishPage
+  Function nestRun
+    ${if} ${isUpdated}
+      StrCpy $1 "--updated"
+    ${else}
+      StrCpy $1 ""
+    ${endif}
+    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+  FunctionEnd
+
+  !define MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN_TEXT "立即运行 nest"
+  !define MUI_FINISHPAGE_RUN_FUNCTION "nestRun"
+  !insertmacro MUI_PAGE_FINISH
 !macroend

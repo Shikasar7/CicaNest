@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { CircleAlert, MessageCircleHeart, Settings2, Sparkles } from 'lucide-react'
 
 import { BotGlyph } from '@/components/BotGlyph'
 import { FirstLoad, StaleNotice } from '@/components/Feedback'
 import { StatusDot, type Tone } from '@/components/StatusDot'
+import { Button } from '@/components/ui/button'
 import { getJson, type Account, type AdapterState, type Bot, type Decision, type Status, type SystemView } from '@/lib/api'
 import { useRecentDecisions } from '@/lib/activity'
 import { formatAgo, formatTime, formatUptime } from '@/lib/format'
 import type { LifeView } from '@/lib/life'
-import { useBots, useLive } from '@/lib/live'
+import { useBots, useLive, useProviders } from '@/lib/live'
 import { useLiveData } from '@/lib/live-data'
 import { botLook } from '@/lib/persona'
 import { platformName } from '@/lib/platforms'
 import { cn } from '@/lib/utils'
 import { useWatches } from '@/lib/watches'
 
+/** On a platform: what she does with what she hears there. */
 const MODE = {
   live: { label: '正式发言', className: 'bg-ok/15 text-ok' },
   observe: { label: '只看不说', className: 'ring-1 ring-border text-muted-foreground' },
@@ -24,7 +27,7 @@ const CONNECTION: Record<AdapterState, { text: string; tone: Tone }> = {
   connected: { text: '在线', tone: 'ok' },
   connecting: { text: '正在连接', tone: 'wait' },
   reconnecting: { text: '重连中', tone: 'wait' },
-  offline: { text: 'QQ 离线', tone: 'wait' },
+  offline: { text: '离线', tone: 'wait' },
   deaf: { text: '收不到消息', tone: 'bad' },
   auth_failed: { text: '令牌错误', tone: 'bad' },
   misconfigured: { text: '配置不对', tone: 'bad' },
@@ -33,96 +36,109 @@ const CONNECTION: Record<AdapterState, { text: string; tone: Tone }> = {
 
 const speaks = (d: Decision) => (d.outcome === 'replied' || d.outcome === 'would_reply') && !!d.reply
 
-/** Today's figures, the ones that tell whether a bot is doing its job. */
-function Today({ bot }: { bot: Bot }) {
-  const quiet = (bot.today.skipped ?? 0) + (bot.today.suppressed ?? 0)
-  const items = [
-    { label: '已发送', value: bot.today.replied ?? 0 },
-    { label: '本来会回', value: bot.today.would_reply ?? 0 },
-    { label: '没开口', value: quiet },
-    { label: '出错', value: bot.today.failed ?? 0, bad: true },
-  ]
-  return (
-    <dl className="grid grid-cols-2 gap-x-2 gap-y-3 @[17rem]:grid-cols-4">
-      {items.map((i) => (
-        <div key={i.label} className="flex flex-col-reverse">
-          <dt className="text-xs whitespace-nowrap text-muted-foreground">{i.label}</dt>
-          <dd
-            className={cn(
-              'text-xl font-semibold tabular-nums tracking-tight',
-              i.bad && i.value > 0 ? 'text-destructive' : i.value === 0 && 'text-muted-foreground/60',
-            )}
-          >
-            {i.value}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  )
+const onDesk = (bot: Bot) => bot.platform === 'desk'
+
+/** The newest line of her chat with you on the desk (GET /api/desk, only what this page needs). */
+type DeskLast = { bot_id: string; last: { text: string; from_self: boolean; sent_at: number; sticker: boolean } | null }
+
+/** What the card quotes: her newest line, from the desk or from a group, whichever is newer. */
+type Line = { text: string; where: string; at: number; real: boolean }
+
+function latestLine(decision: Decision | undefined, desk: DeskLast | undefined, groupOf: Map<number, string>): Line | null {
+  const fromDesk =
+    desk?.last && desk.last.from_self
+      ? { text: desk.last.sticker ? '（发了一个表情）' : desk.last.text, where: '和你聊天时', at: desk.last.sent_at, real: true }
+      : null
+  const fromGroup = decision?.reply
+    ? {
+        text: decision.reply,
+        where: `${decision.outcome === 'replied' ? '发到' : '本来会发到'}「${groupOf.get(decision.channel_id) ?? '群里'}」`,
+        at: decision.created_at,
+        real: decision.outcome === 'replied',
+      }
+    : null
+  if (!fromDesk) return fromGroup
+  if (!fromGroup) return fromDesk
+  return fromDesk.at >= fromGroup.at ? fromDesk : fromGroup
 }
 
-/** The bot's latest line: solid when it really went out, dashed when it was only what it would have said. */
-function LastLine({ line, groupOf }: { line: Decision | undefined; groupOf: Map<number, string> }) {
+/** Her latest line: solid when it really went out, dashed when it was only what she would have said. */
+function LastLine({ line, name }: { line: Line | null; name: string }) {
   if (!line) {
     return (
       <p className="rounded-2xl rounded-tl-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
-        还没开口
+        还没开口。去「聊天」跟{name}打个招呼吧。
       </p>
     )
   }
-  const real = line.outcome === 'replied'
   return (
     <figure
-      key={line.id}
       className={cn(
         'animate-in fade-in-0 zoom-in-95 duration-300 rounded-2xl rounded-tl-md px-4 py-3',
-        real
+        line.real
           ? 'bg-[color-mix(in_oklch,var(--hue)_10%,var(--card))]'
           : 'border border-dashed border-[color-mix(in_oklch,var(--hue)_45%,transparent)]',
       )}
     >
-      <blockquote className="text-[15px] leading-relaxed break-words whitespace-pre-line">{line.reply}</blockquote>
+      <blockquote className="line-clamp-3 text-[15px] leading-relaxed break-words whitespace-pre-line">{line.text}</blockquote>
       <figcaption className="mt-1.5 text-xs text-muted-foreground">
-        {real ? '发到' : '本来会发到'}「{groupOf.get(line.channel_id) ?? '群里'}」，{formatAgo(line.created_at)}
+        {line.where}，{formatAgo(line.at)}
       </figcaption>
     </figure>
   )
 }
 
-function Presence({ account, bot, line, groupOf }: { account: Account; bot: Bot; line?: Decision; groupOf: Map<number, string> }) {
+/** Where she is: always on the desk, and on a platform if one is connected. */
+function Places({ bot, account }: { bot: Bot; account: Account | undefined }) {
+  const connection = account ? (CONNECTION[account.status.state] ?? { text: account.status.state, tone: 'off' as const }) : null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs whitespace-nowrap">
+      <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">桌面</span>
+      {!onDesk(bot) && (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+          <StatusDot tone={connection?.tone ?? 'off'} className="size-1.5" />
+          {platformName(bot.platform ?? 'qq')}
+          <span className={cn(connection?.tone !== 'ok' && 'text-foreground')}>{connection?.text ?? '没有连接'}</span>
+        </span>
+      )}
+      {!onDesk(bot) && <span className={cn('rounded-full px-2 py-0.5 font-medium', MODE[bot.mode].className)}>{MODE[bot.mode].label}</span>}
+    </div>
+  )
+}
+
+function Companion({
+  bot,
+  account,
+  line,
+  now,
+}: {
+  bot: Bot
+  account: Account | undefined
+  line: Line | null
+  /** What she is doing in 小窝 right now, if her days are on. */
+  now: string
+}) {
   const look = botLook(bot.name, bot.id)
-  const connection = CONNECTION[account.status.state] ?? { text: account.status.state, tone: 'off' as const }
-  const online = account.status.state === 'connected'
-  const mode = MODE[bot.mode]
+  const awake = bot.mode !== 'paused' && !!bot.provider
+  const groups = bot.channels.filter((c) => c.enabled && c.kind !== 'private').length
   return (
     <article
       style={{ '--hue': look.hue } as CSSProperties}
-      className="@container flex flex-col gap-5 rounded-2xl border bg-card p-5 shadow-[var(--shadow-lift)]"
+      className="@container flex flex-col gap-4 rounded-2xl border bg-card p-5 shadow-[var(--shadow-lift)]"
     >
-      <header className="space-y-3">
-        <div className="flex items-center gap-3.5">
-          <BotGlyph name={bot.name} id={bot.id} size="lg" online={online} breathing={online && bot.mode !== 'paused'} />
-          <div className="min-w-0 flex-1 space-y-1">
+      <header className="flex items-center gap-3.5">
+        <BotGlyph name={bot.name} id={bot.id} size="lg" online={awake} breathing={awake} />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex items-baseline gap-2">
             <h2 className="truncate text-base font-semibold tracking-tight">{bot.name}</h2>
-            <div className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground">
-              <span className={cn('rounded-full px-2 py-0.5 font-medium', mode.className)}>{mode.label}</span>
-              <StatusDot tone={connection.tone} />
-              <span className={cn('truncate', !online && 'text-foreground')}>
-                {online ? `在线，上线于 ${formatAgo(account.status.since)}` : connection.text}
-              </span>
-            </div>
+            {now && <span className="truncate text-xs text-muted-foreground">{now}</span>}
           </div>
+          <Places bot={bot} account={account} />
         </div>
-        {!online && account.status.detail && (
-          <p className="line-clamp-2 text-xs leading-snug text-muted-foreground" title={account.status.detail}>
-            {account.status.detail}
-          </p>
-        )}
       </header>
-      <LastLine line={line} groupOf={groupOf} />
-      <Today bot={bot} />
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
-        <span>
+      <LastLine line={line} name={bot.name} />
+      <footer className="mt-auto flex flex-wrap items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate" title={bot.provider?.id ?? bot.provider_id ?? ''}>
           {bot.provider ? (
             <>
               模型 {bot.provider.id}
@@ -133,10 +149,73 @@ function Presence({ account, bot, line, groupOf }: { account: Account; bot: Bot;
           ) : (
             '还没有模型'
           )}
+          {!onDesk(bot) && ` · ${groups} 个群`}
         </span>
-        <span>在 {bot.channels.filter((c) => c.enabled).length} 个群</span>
+        <Button size="sm" variant="ghost" asChild>
+          <a href={`#/chat?bot=${encodeURIComponent(bot.id)}`}>
+            <MessageCircleHeart />
+            聊天
+          </a>
+        </Button>
+        <Button size="sm" variant="ghost" asChild>
+          <a href={`#/bots?bot=${encodeURIComponent(bot.id)}`}>
+            <Settings2 />
+            设置
+          </a>
+        </Button>
       </footer>
     </article>
+  )
+}
+
+type Notice = { key: string; text: string; href: string; bad: boolean }
+
+/** 需要你看一下: what keeps a companion from talking. Nothing to show, nothing shown. */
+function notices(bots: Bot[], accounts: Account[]): Notice[] {
+  const list: Notice[] = []
+  for (const bot of bots) {
+    if (bot.provider_id && !bot.provider) {
+      list.push({ key: `${bot.id}-model`, text: `${bot.name}的模型「${bot.provider_id}」配置有误，她现在说不了话`, href: '#/models', bad: true })
+    } else if (!bot.provider_id) {
+      list.push({ key: `${bot.id}-model`, text: `${bot.name}还没有模型，选一个她才能说话`, href: `#/bots?bot=${encodeURIComponent(bot.id)}`, bad: false })
+    } else if (bot.provider && !bot.provider.available) {
+      list.push({ key: `${bot.id}-model`, text: `${bot.name}的模型「${bot.provider.id}」暂时用不了，会自己重试`, href: '#/models', bad: false })
+    }
+  }
+  for (const account of accounts) {
+    const state = account.status.state
+    if (state === 'connected' || state === 'connecting') continue
+    const bot = bots.find((b) => b.id === account.id)
+    if (bot?.mode === 'paused') continue
+    const connection = CONNECTION[state] ?? { text: state, tone: 'bad' as const }
+    list.push({
+      key: `${account.id}-link`,
+      text: `${bot?.name ?? account.name}在${platformName(account.platform)}上${connection.text}${account.status.detail ? `：${account.status.detail}` : ''}`,
+      href: '#/platforms',
+      bad: connection.tone === 'bad',
+    })
+  }
+  return list
+}
+
+function Attention({ items }: { items: Notice[] }) {
+  if (items.length === 0) return null
+  return (
+    <section aria-labelledby="attention" className="rounded-2xl border border-warn/40 bg-warn/5 p-5">
+      <h2 id="attention" className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <CircleAlert className="size-4 text-warn" />
+        需要你看一下
+      </h2>
+      <ul className="space-y-2">
+        {items.map((n) => (
+          <li key={n.key} className="text-sm">
+            <a href={n.href} className={cn('underline-offset-4 hover:underline', n.bad && 'text-destructive')}>
+              {n.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
@@ -157,9 +236,8 @@ function Services({ accounts }: { accounts: Account[] }) {
     },
   ]
   const boxes = system?.snowluma.mode === 'docker' ? system.containers : undefined
-  // SnowLuma and QQ's containers mean nothing to whoever only runs other platforms.
-  const hasQQ = accounts.length === 0 || accounts.some((a) => a.platform === 'qq')
-  if (!hasQQ) {
+  // SnowLuma and QQ's containers only mean something once a QQ account is connected.
+  if (!accounts.some((a) => a.platform === 'qq')) {
     // nothing to show
   } else if (boxes && boxes.length > 1) {
     const up = boxes.filter((b) => b.running).length
@@ -175,13 +253,12 @@ function Services({ accounts }: { accounts: Account[] }) {
       text: !system.snowluma.configured ? '没有设置位置' : system.snowluma.running ? '运行中' : '没有运行',
     })
   }
-  const platforms = accounts.length === 0 ? ['qq'] : [...new Set(accounts.map((a) => a.platform))]
-  for (const key of platforms) {
+  for (const key of [...new Set(accounts.map((a) => a.platform))]) {
     const own = accounts.filter((a) => a.platform === key)
     const up = own.filter((a) => a.status.state === 'connected').length
     rows.push({
       name: platformName(key),
-      tone: own.length === 0 ? 'off' : up === own.length ? 'ok' : up === 0 ? 'bad' : 'wait',
+      tone: up === own.length ? 'ok' : up === 0 ? 'bad' : 'wait',
       text: `${up} / ${own.length} 个号在线`,
     })
   }
@@ -211,45 +288,35 @@ function Services({ accounts }: { accounts: Account[] }) {
           </li>
         ))}
       </ul>
-      <a href="#/system" className="mt-4 inline-block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-        在「系统」页启动、重启或看日志
+      <a
+        href={accounts.length > 0 ? '#/platforms' : '#/system'}
+        className="mt-4 inline-block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        {accounts.length > 0 ? '各平台的连接在「平台接入」页，日志在「系统」页' : '日志和重启在「系统」页'}
       </a>
     </section>
   )
 }
 
-/** 她们的近况: what each companion is doing in 小窝 now, and the latest little thing that happened. */
-function Lately() {
-  const { botsVersion } = useLive()
-  const { data } = useLiveData<LifeView>('/api/life', [botsVersion])
-  if (!data?.on) return null
-  const home = data.people.filter((p) => p.home)
-  if (home.length === 0) return null
-  const nameOf = new Map(data.people.map((p) => [p.bot_id, p.name]))
-  const moment = data.moments[0]
+/** 她们的近况: the latest little thing that happened in 小窝 (what each is doing is on her card). */
+function Lately({ life }: { life: LifeView | null }) {
+  if (!life?.on || life.moments.length === 0) return null
+  const nameOf = new Map(life.people.map((p) => [p.bot_id, p.name]))
   return (
     <section aria-labelledby="lately" className="rounded-2xl border bg-card p-5">
       <h2 id="lately" className="mb-3 text-sm font-semibold">
         她们的近况
       </h2>
-      <ul className="space-y-2.5">
-        {home.map((p) => (
-          <li key={p.bot_id} className="flex items-center gap-2.5 text-sm">
-            <BotGlyph name={p.name} id={p.bot_id} size="sm" />
-            <span className="min-w-0 truncate">
-              <span className="font-medium">{p.name}</span>
-              <span className="ml-1.5 text-muted-foreground">
-                {p.now ? `在${p.now.room}${p.now.doing}` : data.planned ? '在发呆' : '还没起床'}
-              </span>
+      <ul className="space-y-2">
+        {life.moments.slice(0, 3).map((m) => (
+          <li key={m.id} className="flex items-start gap-2.5 text-sm">
+            <BotGlyph name={nameOf.get(m.bot_id) ?? ''} id={m.bot_id} size="sm" className="mt-0.5" />
+            <span className="min-w-0 text-muted-foreground">
+              <span className="font-medium text-foreground">{nameOf.get(m.bot_id) ?? ''}</span> {m.text}
             </span>
           </li>
         ))}
       </ul>
-      {moment && (
-        <p className="mt-3 truncate text-xs text-muted-foreground">
-          {nameOf.get(moment.bot_id) ?? ''}：{moment.text}
-        </p>
-      )}
       <a href="#/chat" className="mt-3 inline-block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
         在「聊天」页的小窝里看看
       </a>
@@ -265,53 +332,97 @@ const OUTCOME_TEXT: Record<Decision['outcome'], string> = {
   failed: '出错了',
 }
 
-function Feed({ decisions, groupOf, fresh, loaded }: ReturnType<typeof useRecentDecisions>) {
+function Feed({ decisions, groupOf, fresh }: ReturnType<typeof useRecentDecisions>) {
+  if (decisions.length === 0) return null
   return (
     <section aria-labelledby="feed" className="rounded-2xl border bg-card p-5">
       <h2 id="feed" className="mb-2 text-sm font-semibold">
-        最近动态
+        群里的动态
       </h2>
-      {decisions.length === 0 ? (
-        <p className="py-6 text-sm text-muted-foreground">
-          {loaded ? '还没有动态。有人在群里说话或点名 bot 后，它们的判断会出现在这里。' : '读取中…'}
-        </p>
-      ) : (
-        <ol className="divide-y">
-          {decisions.slice(0, 12).map((d) => (
-            <li key={d.id} className={cn(fresh.has(d.id) && 'feed-in')}>
-              <div className="flex gap-3 py-2.5">
-                <BotGlyph name={d.bot_name} id={d.bot_id} size="sm" className="mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm">
-                    <span className="font-medium">{d.bot_name}</span>
-                    <span className={cn('mx-1.5', d.outcome === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>
-                      {OUTCOME_TEXT[d.outcome]}
-                    </span>
-                    {d.trigger_sender && <span className="text-muted-foreground">{d.trigger_sender}</span>}
-                  </p>
-                  <p className={cn('truncate text-sm', speaks(d) ? 'text-foreground' : 'text-muted-foreground')}>
-                    {speaks(d) ? d.reply : d.reason}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right text-xs text-muted-foreground">
-                  <p>{formatTime(d.created_at)}</p>
-                  <p className="max-w-28 truncate">{groupOf.get(d.channel_id) ?? ''}</p>
-                </div>
+      <ol className="divide-y">
+        {decisions.slice(0, 12).map((d) => (
+          <li key={d.id} className={cn(fresh.has(d.id) && 'feed-in')}>
+            <div className="flex gap-3 py-2.5">
+              <BotGlyph name={d.bot_name} id={d.bot_id} size="sm" className="mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">
+                  <span className="font-medium">{d.bot_name}</span>
+                  <span className={cn('mx-1.5', d.outcome === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>
+                    {OUTCOME_TEXT[d.outcome]}
+                  </span>
+                  {d.trigger_sender && <span className="text-muted-foreground">{d.trigger_sender}</span>}
+                </p>
+                <p className={cn('truncate text-sm', speaks(d) ? 'text-foreground' : 'text-muted-foreground')}>
+                  {speaks(d) ? d.reply : d.reason}
+                </p>
               </div>
-            </li>
-          ))}
-        </ol>
-      )}
+              <div className="shrink-0 text-right text-xs text-muted-foreground">
+                <p>{formatTime(d.created_at)}</p>
+                <p className="max-w-28 truncate">{groupOf.get(d.channel_id) ?? ''}</p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+/** A nest with no companion yet: a model first if there is none, then her. Nothing about platforms. */
+function Welcome({ hasModel }: { hasModel: boolean }) {
+  return (
+    <section className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-3xl border bg-card px-6 py-10 text-center shadow-[var(--shadow-lift)]">
+      <BotGlyph name="nest" id="welcome" size="lg" />
+      <h2 className="text-xl font-semibold tracking-tight">欢迎来到 nest</h2>
+      <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+        nest 里住着你的伙伴：可以在桌面上和她聊天、让她帮你做事、一起玩小游戏。
+        {hasModel ? '先请一位伙伴住进来吧。' : '她要靠一个大模型说话，先加一个模型，再请她住进来。'}
+      </p>
+      <ol className="flex w-full max-w-sm flex-col gap-2 text-left text-sm">
+        <li className={cn('flex items-center gap-3 rounded-xl border px-4 py-3', hasModel && 'text-muted-foreground')}>
+          <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs', hasModel ? 'bg-ok/15 text-ok' : 'bg-primary text-primary-foreground')}>
+            {hasModel ? '✓' : '1'}
+          </span>
+          <span className="flex-1">{hasModel ? '已经有模型了' : '加一个模型'}</span>
+          {!hasModel && (
+            <Button size="sm" asChild>
+              <a href="#/models">去加</a>
+            </Button>
+          )}
+        </li>
+        <li className={cn('flex items-center gap-3 rounded-xl border px-4 py-3', !hasModel && 'text-muted-foreground')}>
+          <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs', hasModel ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
+            2
+          </span>
+          <span className="flex-1">创建一个伙伴，或者先看看示例伙伴</span>
+          {hasModel && (
+            <Button size="sm" asChild>
+              <a href="#/chat">
+                <Sparkles />
+                开始
+              </a>
+            </Button>
+          )}
+        </li>
+      </ol>
+      <p className="text-xs text-muted-foreground">
+        想让她也去 QQ、Discord 这些地方说话，以后在「伙伴」页给她接一个平台就行。已经有 bot 号了？
+        <a href="#/bots" className="underline underline-offset-4 hover:text-foreground">
+          从号开始加
+        </a>
+      </p>
     </section>
   )
 }
 
 export function Overview() {
-  const { accounts, state } = useLive()
+  const { accounts, state, botsVersion } = useLive()
   const { data: bots, error } = useBots<Bot[]>('/api/bots')
+  const { data: desk } = useBots<DeskLast[]>('/api/desk')
+  const { data: providers } = useProviders()
+  const life = useLiveData<LifeView>('/api/life', [botsVersion]).data
   const activity = useRecentDecisions()
-  const botsByAccount = useMemo(() => new Map((bots ?? []).map((b) => [b.id, b])), [bots])
-  const lastLine = useMemo(() => {
+  const lastDecision = useMemo(() => {
     // The live feed keeps only the latest few decisions of all bots: a quiet bot's line drops out of it, so
     // start from the one the server remembers for each bot (newer ones arrive through the feed).
     const latest = new Map<string, Decision>()
@@ -322,50 +433,52 @@ export function Overview() {
     }
     return latest
   }, [activity.decisions, bots])
-  // Re-render twice a minute so "上线于 3 分钟前" stays current (local timer, no network).
+  // Re-render twice a minute so "3 分钟前" stays current (local timer, no network).
   const [, setTick] = useState(0)
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 30_000)
     return () => clearInterval(timer)
   }, [])
 
-  if (state === 'open' && accounts.length === 0) {
-    return (
-      <section className="rounded-2xl border bg-card p-6">
-        <h2 className="text-base font-semibold">还没有账号</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          先到「模型」页加一个模型，再到「Bot」页点「增加 bot」，选平台、填账号；连上以后，在这个 bot 的设置里打开它要说话的群。
-        </p>
-      </section>
-    )
-  }
+  if (bots === null) return error ? <FirstLoad error={error} what="伙伴" /> : null
+  if (state === 'open' && bots.length === 0) return <Welcome hasModel={(providers?.length ?? 0) > 0} />
 
-  const withBot = accounts.filter((a) => botsByAccount.has(a.id))
-  const withoutBot = accounts.filter((a) => bots !== null && !botsByAccount.has(a.id))
+  const nowOf = (botId: string) => {
+    const now = life?.on ? life.people.find((p) => p.bot_id === botId)?.now : null
+    return now ? `在${now.room}${now.doing}` : ''
+  }
+  const onPlatforms = bots.some((b) => !onDesk(b))
+  const orphans = accounts.filter((a) => !bots.some((b) => b.id === a.id))
   return (
     <div className="flex flex-col gap-6">
-      {bots === null ? error ? <FirstLoad error={error} what=" bot " /> : null : <StaleNotice error={error} />}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {withBot.map((account) => {
-          const bot = botsByAccount.get(account.id)!
-          return <Presence key={account.id} account={account} bot={bot} line={lastLine.get(bot.id)} groupOf={activity.groupOf} />
-        })}
+      <StaleNotice error={error} />
+      <Attention items={notices(bots, accounts)} />
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-4">
+        {bots.map((bot) => (
+          <Companion
+            key={bot.id}
+            bot={bot}
+            account={accounts.find((a) => a.id === bot.id)}
+            line={latestLine(lastDecision.get(bot.id), desk?.find((d) => d.bot_id === bot.id), activity.groupOf)}
+            now={nowOf(bot.id)}
+          />
+        ))}
       </div>
-      {withoutBot.length > 0 && (
+      {orphans.length > 0 && (
         <p className="text-sm text-muted-foreground">
-          还没有 bot 的账号：{withoutBot.map((a) => a.name || a.self_id).join('、')}
+          还没有伙伴的号：{orphans.map((a) => a.name || a.self_id).join('、')}
         </p>
       )}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className={cn('grid gap-4', activity.decisions.length > 0 && 'lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]')}>
         <Feed {...activity} />
-        <div className="space-y-4">
+        <div className={cn('grid content-start gap-4', activity.decisions.length === 0 && 'md:grid-cols-2')}>
           <Services accounts={accounts} />
-          <Lately />
-          {bots && (
+          <Lately life={life} />
+          {onPlatforms && (
             <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-              {bots.some((b) => b.mode === 'live')
-                ? '有 bot 在「正式发言」：判断后会真的发到群里。需要时点左下角「全部暂停」。'
-                : '所有 bot 都是「只看不说」或暂停：判断结果显示在「消息」页，不会真的发到群里。'}
+              {bots.some((b) => !onDesk(b) && b.mode === 'live')
+                ? '有伙伴在平台上「正式发言」：判断后会真的发到群里。需要时点左下角「全部暂停」。'
+                : '平台上的伙伴都是「只看不说」或暂停：判断结果显示在「消息记录」页，不会真的发到群里。'}
             </p>
           )}
         </div>

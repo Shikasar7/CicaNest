@@ -23,6 +23,8 @@ export function Stickers() {
   const providers = useProviders()
   const bots = useBots<Bot[]>('/api/bots')
   const [status, setStatus] = useState<StickerStatus | 'all'>('all')
+  // Whose: a bot id (hers alone, her packs' included), '' (any bot may send them), null (all).
+  const [owner, setOwner] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [limit, setLimit] = useState(PAGE)
   const [selected, setSelected] = useState<Set<number>>(() => new Set())
@@ -30,6 +32,7 @@ export function Stickers() {
   const params = new URLSearchParams({ limit: String(limit) })
   if (status !== 'all') params.set('status', status)
   if (query.trim()) params.set('q', query.trim())
+  if (owner !== null) params.set('owner', owner)
   const list = useLiveData<StickerList>(`/api/stickers?${params}`, [stickersVersion])
 
   if (list.missing && !list.data) {
@@ -71,7 +74,7 @@ export function Stickers() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        bot 在群里看到的表情包会收藏在这里，也可以自己加或者让模型画，都由看图模型写一句描述。Bot 页每个群的「发表情」打开后，bot
+        bot 在群里看到的表情包会收藏在这里，也可以自己加或者让模型画，都由看图模型写一句描述。伙伴页「群和私聊」里每个群的「发表情」打开后，bot
         回复时可以挑一张发出去。每张表情可以设成某个 bot 专用，别的 bot 就不会发它。
       </p>
       <StaleNotice error={list.error} />
@@ -91,6 +94,23 @@ export function Stickers() {
             setLimit(PAGE)
           }}
         />
+        <NativeSelect
+          aria-label="按伙伴筛选"
+          value={owner === null ? 'all' : `bot:${owner}`}
+          onChange={(e) => {
+            const value = e.target.value
+            setOwner(value === 'all' ? null : value.slice(4))
+            setLimit(PAGE)
+          }}
+        >
+          <option value="all">全部伙伴</option>
+          <option value="bot:">谁都能发 {data.owners?.[''] ?? 0}</option>
+          {(bots.data ?? []).map((bot) => (
+            <option key={bot.id} value={`bot:${bot.id}`}>
+              {bot.name}的专属 {data.owners?.[bot.id] ?? 0}
+            </option>
+          ))}
+        </NativeSelect>
         <Input
           className="w-48"
           placeholder="搜描述、字或标签"
@@ -141,7 +161,7 @@ export function Stickers() {
             <Smile className="size-5" />
           </span>
           <h2 className="mt-4 text-base font-semibold tracking-tight">
-            {total === 0 ? '还没有收藏表情' : '没有符合条件的表情'}
+            {total === 0 ? '还没有收藏表情' : owner ? '这位伙伴还没有专属表情' : '没有符合条件的表情'}
           </h2>
           {total === 0 && (
             <p className="mt-1.5 max-w-md text-sm text-muted-foreground">

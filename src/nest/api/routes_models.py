@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict
 from nest import plugin_code
 from nest.api.auth import require_token
 from nest.api.text import has_bad_chars, proxy_url
+from nest.llm import google_auth
 from nest.llm.anthropic import EFFORTS
 from nest.llm.base import ChatMessage, Provider, ProviderError
 from nest.llm.codex import DEFAULT_URL as CODEX_URL
@@ -52,6 +53,7 @@ OPTIONS = {
     "openai_chat": ("proxy", "timeout", "temperature", "extra_body", "tools"),
     "openai_responses": ("proxy", "timeout", "extra_body", "input_format"),
     "anthropic": ("proxy", "timeout", "extra_body", "auth_header", "effort", "web_search"),
+    "gemini": ("proxy", "timeout", "temperature", "extra_body", "effort"),
     "codex": ("proxy", "timeout", "auth_file"),
 }
 RESERVED_BODY = (
@@ -159,7 +161,9 @@ def _kind(value: str) -> str:
     if value in plugin_code.MODEL_KINDS:
         return value
     if value not in KINDS:
-        raise _invalid("接口类型只能是 OpenAI Chat 格式、Responses 格式、Claude（Anthropic）或 Codex 订阅")
+        raise _invalid(
+            "接口类型只能是 OpenAI Chat 格式、Responses 格式、Claude（Anthropic）、Gemini 原生或 Codex 订阅"
+        )
     return value
 
 
@@ -349,6 +353,12 @@ def _key_input(kind: str, key: str | None, clear: bool) -> str | None:
     if key is None:
         return None
     key = key.strip()
+    if kind == "gemini" and key.startswith("{"):
+        # Vertex AI's JSON credential: kept cut down to what a token needs, on one line.
+        try:
+            return google_auth.compact(key)
+        except ValueError as exc:
+            raise _invalid(str(exc)) from None
     if not KEY.fullmatch(key):
         raise _invalid("密钥里有空格、换行或中文字符，请检查是否复制完整")
     return key

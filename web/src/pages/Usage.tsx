@@ -193,7 +193,7 @@ function BotTable({ bots, tasks }: { bots: UsageBot[]; tasks: UsageData['tasks']
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        出错 也包括发送失败、模型暂停等，原因在「消息」页的判断卡片里。调用按每次请求算，含自动重试。
+        出错 也包括发送失败、模型暂停等，原因在「消息记录」页的判断卡片里。调用按每次请求算，含自动重试。
         「其中后台任务」是这段时间开始的任务一共用的 token，已经算在左边的用量里；每个任务的明细在「任务」页。
       </p>
     </div>
@@ -274,7 +274,7 @@ export function Usage() {
             <CardHeader>
               <CardTitle>还没有模型</CardTitle>
               <CardDescription>
-                在「模型」页添加模型、在「Bot」页给 bot 选用后，这里会显示每个模型的调用次数、失败率、耗时和用量。
+                在「模型」页添加模型、在「伙伴」页给伙伴选用后，这里会显示每个模型的调用次数、失败率、耗时和用量。
               </CardDescription>
             </CardHeader>
           </Card>

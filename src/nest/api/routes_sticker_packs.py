@@ -110,6 +110,7 @@ async def packs_of(request: Request, bot_id: str) -> dict[str, Any]:
         "packs": await packs.packs(bot_id),
         "desk_stickers": await packs.desk_on(bot_id),
         "own_only": await packs.own_only(bot_id),
+        "group_own_only": await packs.group_own_only(bot_id),
         "own": own,
         "has_avatar": await packs.avatar_of(bot_id) is not None,
     }
@@ -195,6 +196,15 @@ async def own_only_switch(request: Request, bot_id: str, body: DeskSwitch) -> di
     _bot(request, bot_id)
     await request.app.state.sticker_packs.set_own_only(bot_id, body.on)
     return {"own_only": body.on}
+
+
+@router.put("/bots/{bot_id}/group-own-only")
+async def group_own_only_switch(request: Request, bot_id: str, body: DeskSwitch) -> dict[str, Any]:
+    """「群里只发专属表情包」: in the groups of a platform she sends her own stickers only, or (off, the
+    default) the collection's, without anyone's pack."""
+    _bot(request, bot_id)
+    await request.app.state.sticker_packs.set_group_own_only(bot_id, body.on)
+    return {"group_own_only": body.on}
 
 
 @router.get("/bots/{bot_id}/picker")

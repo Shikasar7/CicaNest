@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nest.api.auth import require_token
 from nest.api.text import has_bad_chars
 from nest.core.desk_media import audio_ext
-from nest.core.speech import KEY_REFS, LISTEN_REF
+from nest.core.speech import KEY_REFS, LISTEN_REF, split_ref
 from nest.llm.speech import FISH_MODELS, SpeechError, clean_library
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
@@ -53,6 +53,8 @@ class SpeechPatch(BaseModel):
     listen_url: Line | None = None
     listen_model: Line | None = None
     library: dict[Service, list[Voice]] | None = None  # the services sent get this whole list
+    # 音量 of the voices sent ("<service>:<voice id>" -> dB, 0: as the service makes it); the rest stay
+    volumes: dict[Annotated[str, Field(max_length=260)], Annotated[float, Field(ge=-10, le=20)]] | None = None
 
 
 class VoiceList(BaseModel):
@@ -89,6 +91,14 @@ def _library(sent: dict[str, list[dict[str, str]]]) -> dict[str, list[dict[str, 
         raise _invalid(str(exc)) from None
 
 
+def _volumes(kept: dict[str, float], sent: dict[str, float]) -> dict[str, float]:
+    for ref in sent:
+        if not split_ref(ref)[0] or has_bad_chars(ref):
+            raise _invalid("音量要按「服务:音色 ID」设")
+    merged = {**kept, **{ref: round(float(db), 1) for ref, db in sent.items()}}
+    return {ref: db for ref, db in merged.items() if db}
+
+
 @router.get("/speech")
 async def speech(request: Request) -> dict[str, Any]:
     return request.app.state.speech.view()  # type: ignore[no-any-return]
@@ -114,6 +124,8 @@ async def update_speech(request: Request, patch: SpeechPatch) -> dict[str, Any]:
     async with state.config_lock:
         if "library" in values:
             values["library"] = state.speech.config.library | _library(values["library"])
+        if "volumes" in values:
+            values["volumes"] = _volumes(state.speech.config.volumes, values["volumes"])
         for service, ref in (*KEY_REFS.items(), ("listen", LISTEN_REF)):
             key = values.pop(f"{service}_key", None)
             if key is None:

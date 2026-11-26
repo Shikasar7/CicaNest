@@ -10,6 +10,7 @@ On any failure: wait with exponential backoff (+jitter) and try again, until sto
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -59,6 +60,11 @@ class Misconfigured(Exception):
     pass
 
 
+def _reason(exc: Exception) -> str:
+    """What went wrong, short enough for the console."""
+    return str(exc)[:120] or type(exc).__name__
+
+
 class OneBotError(Exception):
     def __init__(self, action: str, retcode: Any, message: str) -> None:
         super().__init__(f"{action} 失败（{retcode}）：{message}")
@@ -93,6 +99,7 @@ class OneBotAdapter:
             "send_image",
             "send_text",
             "send_voice",
+            "set_profile",
             "sticker_source",
         }
     )
@@ -246,6 +253,35 @@ class OneBotAdapter:
         except (TypeError, ValueError):
             return 0, 0
         return (month, day) if 1 <= month <= 12 and 1 <= day <= 31 else (0, 0)
+
+    async def set_profile(self, nickname: str, avatar: bytes | None, groups: Iterable[str]) -> list[str]:
+        """Wear this nickname and (if given) this avatar on QQ, and the nickname as the group card in each of
+        these groups where the account has a card (one left empty already shows the nickname). Returns what
+        did not work, in words; nothing is raised."""
+        problems: list[str] = []
+        try:
+            await self.call("set_qq_profile", nickname=nickname)
+        except Exception as exc:
+            problems.append(f"QQ 昵称没改成（{_reason(exc)}）")
+        if avatar is not None:
+            encoded = base64.b64encode(avatar).decode("ascii")
+            try:
+                await self.call("set_qq_avatar", file=f"base64://{encoded}")
+            except Exception as exc:
+                problems.append(f"QQ 头像没换成（{_reason(exc)}）")
+        for group in groups:
+            try:
+                info = await self.call(
+                    "get_group_member_info", group_id=int(group), user_id=int(self.account), no_cache=True
+                )
+                card = str(info.get("card") or "") if isinstance(info, dict) else ""
+                if card and card != nickname:
+                    await self.call(
+                        "set_group_card", group_id=int(group), user_id=int(self.account), card=nickname
+                    )
+            except Exception as exc:
+                problems.append(f"群 {group} 的群名片没改成（{_reason(exc)}）")
+        return problems
 
     def status(self) -> AdapterStatus:
         return self._status

@@ -148,7 +148,7 @@ export function BackupButton() {
     <div className="space-y-1.5">
       <p className="text-sm font-medium">备份</p>
       <p className="text-xs text-muted-foreground">
-        打包数据库（聊天记录、Bot 设置、人设）和表情包，留最近 3 份。不含密钥和 QQ 登录数据。
+        打包数据库（聊天记录、伙伴设置、人设）和表情包，留最近 3 份。不含密钥和 QQ 登录数据。
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void backup()}>

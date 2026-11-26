@@ -30,7 +30,7 @@ export function Models() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          bot 用这里的模型来想怎么回话。改动保存后立刻生效，不用重启 nest；在「Bot」页给每个 bot 选模型。
+          伙伴用这里的模型来想怎么回话。改动保存后立刻生效，不用重启 nest；在「伙伴」页给每位伙伴选模型。
         </p>
         {!creating.editing && (
           <Button ref={addButton} onClick={creating.start}>
@@ -54,7 +54,7 @@ export function Models() {
         <Card>
           <CardHeader>
             <CardTitle>还没有模型</CardTitle>
-            <CardDescription>点「添加模型」，填写接口地址、模型名和密钥；添加后到「Bot」页给 bot 选用。</CardDescription>
+            <CardDescription>点「添加模型」，填写接口地址、模型名和密钥；添加后到「伙伴」页给伙伴选用。</CardDescription>
           </CardHeader>
         </Card>
       )}

@@ -60,7 +60,7 @@ export function Slang() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        定期从群里的聊天找出反复出现、外人看不懂的词和梗，推断意思记在这里。Bot 页每个群的「用黑话」打开后，bot
+        定期从群里的聊天找出反复出现、外人看不懂的词和梗，推断意思记在这里。伙伴页「群和私聊」里每个群的「用黑话」打开后，bot
         回复时会看到这批消息里出现的词条。
       </p>
       <StaleNotice error={view.error} />

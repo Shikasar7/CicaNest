@@ -171,7 +171,7 @@ export function AppearanceSettings({ sharing = true }: { sharing?: boolean }) {
           主题
         </p>
         {data.missing && (
-          <p className="text-xs text-warn">原来选的主题所在的插件被关掉或卸载了，现在显示的是 nest 自己的样子。</p>
+          <p className="text-xs text-warn">原来选的主题所在的插件被关掉或卸载了，现在显示的是默认的「软糖」。</p>
         )}
         <div role="radiogroup" aria-labelledby={ids.themes} className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
           {data.themes.map((entry) => (

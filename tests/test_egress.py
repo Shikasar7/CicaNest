@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -305,6 +306,8 @@ async def test_she_is_known_by_where_she_connects_not_by_the_name_she_gives(tmp_
     async with server:
         await _ask(port, f"CONNECT router.example:443 HTTP/1.1\r\n{impostor}\r\n")
         (tmp_path / "networks.json").write_text("{}", encoding="utf-8")  # reached somewhere else
+        # Read again when its time changed: written so soon after, it might not have.
+        os.utime(tmp_path / "networks.json", (1, 1))
         await _ask(port, f"CONNECT router.example:443 HTTP/1.1\r\n{impostor}\r\n")
     first, second = [json.loads(line)["who"] for line in log.read_text(encoding="utf-8").splitlines()]
     assert first == "qq-90000001" and second == "?qq-90000002"

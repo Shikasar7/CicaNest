@@ -114,14 +114,19 @@ function TextField({
   )
 }
 
-/** A service's 音色库: voice ids written down with a name, to pick from for the bots. */
+const VOLUME_STEPS = [-6, -3, 0, 3, 6, 9, 12, 15]
+
+/** A service's 音色库: voice ids written down with a name, to pick from for the bots, each with its 音量 (a
+ * quiet voice brought up to the others). */
 function VoiceLibrary({
   service,
   voices,
+  volumes,
   patch,
 }: {
   service: SpeechService
   voices: SpeechVoice[]
+  volumes: Record<string, number>
   patch: (body: Record<string, unknown>) => Promise<boolean>
 }) {
   const [voiceId, setVoiceId] = useState('')
@@ -161,6 +166,20 @@ function VoiceLibrary({
               <li key={voice.id} className="flex flex-wrap items-center gap-2 py-1.5">
                 <span className="min-w-24 text-sm">{voice.name || '未命名'}</span>
                 <code className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{voice.id}</code>
+                <NativeSelect
+                  aria-label={`${voice.name || voice.id}的音量`}
+                  title="音量：声音比别的音色小，就调大一点"
+                  value={String(volumes[ref] ?? 0)}
+                  onChange={(e) => void patch({ volumes: { [ref]: Number(e.target.value) } })}
+                >
+                  {[...new Set([...VOLUME_STEPS, volumes[ref] ?? 0])]
+                    .sort((a, b) => a - b)
+                    .map((db) => (
+                      <option key={db} value={db}>
+                        {db === 0 ? '音量原样' : `音量 ${db > 0 ? '+' : ''}${db} dB`}
+                      </option>
+                    ))}
+                </NativeSelect>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -301,7 +320,12 @@ function ServiceCard({
           />
         </div>
       )}
-      <VoiceLibrary service={service} voices={settings.library[service.id] ?? []} patch={patch} />
+      <VoiceLibrary
+        service={service}
+        voices={settings.library[service.id] ?? []}
+        volumes={settings.volumes ?? {}}
+        patch={patch}
+      />
     </section>
   )
 }
@@ -488,7 +512,7 @@ export function Speech() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        接上自己的语音服务，把音色 ID 记进音色库，给 bot 选好音色后，在 Bot 页群的设置里打开「发语音」，bot 觉得读出来更有味道时就发一条语音。合成不出来时改发文字。
+        接上自己的语音服务，把音色 ID 记进音色库，给 bot 选好音色后，在伙伴页群的设置里打开「发语音」，bot 觉得读出来更有味道时就发一条语音。合成不出来时改发文字。
       </p>
       <StaleNotice error={list.error} />
       {error && (

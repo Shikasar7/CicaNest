@@ -68,6 +68,9 @@ class SpeechConfig:
     listen_url: str = ""  # 语音输入: an OpenAI-compatible base url (…/v1), for /audio/transcriptions
     listen_model: str = ""  # e.g. whisper-1, FunAudioLLM/SenseVoiceSmall
     library: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # 音色库: service -> [{id, name}]
+    # 音量: "<service>:<voice id>" -> dB louder (or quieter) than the service makes it; a quiet voice is
+    # brought up to the others here, for everyone who uses it.
+    volumes: dict[str, float] = field(default_factory=dict)
 
 
 EDITABLE = tuple(SpeechConfig.__dataclass_fields__)
@@ -134,7 +137,8 @@ class SpeechKeeper:
         service_id, voice_id = split_ref(voice)
         if not service_id:
             raise SpeechError("还没选音色")
-        return await synth(self.service(service_id), voice_id, text, transport=self._transport)
+        volume = float(self.config.volumes.get(voice, 0.0))
+        return await synth(self.service(service_id), voice_id, text, volume=volume, transport=self._transport)
 
     async def sing(self, voice: str, lyrics: str) -> bytes:
         """The lyrics sung in this Fish voice: taken again when it only read them, and the slowest take if

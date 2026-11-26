@@ -34,7 +34,7 @@ export function Picture({ src, name, title, children }: { src: string; name: str
         aria-label="图片"
         onClose={() => setOpen(false)}
         onClick={(e) => e.target === e.currentTarget && close()}
-        className="m-0 h-dvh max-h-none w-dvw max-w-none bg-transparent p-0 backdrop:bg-black/70"
+        className="m-0 h-dvh max-h-none w-dvw max-w-none bg-transparent p-0 backdrop:bg-black/70 [-webkit-app-region:no-drag] [app-region:no-drag]"
       >
         {open && (
           <>
@@ -62,7 +62,8 @@ export function Picture({ src, name, title, children }: { src: string; name: str
                 )}
               </div>
             </div>
-            <div className="fixed top-3 right-3 flex gap-2">
+            {/* In the desktop app the window's own buttons (minimise, maximise, close) sit over the top 40px. */}
+            <div className="fixed top-3 right-3 flex gap-2 [html[data-desktop]_&]:top-[52px]">
               <a href={src} download={name} className={round} aria-label="存下来" title="存下来">
                 <Download className="size-4" />
               </a>

@@ -136,7 +136,7 @@ function AvatarField({ value, onChange }: { value: Picked | null; onChange: (pic
   }
   return (
     <div className="space-y-1">
-      <Label>头像（可以先不选，之后在 Bot 页换）</Label>
+      <Label>头像（可以先不选，之后在伙伴页换）</Label>
       {cropping ? (
         <AvatarCropper
           src={cropping}
@@ -199,7 +199,7 @@ function useUploadAvatar() {
       setAvatar(botId, await sendBlob<AvatarView>(`${avatarPath(botId)}/custom`, picked.blob))
       return ''
     } catch (e) {
-      return `头像没传上去（${(e as Error).message}），可以在 Bot 页再换`
+      return `头像没传上去（${(e as Error).message}），可以在伙伴页再换`
     }
   }
 }
@@ -236,7 +236,7 @@ function Blank({ onDone }: { onDone: (botId: string) => void }) {
   return (
     <div className="max-w-xl space-y-4 text-sm">
       <p className="text-muted-foreground">
-        新伙伴只在桌面上：不需要 QQ 号，在这里和桌面端跟她聊。有自己的人设、模型和记忆。以后想让她上 QQ，再给她接一个号。
+        新伙伴只在桌面上：不需要 QQ 号，在这里和桌面端跟她聊。有自己的人设、模型和记忆。以后想让她也去 QQ、Discord 这些地方，在伙伴页给她接一个平台。
       </p>
       <div className="space-y-1">
         <Label htmlFor={ids.name}>名字</Label>

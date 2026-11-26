@@ -80,7 +80,7 @@ export function Memories() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        Bot 记住的群友的事：喜好、情况，和跟某个 bot 的约定。在 Bot 页某个群或私聊的「长期记忆」打开后，隔一阵从那里的聊天整理一次；有人说话时，bot
+        Bot 记住的群友的事：喜好、情况，和跟某个 bot 的约定。在伙伴页某个群或私聊的「长期记忆」打开后，隔一阵从那里的聊天整理一次；有人说话时，bot
         会看到记得的关于这个人的事。只在记下的地方用。改过或手加的，自动整理不会再动它。
       </p>
       <StaleNotice error={view.error} />
@@ -92,7 +92,7 @@ export function Memories() {
           </span>
           <h2 className="mt-4 text-base font-semibold tracking-tight">还没有开长期记忆的地方</h2>
           <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
-            到 Bot 页，在某个群或私聊的设置里打开「长期记忆」，这里就能看到记下的事。
+            到伙伴页，在某个群或私聊的设置里打开「长期记忆」，这里就能看到记下的事。
           </p>
         </section>
       ) : (

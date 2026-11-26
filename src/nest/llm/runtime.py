@@ -34,6 +34,8 @@ from nest.llm.base import (
     without_thought,
 )
 from nest.llm.codex import Codex
+from nest.llm.gemini import DEFAULT_EFFORT as GEMINI_EFFORT
+from nest.llm.gemini import Gemini
 from nest.llm.http import scrub
 from nest.llm.openai_chat import OpenAIChat
 from nest.llm.openai_responses import OpenAIResponses
@@ -42,7 +44,7 @@ from nest.storage.bots import ProviderConfig
 
 log = logging.getLogger(__name__)
 
-KINDS = ("openai_chat", "openai_responses", "anthropic", "codex")
+KINDS = ("openai_chat", "openai_responses", "anthropic", "gemini", "codex")
 CallRecorder = Callable[..., Awaitable[int]]  # BotRepo.record_llm_call
 ProviderFactory = Callable[[ProviderConfig, SecretReader], Provider]
 DEFAULT_TIMEOUT = 40.0
@@ -97,6 +99,15 @@ def build_provider(config: ProviderConfig, secrets: SecretReader) -> Provider:
             extra_body=options.get("extra_body"),
             auth_header=options.get("auth_header", "x-api-key"),
             effort=options.get("effort", DEFAULT_EFFORT),
+            **common,
+        )
+    if config.kind == "gemini":
+        return Gemini(
+            base_url=config.base_url,
+            api_key=secrets.get(config.key_ref),
+            temperature=options.get("temperature"),
+            effort=options.get("effort", GEMINI_EFFORT),
+            extra_body=options.get("extra_body"),
             **common,
         )
     if config.kind == "codex":
@@ -170,10 +181,11 @@ class ProviderRuntime:
 
     @property
     def can_use_tools(self) -> bool:
-        """Whether this model can call tools of ours while answering (伙伴模式): Claude and the ChatGPT
-        subscription (Codex) can; an OpenAI-compatible gateway when its option `tools` is on (not every
-        gateway passes tools through). Ark's Responses endpoint, which takes the chat as one text, cannot."""
-        if self.config.kind in ("anthropic", "codex"):
+        """Whether this model can call tools of ours while answering (伙伴模式): Claude, Gemini and the
+        ChatGPT subscription (Codex) can; an OpenAI-compatible gateway when its option `tools` is on (not
+        every gateway passes tools through). Ark's Responses endpoint, which takes the chat as one text,
+        cannot."""
+        if self.config.kind in ("anthropic", "gemini", "codex"):
             return True
         added = plugin_code.MODEL_KINDS.get(self.config.kind)
         if added is not None:

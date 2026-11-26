@@ -4,9 +4,9 @@ import type { Activity, Bot, BotChannel, BotMode, Outcome, Persona } from '@/lib
 import { charCount } from '@/lib/forms'
 
 export const MODES: { mode: BotMode; label: string; hint: string }[] = [
-  { mode: 'observe', label: '只看不说', hint: '判断要不要回、会说什么，但不会真的发出去' },
-  { mode: 'paused', label: '暂停', hint: '不判断、不调用模型' },
-  { mode: 'live', label: '正式发言', hint: '判断后真的发到群里' },
+  { mode: 'observe', label: '只看不说', hint: '判断要不要回、会说什么，但不真的说出来' },
+  { mode: 'paused', label: '暂停', hint: '不判断、不调用模型，哪里都不说话' },
+  { mode: 'live', label: '正式发言', hint: '判断后真的说出来：群里、私聊和桌面上' },
 ]
 
 export const ACTIVITY: { value: Activity; label: string }[] = [

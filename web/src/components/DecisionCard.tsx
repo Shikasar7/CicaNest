@@ -23,7 +23,13 @@ const STICKER: Record<NonNullable<Decision['sticker_state']>, string> = {
 
 /** A bot's decision in the group timeline, in the bot's own colour: solid edge when it spoke, dashed when it only
  *  would have, quiet when it held back. */
-const TRIGGER: Record<string, string> = { mention: '被点名', source: '看源码补答', welcome: '进群欢迎', birthday: '生日祝福' }
+const TRIGGER: Record<string, string> = {
+  mention: '被点名',
+  source: '看源码补答',
+  welcome: '进群欢迎',
+  birthday: '生日祝福',
+  opener: '冷场开口',
+}
 
 export function DecisionCard({ decision }: { decision: Decision }) {
   const speaks = decision.outcome === 'would_reply' || decision.outcome === 'replied'

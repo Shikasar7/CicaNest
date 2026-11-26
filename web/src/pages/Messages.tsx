@@ -89,7 +89,7 @@ function GroupTimeline({ group, botNames }: { group: Group; botNames: Map<string
     () =>
       subscribe((item) =>
         setTimeline((current) => {
-          if (!current || item.kind === 'log' || item.kind === 'watch' || item.kind === 'task' || item.kind === 'workspace' || item.kind === 'approval' || item.kind === 'desk_delta') return current
+          if (!current || item.kind === 'log' || item.kind === 'watch' || item.kind === 'task' || item.kind === 'workspace' || item.kind === 'approval' || item.kind === 'desk_delta' || item.kind === 'game') return current
           if (item.kind === 'decision') {
             if (!current.channel_ids.includes(item.decision.channel_id)) return current
             if (current.decisions.some((d) => d.id === item.decision.id)) return current

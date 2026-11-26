@@ -43,7 +43,7 @@ function placed(size: Size, crop: Crop, box: number): CSSProperties {
   return { width, height, left: box / 2 + crop.x * k - width / 2, top: box / 2 + crop.y * k - height / 2 }
 }
 
-async function render(image: HTMLImageElement, size: Size, crop: Crop): Promise<Blob> {
+async function render(image: HTMLImageElement, size: Size, crop: Crop, jpeg: boolean): Promise<Blob> {
   const scale = cover(size) * crop.zoom
   const left = STAGE / 2 + crop.x - (size.w * scale) / 2
   const top = STAGE / 2 + crop.y - (size.h * scale) / 2
@@ -56,8 +56,14 @@ async function render(image: HTMLImageElement, size: Size, crop: Crop): Promise<
   context.drawImage(image, -left / scale, -top / scale, STAGE / scale, STAGE / scale, 0, 0, OUTPUT, OUTPUT)
   const encode = (type: string, quality?: number) =>
     new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality))
-  const webp = await encode('image/webp', 0.9)
-  const blob = webp?.type === 'image/webp' ? webp : await encode('image/png')
+  if (jpeg) {
+    // Painted on white first: a JPEG has no transparency, and see-through corners would turn black.
+    context.globalCompositeOperation = 'destination-over'
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, OUTPUT, OUTPUT)
+  }
+  const webp = jpeg ? null : await encode('image/webp', 0.9)
+  const blob = webp?.type === 'image/webp' ? webp : jpeg ? await encode('image/jpeg', 0.92) : await encode('image/png')
   if (!blob) throw new Error('浏览器不能处理这张图片')
   return blob
 }
@@ -72,6 +78,7 @@ export function AvatarCropper({
   onConfirm,
   onError,
   themed = false,
+  jpeg = false,
 }: {
   /** A data: URL (the console's CSP allows data: pictures, not blob:). */
   src: string
@@ -82,6 +89,8 @@ export function AvatarCropper({
   onError: (message: string) => void
   /** The theme's own button colours rather than the bot's (your own picture has no bot colour). */
   themed?: boolean
+  /** Upload a JPEG (a QQ avatar: QQ may not show a WebP), not the smaller WebP. */
+  jpeg?: boolean
 }) {
   const [image, setImage] = useState<{ element: HTMLImageElement; size: Size } | null>(null)
   const [crop, setCrop] = useState<Crop>({ zoom: 1, x: 0, y: 0 })
@@ -163,7 +172,7 @@ export function AvatarCropper({
   const confirm = async () => {
     setRendering(true)
     try {
-      onConfirm(await render(image.element, size, crop))
+      onConfirm(await render(image.element, size, crop, jpeg))
     } catch (e) {
       onError((e as Error).message)
     } finally {

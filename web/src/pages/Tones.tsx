@@ -15,7 +15,7 @@ export function Tones() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        bot 说话的语气。在「Bot」页每个群里可以分别选「聊天语气」和「答题语气」。人设决定 bot 是谁，语气决定它怎么说话；选「跟人设走」就照人设说。
+        伙伴说话的语气。在「伙伴」页她的「群和私聊」里，每个地方可以分别选「聊天语气」和「答题语气」。人设决定她是谁，语气决定她怎么说话；选「跟人设走」就照人设说。
         答题时不管选哪种，都会去掉小标题、标签和客套话，免得像在写文档。改了马上生效。
       </p>
       <StaleNotice error={tones.error} />

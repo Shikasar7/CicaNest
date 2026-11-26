@@ -185,17 +185,21 @@ function AddMood({ packId, onDone }: { packId: number; onDone: (message?: string
 }
 
 /** 专属表情包: every picture that is hers (the pack in use and the ones given to her), and whether she
- * sticks to them in the desk chat. */
+ * sticks to them in the desk chat, and in the groups of a platform. */
 function OwnStickers({
   name,
   own,
   ownOnly,
   onOwnOnly,
+  groupOwnOnly,
+  onGroupOwnOnly,
 }: {
   name: string
   own: Sticker[]
   ownOnly: boolean
   onOwnOnly: (on: boolean) => void
+  groupOwnOnly: boolean
+  onGroupOwnOnly: (on: boolean) => void
 }) {
   return (
     <section className="mt-8 rounded-3xl border bg-muted/20 p-4">
@@ -211,6 +215,15 @@ function OwnStickers({
         {ownOnly
           ? `聊天里${name}只从这些里挑${own.length ? '' : '；现在一张都没有，所以她不会发表情包'}。`
           : `聊天里${name}先从这些里挑，也会用表情包库里的。`}
+      </p>
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <Switch checked={groupOwnOnly} onCheckedChange={onGroupOwnOnly} />
+        群里只发专属表情包
+      </label>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {groupOwnOnly
+          ? `在 QQ 等平台的群里，${name}也只发这些${own.length ? '' : '；现在一张都没有，所以她在群里不会发表情包'}（群里要先打开「发表情」）。`
+          : `在 QQ 等平台的群里，${name}发的是表情包库里收集的表情，不发任何人的专属表情包。`}
       </p>
       {own.length > 0 && (
         <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(4rem,1fr))] gap-2">
@@ -375,7 +388,7 @@ function PackEditor({
   const cannot = !overview.can_draw
     ? '没有能画图的模型：先在「模型」页加一个 Codex（ChatGPT 订阅）模型。'
     : !hasAvatar
-      ? '她还没有头像：先在 Bot 页给她设一张，nest 照着头像画。'
+      ? '她还没有头像：先在伙伴页给她设一张，nest 照着头像画。'
       : ''
 
   return (
@@ -637,7 +650,7 @@ export function StickerPacks({ initialBot, onClose }: { initialBot: string | nul
                   )
                 }
               />
-              {bot.name}在聊天里发表情包（平均四句最多一张，只在桌面聊天里，不发到 QQ）
+              {bot.name}在聊天里发表情包（平均四句最多一张，只在桌面聊天里，不发到平台上）
             </label>
             {message && (
               <p role="status" className="border-b bg-muted/50 px-5 py-2 text-sm">
@@ -660,6 +673,14 @@ export function StickerPacks({ initialBot, onClose }: { initialBot: string | nul
                     onOwnOnly={(on) =>
                       void run(() =>
                         sendJson('PUT', `/api/sticker-packs/bots/${encodeURIComponent(bot.bot_id)}/own-only`, { on }),
+                      )
+                    }
+                    groupOwnOnly={packs.group_own_only}
+                    onGroupOwnOnly={(on) =>
+                      void run(() =>
+                        sendJson('PUT', `/api/sticker-packs/bots/${encodeURIComponent(bot.bot_id)}/group-own-only`, {
+                          on,
+                        }),
                       )
                     }
                   />

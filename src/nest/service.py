@@ -16,6 +16,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from nest.proc import NO_WINDOW
+
 LABEL = "com.nest.server"
 THROTTLE_SECONDS = 10  # launchd waits at least this long between restarts
 
@@ -23,7 +25,9 @@ Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 
 def _run(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(args), capture_output=True, text=True, timeout=30, check=False)
+    return subprocess.run(
+        list(args), capture_output=True, text=True, timeout=30, check=False, creationflags=NO_WINDOW
+    )
 
 
 def supported() -> bool:

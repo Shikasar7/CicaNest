@@ -149,6 +149,15 @@ function parseExtra(value: string): { ok: true; value: Record<string, unknown> |
   return { ok: true, value: Object.keys(parsed).length ? (parsed as Record<string, unknown>) : null }
 }
 
+function isJson(text: string): boolean {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** The key to send: only when typed during this edit and non-empty after trimming. */
 export function keyToSend(form: ModelFormState): string | null {
   if (form.kind === 'codex' || form.clearKey || !form.keyTouched) return null
@@ -208,7 +217,12 @@ export function checkForm(
   if (allowed.includes('auth_file') && form.auth_file.trim()) options.auth_file = form.auth_file.trim()
 
   const key = keyToSend(form)
-  if (key !== null && !KEY_PATTERN.test(key)) errors.key = '密钥里有空格、换行或中文字符，请检查是否复制完整'
+  if (key !== null && form.kind === 'gemini' && key.startsWith('{')) {
+    // Vertex AI's JSON credential, pasted whole: the backend keeps what a token needs of it.
+    if (!isJson(key)) errors.key = '这段 JSON 不完整，把服务账号的 JSON 密钥整个复制过来'
+  } else if (key !== null && !KEY_PATTERN.test(key)) {
+    errors.key = '密钥里有空格、换行或中文字符，请检查是否复制完整'
+  }
 
   if (Object.keys(errors).length) return { ok: false, errors }
   return { ok: true, options, key }

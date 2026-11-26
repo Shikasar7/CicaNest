@@ -288,7 +288,7 @@ function StagedCard({ staged, busy, onCancel, onInstall }: {
         {plugin.trust === 'trusted'
           ? '它的代码在 nest 下次启动时载入（装好后要重启 nest）。'
           : themesOnly(plugin)
-            ? '装好以后在「系统」页的「外观」里选它。'
+            ? '装好以后在「外观」页选它。'
             : '装好以后先不给任何伙伴用，你在下面选给谁。'}
       </p>
       <div className="flex gap-2">
@@ -359,7 +359,7 @@ function PluginCard({ plugin, bots, busy, act, canRun = true }: {
       </div>
       {plugin.enabled && themesOnly(plugin) && (
         <p className="border-t pt-3 text-xs text-muted-foreground">
-          主题对所有地方都一样，不分伙伴：在「系统」页的「外观」里选用。关掉它，用着它的界面会回到 nest 自己的样子。
+          主题对所有地方都一样，不分伙伴：在「外观」页选用。关掉它，用着它的界面会回到 nest 自己的样子。
         </p>
       )}
       {plugin.enabled && !themesOnly(plugin) && (

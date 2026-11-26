@@ -28,6 +28,33 @@ class MessageStore:
     def __init__(self, db: Database) -> None:
         self.db = db
         self._channel_ids: dict[str, int] = {}
+        # Who each account was and when (identity_switches): self id -> [(at, before, after)], oldest first.
+        self._switches: dict[str, list[tuple[float, str, str]]] = {}
+
+    async def load_switches(self) -> None:
+        """Read again who each account was when (after nest starts, and after a 人设方案 renames a bot)."""
+        rows = await self.db.fetchall(
+            "SELECT self_id, at, before, after FROM identity_switches ORDER BY at, id"
+        )
+        switches: dict[str, list[tuple[float, str, str]]] = {}
+        for row in rows:
+            switches.setdefault(row["self_id"], []).append((row["at"], row["before"], row["after"]))
+        self._switches = switches
+
+    def _row(self, row) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+        """A message as a dict; what the account itself said while it was someone else than it is now carries
+        `said_as`: that one's name (shown to the model as her, not as 「你」)."""
+        data = message_dict(row)
+        switches = self._switches.get(data["sender_id"]) if data["from_self"] else None
+        if switches:
+            sent = data["sent_at"]
+            was = switches[0][1]
+            for at, _, after in switches:
+                if at <= sent:
+                    was = after
+            if was != switches[-1][2]:
+                data["said_as"] = was
+        return data
 
     async def channel_id(self, ref: ChannelRef) -> int:
         cached = self._channel_ids.get(ref.key)
@@ -82,7 +109,7 @@ class MessageStore:
                 "UPDATE channels SET last_message_at = max(coalesce(last_message_at, 0), ?) WHERE id = ?",
                 (event.timestamp, channel),
             )
-        return message_dict(row)
+        return self._row(row)
 
     async def recall(self, event: RecallEvent) -> dict[str, Any] | None:
         channel = await self.channel_id(event.channel)
@@ -98,7 +125,7 @@ class MessageStore:
             )
             row = await cursor.fetchone()
             await cursor.close()
-        return message_dict(row) if row else None
+        return self._row(row) if row else None
 
     async def name_channels(self, infos: list[ChannelInfo]) -> None:
         for info in infos:
@@ -135,7 +162,7 @@ class MessageStore:
                 ORDER BY sent_at DESC, id DESC LIMIT ?""",
             (channel, before, before, limit),
         )
-        return [message_dict(row) for row in reversed(rows)]
+        return [self._row(row) for row in reversed(rows)]
 
     async def after(self, channel: int, message_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
         """Messages stored after message id `message_id` in a channel, oldest first."""
@@ -143,7 +170,7 @@ class MessageStore:
             f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE channel_id = ? AND id > ? ORDER BY id LIMIT ?",
             (channel, message_id, limit),
         )
-        return [message_dict(row) for row in rows]
+        return [self._row(row) for row in rows]
 
     async def memory(self, channel: int) -> tuple[str, int]:
         """(summary of a private chat's older talk, the last message id in it)."""
@@ -177,7 +204,7 @@ class MessageStore:
                     ORDER BY sent_at DESC, id DESC LIMIT ?""",
                 (channel, before, *[like for like in likes for _ in (0, 1)], limit),
             )
-            found.update((row["id"], message_dict(row)) for row in rows)
+            found.update((row["id"], self._row(row)) for row in rows)
         if links:
             rows = await self.db.fetchall(
                 f"""SELECT {MESSAGE_COLUMNS} FROM messages
@@ -187,7 +214,7 @@ class MessageStore:
                     ORDER BY sent_at DESC, id DESC LIMIT ?""",
                 (channel, before, limit),
             )
-            found.update((row["id"], message_dict(row)) for row in rows)
+            found.update((row["id"], self._row(row)) for row in rows)
         newest = sorted(found.values(), key=lambda row: (row["sent_at"], row["id"]))[-limit:]
         return newest
 
@@ -204,18 +231,18 @@ class MessageStore:
                 ORDER BY sent_at DESC, id DESC LIMIT ?""",
             (channel, *likes, limit),
         )
-        return [message_dict(row) for row in rows]
+        return [self._row(row) for row in rows]
 
     async def message(self, message_id: int) -> dict[str, Any] | None:
         row = await self.db.fetchone(f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?", (message_id,))
-        return message_dict(row) if row else None
+        return self._row(row) if row else None
 
     async def by_external_id(self, channel: int, external_id: str) -> dict[str, Any] | None:
         row = await self.db.fetchone(
             f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE channel_id = ? AND external_id = ?",
             (channel, external_id),
         )
-        return message_dict(row) if row else None
+        return self._row(row) if row else None
 
     async def from_members(
         self, channel: int, *, since: float, exclude: set[str], limit: int
@@ -229,7 +256,7 @@ class MessageStore:
                 ORDER BY sent_at DESC, id DESC LIMIT ?""",
             (channel, since, *sorted(exclude), limit),
         )
-        return [message_dict(row) for row in reversed(rows)]
+        return [self._row(row) for row in reversed(rows)]
 
     async def since(self, channel: int, since: float, *, limit: int) -> list[dict[str, Any]]:
         """The first `limit` messages of a channel sent after `since`, everyone's (ours too), oldest first."""
@@ -238,7 +265,7 @@ class MessageStore:
                 ORDER BY sent_at, id LIMIT ?""",
             (channel, since, limit),
         )
-        return [message_dict(row) for row in rows]
+        return [self._row(row) for row in rows]
 
     async def count_from_members(self, channel: int, *, since: float, exclude: set[str]) -> int:
         marks = ",".join("?" * len(exclude)) or "SELECT NULL WHERE 0"  # NOT IN (NULL) matches nothing
@@ -263,7 +290,7 @@ class MessageStore:
                 ORDER BY m.sent_at, m.id""",
             (group_id, f"{platform}:%", after, before, uin),
         )
-        return [message_dict(row) for row in rows]
+        return [self._row(row) for row in rows]
 
     async def backfill_targets(self, platform: str, account: str) -> list[tuple[ChannelRef, float]]:
         """Channels with stored messages, and the newest stored message time of each."""

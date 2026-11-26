@@ -10,7 +10,7 @@ import pytest
 
 from nest.adapters.base import AdapterStatus
 from nest.adapters.onebot11 import adapter as onebot
-from nest.adapters.onebot11.adapter import OneBotAdapter
+from nest.adapters.onebot11.adapter import OneBotAdapter, OneBotError
 from nest.core.events import CaughtUp, ChannelRef, Event, MessageEvent, RecallEvent
 from tests.fakes.onebot import ActionFailed, FakeOneBot
 from tests.helpers import eventually
@@ -314,3 +314,36 @@ async def test_offline_heartbeat_and_group_list() -> None:
         await eventually(lambda: adapter.status().state == "connected")
         [info] = await adapter.list_channels()
         assert info.channel == GROUP and info.name == "测试群"
+
+
+async def test_wearing_a_profile_sets_the_nickname_avatar_and_the_cards_it_has() -> None:
+    adapter = OneBotAdapter(account="10001", http_url="http://x", ws_url="ws://x")
+    calls: list[tuple[str, dict]] = []
+    cards = {42: "阿马", 77: "", 88: "阿喵"}
+
+    async def call(action: str, **params: object) -> object:
+        calls.append((action, params))
+        if action == "get_group_member_info":
+            group = int(params["group_id"])  # type: ignore[call-overload]
+            if group == 99:
+                raise OneBotError(action, 1200, "不在群里")
+            return {"card": cards[group]}
+        if action == "set_qq_avatar":
+            raise OneBotError(action, 1400, "操作太频繁")
+        return None
+
+    adapter.call = call  # type: ignore[method-assign]
+    try:
+        problems = await adapter.set_profile("阿喵", b"\x89PNG", ["42", "77", "88", "99"])
+    finally:
+        await adapter.stop()
+    assert calls[0] == ("set_qq_profile", {"nickname": "阿喵"})
+    assert calls[1] == ("set_qq_avatar", {"file": "base64://iVBORw=="})
+    # Only a card that is set and says something else is changed: an empty one shows the nickname.
+    assert [c for c in calls if c[0] == "set_group_card"] == [
+        ("set_group_card", {"group_id": 42, "user_id": 10001, "card": "阿喵"})
+    ]
+    assert problems == [
+        "QQ 头像没换成（set_qq_avatar 失败（1400）：操作太频繁）",
+        "群 99 的群名片没改成（get_group_member_info 失败（1200）：不在群里）",
+    ]

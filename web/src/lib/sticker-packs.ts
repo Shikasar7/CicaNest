@@ -44,6 +44,8 @@ export type BotPacks = {
   desk_stickers: boolean
   /** 「只用专属表情包里的表情」: in the desk chat she picks only from `own`. */
   own_only: boolean
+  /** 「群里只发专属表情包」: in a platform's groups she sends her own only (default off: the collection). */
+  group_own_only: boolean
   /** Her 专属表情包: the pack in use, then the other pictures that are hers alone. */
   own: Sticker[]
   has_avatar: boolean

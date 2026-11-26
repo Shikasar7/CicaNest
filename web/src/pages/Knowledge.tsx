@@ -232,7 +232,7 @@ function Groups({ data, reload }: { data: KnowledgeView; reload: () => void }) {
         </ul>
       )}
       <p className="border-t px-5 py-2.5 text-xs text-muted-foreground">
-        只对开了「答题」的 bot 起作用（Bot 页每个群的「回复方式」）。一个群建议只让一个 bot 开答题，免得几个一起抢答。
+        只对开了「答题」的 bot 起作用（伙伴页「群和私聊」里每个群的「回复方式」）。一个群建议只让一个 bot 开答题，免得几个一起抢答。
       </p>
       {error && (
         <p role="alert" className="px-5 pb-3 text-xs text-destructive">

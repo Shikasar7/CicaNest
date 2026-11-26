@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   Ellipsis,
   FolderOpen,
+  Gamepad2,
   GripVertical,
   House,
   ImagePlus,
@@ -28,6 +29,7 @@ import {
 import { BotGlyph } from '@/components/BotGlyph'
 import { ChatSettings } from '@/components/chat/ChatSettings'
 import { Files } from '@/components/chat/Files'
+import { GameRoom } from '@/components/chat/GameRoom'
 import { Home } from '@/components/chat/Home'
 import { GroupConversation, GroupGlyph, GroupSettings, NewGroup } from '@/components/chat/GroupChat'
 import { Keepsakes } from '@/components/chat/Keepsakes'
@@ -45,6 +47,7 @@ import { STATUS_LABEL, Tasks, useTasks } from '@/components/chat/Tasks'
 import { getJson, sendBlob, sendJson, type BotMode, type Message } from '@/lib/api'
 import { rowsOf, shortTime, timeLine } from '@/lib/chat-time'
 import { bubbles } from '@/lib/desk-stream'
+import { useGame } from '@/lib/games'
 import { groupLine, type DeskGroup } from '@/lib/groups'
 import type { LifeView } from '@/lib/life'
 import { useLiveData } from '@/lib/live-data'
@@ -66,12 +69,13 @@ import {
 } from '@/lib/desk-media'
 import { DROP_MAX, FILE_MAX, isPicture, useDropGuard, useFileDrop } from '@/lib/file-drop'
 import { useNarrow } from '@/lib/narrow'
+import { platformName } from '@/lib/platforms'
 import { STAGED_MAX, forget, lineOf, stage, upload, type Staged } from '@/lib/staged-pictures'
 import { stickerImage, stickerOf } from '@/lib/sticker-packs'
 import { cn } from '@/lib/utils'
 
 /** 桌面聊天: each bot's private chat with you, seen from here. What you type here she answers here; what was
- * said on the platform (QQ…) shows up too, since it is the same chat.
+ * said on her platform (QQ, Discord…) shows up too, since it is the same chat.
  *
  * It looks like a game's chat panel: big round avatars on both sides, soft bubbles, the time
  * between messages only where a pause or a new day is, and new messages popping in. */
@@ -107,9 +111,9 @@ const takenBack = (m: Message) => Boolean(m.recalled_at) && typedHere(m)
 const FOUND_MS = 2500 // how long a message found by 搜索 stays lit
 
 function cannotTalk(bot: DeskBot): string {
-  if (bot.mode === 'paused') return `${bot.name}在休息（已暂停）。在 Bot 页让她回来，她就能接着陪你聊了。`
-  if (!bot.has_model) return `${bot.name}还说不了话：在 Bot 页给她选一个模型，再改成「正式发言」。`
-  if (bot.mode !== 'live') return `${bot.name}现在只听不说（只看不说）。在 Bot 页改成「正式发言」，她就会回你了。`
+  if (bot.mode === 'paused') return `${bot.name}在休息（已暂停）。在伙伴页让她回来，她就能接着陪你聊了。`
+  if (!bot.has_model) return `${bot.name}还说不了话：在伙伴页给她选一个模型，再改成「正式发言」。`
+  if (bot.mode !== 'live') return `${bot.name}现在只听不说（只看不说）。在伙伴页改成「正式发言」，她就会回你了。`
   return ''
 }
 
@@ -554,7 +558,7 @@ function MoreMenu({ items }: { items: MenuItem[] }) {
   )
 }
 
-function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, onTasks, onFiles, onStickers, onBack }: {
+function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, onTasks, onFiles, onStickers, onGame, onBack }: {
   bot: DeskBot
   /** A phone: back to the list. */
   onBack?: () => void
@@ -568,8 +572,11 @@ function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, 
   onTasks: () => void
   onFiles: () => void
   onStickers: () => void
+  /** 小游戏: to the board. */
+  onGame: () => void
 }) {
   const subscribe = useSubscribe()
+  const { game } = useGame(bot.bot_id)
   const working = (useTasks(bot.bot_id).tasks ?? []).filter((t) =>
     ['running', 'queued', 'waiting_pc'].includes(t.status),
   )
@@ -707,7 +714,7 @@ function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, 
     const timer = setTimeout(() => {
       setWaitingSince(null)
       setNote(`${bot.name}好像在忙，过一会儿再找她试试吧`)
-      setWhy('等了一分半钟还没有回音。想知道她是怎么判断的，可以去控制台的「消息」页看看。')
+      setWhy('等了一分半钟还没有回音。想知道她是怎么判断的，可以去控制台的「消息记录」页看看。')
     }, WAIT_MS)
     return () => clearTimeout(timer)
   }, [waitingSince, bot.name])
@@ -1010,6 +1017,15 @@ function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, 
                 : '和她的私聊是同一段对话：在这里说的她在这里回，不会发到平台上；平台上说过的这里也看得到。')}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onGame}
+          title={`和${bot.name}一起玩：五子棋、黑白棋、海龟汤、你画我猜`}
+          className="ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground active:scale-95"
+        >
+          <Gamepad2 className="size-4" />
+          <span className="max-sm:hidden">一起玩</span>
+        </button>
         <MoreMenu
           items={[
             { label: '搜索聊天', icon: SearchIcon, onClick: () => setSearching(true) },
@@ -1025,6 +1041,24 @@ function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, 
           ]}
         />
       </div>
+      {game?.status === 'playing' && (
+        <button
+          type="button"
+          onClick={onGame}
+          className="flex items-center gap-2 border-b bg-primary/5 px-5 py-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Gamepad2 className="size-3.5 shrink-0 text-primary" />
+          <span className="truncate">
+            {game.kind === 'draw'
+              ? game.draw?.mode === 'her'
+                ? `正在和${bot.name}玩你画我猜：她画你猜（你还能猜 ${game.draw.tries_left} 次）· 回去接着猜`
+                : `正在和${bot.name}玩你画我猜（她还能猜 ${game.draw?.tries_left ?? 0} 次）· 回去接着画`
+              : game.kind === 'soup'
+              ? `正在和${bot.name}玩海龟汤「${game.soup?.title || '题目还在想'}」（问了 ${game.soup?.questions.length ?? 0} 个问题）· 回去接着猜`
+              : `正在和${bot.name}下${game.kind === 'reversi' ? '黑白棋' : '五子棋'}${game.turn === 'you' && !game.thinking ? '，轮到你' : ''} · 回到棋盘`}
+          </span>
+        </button>
+      )}
       {working.length > 0 && (
         <button
           type="button"
@@ -1282,7 +1316,7 @@ function NoChat({ bot, onOpened }: { bot: DeskBot; onOpened: () => void }) {
     <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm">
       <BotGlyph name={bot.name} id={bot.bot_id} size="lg" />
       <p className="max-w-sm text-muted-foreground">
-        {bot.name} 还没有私聊。可以在这里开一段只在桌面上的聊天；想和平台上的私聊连成一段，就先在 Bot 页的「私聊」里加上你自己。
+        {bot.name} 还没有私聊。可以在这里开一段只在桌面上的聊天；想和平台上的私聊连成一段，就先在伙伴页「群和私聊」的「私聊」里加上你自己。
       </p>
       <button
         type="button"
@@ -1311,6 +1345,7 @@ type Pane =
   | 'group-new'
   | 'group-settings'
   | 'home'
+  | 'game'
 
 /** 群聊 in the list: the desk groups, each with what was said last. */
 function GroupList({
@@ -1437,6 +1472,16 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
     setAtList(false)
   }, [open])
   useNotifications(bots, showBot)
+  // '#/chat?bot=…' (a companion's 聊天 button elsewhere in the console): open her chat.
+  useEffect(() => {
+    const follow = () => {
+      const wanted = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('bot')
+      if (wanted) showBot(wanted)
+    }
+    follow()
+    window.addEventListener('hashchange', follow)
+    return () => window.removeEventListener('hashchange', follow)
+  }, [showBot])
   const subscribe = useSubscribe()
   const [lasts, setLasts] = useState<ReadonlyMap<number, Last>>(new Map())
   useEffect(
@@ -1544,9 +1589,9 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
   } else if (bot === null) {
     main = <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">选一个伙伴开始聊天</div>
   } else if (pane === 'reminders') {
-    const hasQQ = !bot.desk_only && bot.chats.some((c) => c.channel_id === bot.channel_id && !c.desk_only)
+    const onPlatform = !bot.desk_only && bot.chats.some((c) => c.channel_id === bot.channel_id && !c.desk_only)
     main = (
-      <Reminders key={bot.bot_id} botId={bot.bot_id} name={bot.name} hasQQ={hasQQ} onClose={() => setPane('chat')} />
+      <Reminders key={bot.bot_id} botId={bot.bot_id} name={bot.name} platform={onPlatform ? platformName(bot.bot_id.split(':')[0]) : null} onClose={() => setPane('chat')} />
     )
   } else if (pane === 'files') {
     main = <Files key={bot.bot_id} botId={bot.bot_id} name={bot.name} onClose={() => setPane('chat')} />
@@ -1556,6 +1601,18 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
     main = <Keepsakes key={bot.bot_id} botId={bot.bot_id} name={bot.name} onClose={() => setPane('chat')} />
   } else if (bot.channel_id === null) {
     main = <NoChat key={bot.bot_id} bot={bot} onOpened={reload} />
+  } else if (pane === 'game') {
+    main = (
+      <GameRoom
+        key={bot.bot_id}
+        botId={bot.bot_id}
+        name={bot.name}
+        channel={bot.channel_id}
+        blocked={cannotTalk(bot)}
+        onClose={() => setPane('chat')}
+        onStickers={() => setPane('stickers')}
+      />
+    )
   } else {
     main = (
       <Conversation
@@ -1569,6 +1626,7 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
         onTasks={() => setPane('tasks')}
         onFiles={() => setPane('files')}
         onStickers={() => setPane('stickers')}
+        onGame={() => setPane('game')}
         onBack={narrow ? () => setAtList(true) : undefined}
       />
     )
@@ -1597,7 +1655,7 @@ export function Chat({ standalone = false }: { standalone?: boolean }) {
           <BotList
             bots={listed ?? []}
             lasts={lasts}
-            selected={['chat', 'keepsakes', 'reminders', 'tasks', 'files'].includes(pane) ? (bot?.bot_id ?? null) : null}
+            selected={['chat', 'keepsakes', 'reminders', 'tasks', 'files', 'game'].includes(pane) ? (bot?.bot_id ?? null) : null}
             onSelect={showBot}
             onReorder={(ids) => void reorder(ids)}
             wide={phoneList}

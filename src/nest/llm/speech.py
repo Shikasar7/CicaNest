@@ -96,8 +96,11 @@ class Service:
     proxy: str | None = None
 
 
-def request_spec(service: Service, voice: str, text: str) -> tuple[str, dict[str, str], dict[str, Any]]:
-    """(url, headers, JSON body) of one piece of speech."""
+def request_spec(
+    service: Service, voice: str, text: str, volume: float = 0.0
+) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """(url, headers, JSON body) of one piece of speech. `volume`: dB louder than the service makes it
+    (Fish takes dB and keeps the peaks in; MiniMax a factor; an OpenAI-compatible server nothing)."""
     if not service.key and service.id != "openai":  # a local OpenAI-compatible server may need no key
         raise SpeechError(f"{LABELS[service.id]} 还没填密钥")
     if not service.model or not voice:
@@ -107,6 +110,8 @@ def request_spec(service: Service, voice: str, text: str) -> tuple[str, dict[str
         if service.model not in FISH_MODELS:
             raise SpeechError(f"Fish 不认模型 {service.model}：只能选 {' / '.join(FISH_MODELS)}")
         body = {"text": text, "reference_id": voice, "format": "mp3", "mp3_bitrate": 128, "latency": "normal"}
+        if volume:
+            body["prosody"] = {"speed": 1.0, "volume": volume}
         return f"{FISH_URL}/v1/tts", {**bearer, "model": service.model}, body
     if service.id == "minimax":
         return (
@@ -118,7 +123,7 @@ def request_spec(service: Service, voice: str, text: str) -> tuple[str, dict[str
                 "stream": False,
                 "output_format": "hex",
                 "language_boost": "auto",
-                "voice_setting": {"voice_id": voice, "speed": 1, "vol": 1, "pitch": 0},
+                "voice_setting": {"voice_id": voice, "speed": 1, "vol": minimax_vol(volume), "pitch": 0},
                 "audio_setting": {"sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1},
             },
         )
@@ -126,6 +131,11 @@ def request_spec(service: Service, voice: str, text: str) -> tuple[str, dict[str
         raise SpeechError("OpenAI 兼容接口还没填地址")
     body = {"model": service.model, "input": text, "voice": voice, "response_format": "mp3"}
     return f"{service.base_url.rstrip('/')}/audio/speech", bearer, body
+
+
+def minimax_vol(volume: float) -> float:
+    """MiniMax's volume: a factor (0, 10], 1 as made."""
+    return round(min(10.0, max(0.1, 10 ** (volume / 20))), 2)
 
 
 def _json(response: httpx.Response, label: str) -> dict[str, Any]:
@@ -230,10 +240,15 @@ async def transcribe(
 
 
 async def synth(
-    service: Service, voice: str, text: str, *, transport: httpx.AsyncBaseTransport | None = None
+    service: Service,
+    voice: str,
+    text: str,
+    *,
+    volume: float = 0.0,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> bytes:
-    """One piece of speech as audio bytes. SpeechError says why not."""
-    url, headers, body = request_spec(service, voice, text)
+    """One piece of speech as audio bytes (`volume`: dB, see request_spec). SpeechError says why not."""
+    url, headers, body = request_spec(service, voice, text, volume)
     async with client(timeout=SPEECH_TIMEOUT, proxy=service.proxy, transport=transport) as http:
         try:
             response = await http.post(url, json=body, headers=headers)

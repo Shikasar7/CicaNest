@@ -23,6 +23,7 @@ def test_qq_keeps_every_capability_it_had() -> None:
         "send_image",
         "send_text",
         "send_voice",
+        "set_profile",
         "sticker_source",
     }
     assert can("qq:10001", "sees_all") and not can("nobody:1", "sees_all")

@@ -191,12 +191,22 @@ def _room(row: dict[str, Any], limit: int) -> int:
     return max(limit, int(row.get("room") or 0)) + int(row.get("spare") or 0)
 
 
+def speaker(row: dict[str, Any], bot_name: str = "") -> str:
+    """Who said a message of her own account, as the model is told: 你 (with her name, when given), or, for
+    what the account said while it was another character (said_as: a 人设方案 changed who it is), that one
+    — not her."""
+    was = row.get("said_as")
+    if was:
+        return f"{was}（这个号以前的人设，不是你）"
+    return f"你（{bot_name}）" if bot_name else "你"
+
+
 def render(
     row: dict[str, Any], *, bot_name: str, peers: dict[str, str], called: set[int], limit: int = 180
 ) -> str:
     text = " ".join(str(row.get("text") or "").split())[: _room(row, limit)] or "[非文本]"
     if row.get("from_self"):
-        who = f"你（{bot_name}）"
+        who = speaker(row, bot_name)
     elif row["sender_id"] in peers:
         who = f"{row['sender_name']}（另一个 bot）"
     else:
@@ -357,7 +367,7 @@ def build_private_prompt(
 
     def show(row: dict[str, Any]) -> str:
         text = " ".join(str(row.get("text") or "").split())[: _room(row, 500)] or "[非文本]"
-        who = f"你（{bot_name}）" if row.get("from_self") else row["sender_name"]
+        who = speaker(row, bot_name) if row.get("from_self") else row["sender_name"]
         return f"{who}：{text}" + ("（已撤回）" if row.get("recalled_at") else "")
 
     last: list[float] = []
@@ -410,7 +420,7 @@ def build_memory_prompt(*, bot_name: str, summary: str, rows: Iterable[dict[str,
     asking for something is not a request to this call."""
 
     def show(row: dict[str, Any]) -> str:
-        who = "你" if row.get("from_self") else row["sender_name"]
+        who = speaker(row) if row.get("from_self") else row["sender_name"]
         return f"{who}：{' '.join(str(row.get('text') or '').split())[:300]}"
 
     said = "\n".join(show(row) for row in rows)
@@ -537,7 +547,7 @@ def card_links(segments: Iterable[dict[str, Any]] | None) -> list[str]:
 def render_record(row: dict[str, Any], *, bot_name: str) -> str:
     """One message found in the chat log, with the day it was sent and what a shared card links to."""
     stamp = time.strftime("%m-%d %H:%M", time.localtime(row["sent_at"]))
-    who = f"你（{bot_name}）" if row.get("from_self") else row["sender_name"]
+    who = speaker(row, bot_name) if row.get("from_self") else row["sender_name"]
     text = " ".join(str(row.get("text") or "").split())
     cards = card_links(row.get("segments"))
     if cards:

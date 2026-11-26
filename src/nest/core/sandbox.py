@@ -43,6 +43,7 @@ from pathlib import Path
 
 from nest import docker
 from nest.core.workspace import Workspace, folder_name
+from nest.proc import NO_WINDOW
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ async def spawn_docker(args: list[str], env: dict[str, str]) -> asyncio.subproce
             stderr=asyncio.subprocess.DEVNULL,
             env={**os.environ, **env},
             limit=LINE_LIMIT,
+            creationflags=NO_WINDOW,
         )
     except OSError as exc:
         raise SandboxError(f"运行 docker 失败：{exc.strerror or exc}") from None
@@ -139,6 +141,7 @@ async def run_docker(args: list[str], seconds: float, stdin: bytes | None = None
             stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            creationflags=NO_WINDOW,
         )
     except OSError as exc:
         raise SandboxError(f"运行 docker 失败：{exc.strerror or exc}") from None

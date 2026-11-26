@@ -11,6 +11,7 @@ Capabilities:
   self_echo             the platform sends the bot's own messages back; otherwise the adapter makes that event
   fetch_history, list_channels
   proactive             it can speak without being spoken to (监控, 掉线提醒, 汇总)
+  set_profile           the account's own nickname and avatar can be changed (人设方案 that keep who she is)
 """
 
 from __future__ import annotations

@@ -682,7 +682,7 @@ export function NewGroup({
           <MemberPicker companions={companions} chosen={chosen} onToggle={toggle} />
         </div>
         <p className="text-xs text-muted-foreground">
-          群只在桌面聊天里，不会发到 QQ。你说的话大家都看得到；没叫名字时会有一个人接，她们也会互相接话，连着说几句后会等你开口。
+          群只在桌面聊天里，不会发到任何平台。你说的话大家都看得到；没叫名字时会有一个人接，她们也会互相接话，连着说几句后会等你开口。
         </p>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <button

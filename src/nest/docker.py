@@ -14,6 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from nest.proc import NO_WINDOW
 from nest.system import ProcessError
 
 # Where Docker Desktop, OrbStack and Homebrew put the command line. A launchd service starts with a bare
@@ -107,6 +108,7 @@ def container(name: str) -> Container:
             errors="replace",
             timeout=INSPECT_TIMEOUT,
             check=False,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         return Container(False, problem="Docker 没有响应（超过 10 秒）")
@@ -193,6 +195,7 @@ def act(name: str, action: str) -> None:
             errors="replace",
             timeout=ACTION_TIMEOUT,
             check=False,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise ProcessError(f"docker {action} 超过 {ACTION_TIMEOUT:.0f} 秒还没有完成") from None
@@ -214,7 +217,11 @@ def login_qr(name: str) -> tuple[bytes, int] | None:
     script = f'f={QR_PATH}; [ -f "$f" ] || exit 3; echo $(( $(date +%s) - $(stat -c %Y "$f") )); cat "$f"'
     try:
         done = subprocess.run(
-            [exe, "exec", name, "sh", "-c", script], capture_output=True, timeout=QR_TIMEOUT, check=False
+            [exe, "exec", name, "sh", "-c", script],
+            capture_output=True,
+            timeout=QR_TIMEOUT,
+            check=False,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise ProcessError(f"Docker 没有响应（超过 {QR_TIMEOUT:.0f} 秒）") from None
@@ -246,6 +253,7 @@ def login_log(name: str) -> str:
             errors="replace",
             timeout=QR_TIMEOUT,
             check=False,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise ProcessError(f"Docker 没有响应（超过 {QR_TIMEOUT:.0f} 秒）") from None
@@ -294,6 +302,7 @@ def _run(args: list[str], timeout: float) -> str:
             errors="replace",
             timeout=timeout,
             check=False,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise ProcessError(f"docker {args[0]} 超过 {timeout:.0f} 秒还没有完成") from None

@@ -270,7 +270,7 @@ export function Issues() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        每个群可以指定一个 bot 当问题记录官（「Bot」页，群的设置 → 记录 → 问题记录官）。它每小时看一遍群里的新消息，把 bot
+        每个群可以指定一个 bot 当问题记录官（「伙伴」页，群的设置 → 记录 → 问题记录官）。它每小时看一遍群里的新消息，把 bot
         没解决的问题、答错的、故障、想要的功能和意见记在这里，按设定的时间私聊汇总给你。
       </p>
       <StaleNotice error={view.error} />

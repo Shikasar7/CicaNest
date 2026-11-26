@@ -18,7 +18,7 @@ export function Personas() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        bot 的人设：它是谁、什么性格、怎么称呼人。在「Bot」页每个群的「发言」里选用；同一个人设可以给几个群、几个 bot 用。改了马上生效。说话的腔调可以另外在「语气」页选。
+        伙伴的人设：她是谁、什么性格、怎么称呼人。在「伙伴」页她的「群和私聊」里给每个地方选用；同一个人设可以给几个地方、几位伙伴用。改了马上生效。说话的腔调在旁边的「语气」里另外选。
       </p>
       <StaleNotice error={personas.error} />
       <NewTextForm

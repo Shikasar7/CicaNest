@@ -29,6 +29,7 @@ import httpx
 from nest.core import real_dns, web_search
 from nest.core.groups import CREATE_GROUP, create_group_tool
 from nest.core.plugins import PluginManager
+from nest.core.prompt import speaker
 from nest.core.reminders import REPEAT_LABELS, parse_request, when_label
 from nest.core.sandbox import Sandbox
 from nest.core.workspace import RECEIVED, Workspace, WorkspaceError
@@ -1125,7 +1126,7 @@ class CompanionTools:
 
         def show(row: dict[str, Any]) -> str:
             at = dt.datetime.fromtimestamp(row["sent_at"]).astimezone()
-            who = "你" if row["from_self"] else row["sender_name"]
+            who = speaker(row) if row["from_self"] else row["sender_name"]
             return f"{at:%m-%d %H:%M} {who}：{' '.join(str(row.get('text') or '').split())[:200]}"
 
         return MATERIAL.format(what="聊天记录里找到的消息", text="\n".join(show(r) for r in rows))

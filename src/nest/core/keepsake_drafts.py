@@ -22,7 +22,7 @@ from typing import Any
 
 from nest.core.desk import chat_of, chosen_chats
 from nest.core.keepsakes import BODY_MAX, RECORDS_MAX, TITLE_MAX
-from nest.core.prompt import first_part
+from nest.core.prompt import first_part, speaker
 from nest.llm.base import ChatMessage, ProviderError
 from nest.llm.purpose import for_purpose
 from nest.llm.runtime import ProviderUnavailable
@@ -192,7 +192,7 @@ class KeepsakeDrafter:
         persona = (channel.persona if channel else "").strip() or f"你是{bot.name}。"
         user = next((r["sender_name"] for r in rows if not r["from_self"] and r["sender_name"]), "对方")
         lines = "\n".join(
-            f"{_when(r['sent_at'])} {'你' if r['from_self'] else r['sender_name'] or user}："
+            f"{_when(r['sent_at'])} {speaker(r) if r['from_self'] else r['sender_name'] or user}："
             + " ".join(str(r["text"]).split())[: self.config.line_chars]
             for r in rows
         )
