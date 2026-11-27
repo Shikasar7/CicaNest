@@ -26,6 +26,10 @@ export const WALLPAPERS = {
   ivy: { label: '叶子', pattern: { kind: 'leaves', base: '#eef3e8', on: '#a9c3a0' } },
   waves: { label: '海浪', pattern: { kind: 'waves', base: '#e6f0f4', on: '#b2cfdd' } },
   starry: { label: '星夜', pattern: { kind: 'stars', base: '#4b5283', on: '#f3e3ae' } },
+  stardust: { label: '星星淡紫', pattern: { kind: 'stars', base: '#f1ebfa', on: '#e8c871' } },
+  maid: { label: '黑白墙裙', pattern: { kind: 'stripes', base: '#f7f4f8', on: '#ece7f0' }, boards: '#4a4152' },
+  tide: { label: '淡紫海浪', pattern: { kind: 'waves', base: '#f1eef9', on: '#cfc4ec' } },
+  haitang: { label: '海棠碎花', pattern: { kind: 'flowers', base: '#f8ede9', on: '#d97f8c', more: '#8fa886' } },
   bricks: { label: '白砖', pattern: { kind: 'bricks', base: '#f4f0ea', on: '#dcd4c8' } },
   clay: { label: '红砖', pattern: { kind: 'bricks', base: '#d9a58e', on: '#eed9cc' } },
   white: { label: '纯白', pattern: { kind: 'plain', base: '#faf7f2' } },
@@ -78,6 +82,10 @@ export const HANGINGS = {
   lights: { label: '小灯串', group: '挂件', w: 10, h: 1 },
   wreath: { label: '花环', group: '挂件', w: 2, h: 2 },
   calendar: { label: '日历', group: '挂件', w: 2, h: 3 },
+  stars: { label: '星星挂饰', group: '挂件', w: 6, h: 4 },
+  apron: { label: '女仆裙', group: '挂件', w: 2, h: 4 },
+  fan: { label: '折扇', group: '挂件', w: 4, h: 2 },
+  haitang: { label: '海棠', group: '画', w: 3, h: 3 },
 } satisfies Record<string, Hanging>
 
 export type HangKind = keyof typeof HANGINGS

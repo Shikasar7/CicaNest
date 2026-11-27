@@ -15,6 +15,23 @@ const MIN_SIZE = { width: 960, height: 640 }
 const OFFLINE_PAGE = path.join(__dirname, 'ui', 'offline.html')
 const OFFLINE_URL = pathToFileURL(OFFLINE_PAGE).href
 
+const MAC = process.platform === 'darwin'
+
+/** The frame: Windows draws its buttons over the page (overlay) on Mica; macOS keeps its lights, placed in the
+ * page's top strip (40 px high: the chat window's header, the console sidebar's own strip), on the window's vibrancy. */
+function frameOptions(view) {
+  if (MAC) {
+    return {
+      titleBarStyle: 'hidden',
+      trafficLightPosition: view === 'chat' ? { x: 14, y: 13 } : { x: 16, y: 13 },
+      vibrancy: 'under-window',
+      visualEffectState: 'active',
+      backgroundColor: '#00000000',
+    }
+  }
+  return { titleBarStyle: 'hidden', titleBarOverlay: overlayOptions(), backgroundMaterial: 'mica', backgroundColor: '#00000000' }
+}
+
 function overlayOptions() {
   return {
     color: '#00000000',
@@ -91,7 +108,7 @@ class MainWindow {
     this.offline = false
     this.saveTimer = null
     nativeTheme.on('updated', () => {
-      if (this.alive()) this.win.setTitleBarOverlay(overlayOptions())
+      if (this.alive() && !MAC) this.win.setTitleBarOverlay(overlayOptions())
     })
   }
 
@@ -128,10 +145,7 @@ class MainWindow {
       show: false,
       title: this.title,
       icon: this.icon,
-      titleBarStyle: 'hidden',
-      titleBarOverlay: overlayOptions(),
-      backgroundMaterial: 'mica',
-      backgroundColor: '#00000000',
+      ...frameOptions(this.view),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
@@ -187,10 +201,11 @@ class MainWindow {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return
       const key = input.key.toLowerCase()
-      if (key === 'f5' || (input.control && key === 'r')) {
+      const command = MAC ? input.meta : input.control
+      if (key === 'f5' || (command && key === 'r')) {
         event.preventDefault()
         this.loadConsole()
-      } else if (key === 'f12' || (input.control && input.shift && key === 'i')) {
+      } else if (key === 'f12' || (command && (input.shift || input.alt) && key === 'i')) {
         event.preventDefault()
         contents.toggleDevTools()
       }

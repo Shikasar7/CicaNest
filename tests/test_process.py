@@ -211,7 +211,7 @@ def test_a_restart_can_listen_while_old_connections_close(tmp_path: Path) -> Non
 def test_start_gives_up_at_once_when_the_server_exits(
     quiet_settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli.service, "installed", lambda: False)
+    monkeypatch.setattr(cli.service, "serves", lambda *_: False)
     failing = [sys.executable, "-c", "raise SystemExit(3)"]
     monkeypatch.setattr(cli, "_spawn_server", lambda _settings: subprocess.Popen(failing))
     began = time.monotonic()

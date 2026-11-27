@@ -21,7 +21,11 @@ contextBridge.exposeInMainWorld('nestDesktop', {
   // "chat": the chat window, drawn without the console's navigation.
   view: argument('nest-view') || 'console',
   titleBarHeight: 40,
-  captionWidth: 140,
+  // The window's own buttons: Windows' three on the right (drawn over the page), macOS' three lights on the left.
+  captionWidth: process.platform === 'darwin' ? 80 : 140,
+  captionSide: process.platform === 'darwin' ? 'left' : 'right',
+  // win32 or darwin: what the console offers (电脑上做事 is Windows' only).
+  platform: process.platform,
   restartNest: () => ipcRenderer.invoke('nest:restart'),
   // The offline page: why, and the ways out.
   whyOffline: () => ipcRenderer.invoke('nest:why-offline'),

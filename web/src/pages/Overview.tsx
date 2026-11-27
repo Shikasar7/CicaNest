@@ -370,48 +370,51 @@ function Feed({ decisions, groupOf, fresh }: ReturnType<typeof useRecentDecision
 
 /** A nest with no companion yet: a model first if there is none, then her. Nothing about platforms. */
 function Welcome({ hasModel }: { hasModel: boolean }) {
+  // In the middle of the page (the header, the page's bottom margin and a notice above take about 12rem).
   return (
-    <section className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-3xl border bg-card px-6 py-10 text-center shadow-[var(--shadow-lift)]">
-      <BotGlyph name="nest" id="welcome" size="lg" />
-      <h2 className="text-xl font-semibold tracking-tight">欢迎来到 nest</h2>
-      <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-        nest 里住着你的伙伴：可以在桌面上和她聊天、让她帮你做事、一起玩小游戏。
-        {hasModel ? '先请一位伙伴住进来吧。' : '她要靠一个大模型说话，先加一个模型，再请她住进来。'}
-      </p>
-      <ol className="flex w-full max-w-sm flex-col gap-2 text-left text-sm">
-        <li className={cn('flex items-center gap-3 rounded-xl border px-4 py-3', hasModel && 'text-muted-foreground')}>
-          <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs', hasModel ? 'bg-ok/15 text-ok' : 'bg-primary text-primary-foreground')}>
-            {hasModel ? '✓' : '1'}
-          </span>
-          <span className="flex-1">{hasModel ? '已经有模型了' : '加一个模型'}</span>
-          {!hasModel && (
-            <Button size="sm" asChild>
-              <a href="#/models">去加</a>
-            </Button>
-          )}
-        </li>
-        <li className={cn('flex items-center gap-3 rounded-xl border px-4 py-3', !hasModel && 'text-muted-foreground')}>
-          <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs', hasModel ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
-            2
-          </span>
-          <span className="flex-1">创建一个伙伴，或者先看看示例伙伴</span>
-          {hasModel && (
-            <Button size="sm" asChild>
-              <a href="#/chat">
-                <Sparkles />
-                开始
-              </a>
-            </Button>
-          )}
-        </li>
-      </ol>
-      <p className="text-xs text-muted-foreground">
-        想让她也去 QQ、Discord 这些地方说话，以后在「伙伴」页给她接一个平台就行。已经有 bot 号了？
-        <a href="#/bots" className="underline underline-offset-4 hover:text-foreground">
-          从号开始加
-        </a>
-      </p>
-    </section>
+    <div className="flex min-h-[calc(100svh-12rem)] items-center justify-center py-6">
+      <section className="flex w-full max-w-2xl flex-col items-center gap-5 rounded-3xl border bg-card px-8 py-12 text-center shadow-[var(--shadow-lift)] md:px-12">
+        <BotGlyph name="nest" id="welcome" size="lg" />
+        <h2 className="text-2xl font-semibold tracking-tight">欢迎来到 nest</h2>
+        <p className="max-w-lg text-[15px] leading-relaxed text-muted-foreground">
+          nest 里住着你的伙伴：可以在桌面上和她聊天、让她帮你做事、一起玩小游戏。
+          {hasModel ? '先请一位伙伴住进来吧。' : '她要靠一个大模型说话，先加一个模型，再请她住进来。'}
+        </p>
+        <ol className="flex w-full max-w-md flex-col gap-2.5 text-left text-[15px]">
+          <li className={cn('flex items-center gap-3 rounded-xl border px-4 py-3.5', hasModel && 'text-muted-foreground')}>
+            <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs', hasModel ? 'bg-ok/15 text-ok' : 'bg-primary text-primary-foreground')}>
+              {hasModel ? '✓' : '1'}
+            </span>
+            <span className="flex-1">{hasModel ? '已经有模型了' : '加一个模型'}</span>
+            {!hasModel && (
+              <Button size="sm" asChild>
+                <a href="#/models">去加</a>
+              </Button>
+            )}
+          </li>
+          <li className={cn('flex items-center gap-3 rounded-xl border px-4 py-3.5', !hasModel && 'text-muted-foreground')}>
+            <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs', hasModel ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
+              2
+            </span>
+            <span className="flex-1">创建一个伙伴，或者先看看示例伙伴</span>
+            {hasModel && (
+              <Button size="sm" asChild>
+                <a href="#/chat">
+                  <Sparkles />
+                  开始
+                </a>
+              </Button>
+            )}
+          </li>
+        </ol>
+        <p className="max-w-lg text-[13px] leading-relaxed text-muted-foreground">
+          想让她也去 QQ、Discord 这些地方说话，以后在「伙伴」页给她接一个平台就行。已经有 bot 号了？
+          <a href="#/bots" className="underline underline-offset-4 hover:text-foreground">
+            从号开始加
+          </a>
+        </p>
+      </section>
+    </div>
   )
 }
 

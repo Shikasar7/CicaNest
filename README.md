@@ -80,11 +80,12 @@
 
 ## 快速开始
 
-到 [Releases](https://github.com/Shikasar7/CicaNest/releases/latest) 下载，有两个包：
+到 [Releases](https://github.com/Shikasar7/CicaNest/releases/latest) 下载，有三个包：
 
 | 文件 | 是什么 | 装在哪 |
 | --- | --- | --- |
 | `nest-setup-版本.exe` | Windows 一个就够：后台、控制台、聊天窗口、桌宠、托盘都在里面，不用另装 Python、uv 或 Node | Windows 10、11（64 位） |
+| `nest-版本-arm64.dmg` | Mac 桌面端，同样什么都不用另装（没有「电脑上做事」） | Apple 芯片（M1 及以后）的 Mac，macOS 12 以上 |
 | `CicaNest-版本-server.zip` | 只有 nest 本体，控制台已经构建好 | 常开的 Mac、Linux 或服务器 |
 
 ### Windows
@@ -99,7 +100,17 @@
 
 > 安装包没有代码签名，Windows 第一次会提示「已保护你的电脑」：点「更多信息」→「仍要运行」。打开了「智能应用控制」的电脑可能不让运行没签名的程序。
 
-### Mac、Linux
+### Mac 桌面端
+
+1. 打开 `nest-版本-arm64.dmg`，把 nest 拖进「应用程序」。
+2. 第一次打开会提示无法验证开发者（安装包没有签名）：到「系统设置」→「隐私与安全性」，在下面找到 nest，点「仍要打开」。只要这一次。
+3. 选「在这台电脑上」，点「开始使用」，在「模型」页加一个模型，再请一位伙伴过来。
+
+关掉窗口它还在屏幕顶部的菜单栏里；想连伙伴一起停，在菜单栏图标里选「退出并停止 nest」。伙伴、聊天记录和密钥都在 `~/Library/Application Support/nest/home`。有新版本时会提醒，点「更新」会打开发布页，下载新的 dmg 拖进去替换就行，数据不动。
+
+「电脑上做事」（让她在你的电脑上开文件、跑命令）目前只有 Windows 版有；Mac 上可以在聊天页的「文件」里把文件夹共享给她。
+
+### Mac、Linux 的服务端
 
 装好 [uv](https://docs.astral.sh/uv/getting-started/installation/)，解压 `server.zip`，在解压出来的文件夹里运行：
 

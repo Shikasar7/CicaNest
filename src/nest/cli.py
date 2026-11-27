@@ -185,7 +185,7 @@ def start(settings: Settings, *, open_browser: bool) -> int:
     server: subprocess.Popen | None = None
     if not _healthy(settings):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
-        if service.installed():
+        if service.serves(settings.home):
             # The launchd agent owns the process: start its job rather than a second, unsupervised copy.
             if not service.kickstart():
                 print(

@@ -54,6 +54,9 @@ def test_install(tmp_path: Path) -> None:
     ]
     assert (tmp_path / "nest" / "data" / "logs").is_dir()
     assert service.installed(tmp_path)
+    # It serves that nest only: another copy on this Mac (a test one, the desktop app's) starts by itself.
+    assert service.serves(tmp_path / "nest", tmp_path)
+    assert not service.serves(tmp_path / "other", tmp_path)
 
 
 @pytest.mark.usefixtures("mac")

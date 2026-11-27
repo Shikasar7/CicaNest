@@ -48,15 +48,26 @@ if (INSTALLED) config.debugDir = null // not even in the installed app's files
 const DEBUG_REFUSED = config.debugDir ? debugAllowed(config.debugDir, EXECUTOR_FILE).why : ''
 if (DEBUG_REFUSED) config.debugDir = null
 const ICONS = path.join(__dirname, '..', 'assets', 'icons')
-const APP_ICON = path.join(ICONS, 'nest.ico')
+const MAC = process.platform === 'darwin'
+const WINDOWS = process.platform === 'win32'
+const APP_ICON = path.join(ICONS, WINDOWS ? 'nest.ico' : 'nest-512.png')
 const COOKIE_NAME = 'nest_session'
-const HIDDEN = process.argv.includes('--hidden') // started at login: stay in the tray
+// Started at login: stay in the tray (Windows passes --hidden; macOS says it opened the app at login).
+const HIDDEN = process.argv.includes('--hidden') || (MAC && openedAtLogin())
+
+function openedAtLogin() {
+  try {
+    return Boolean(app.getLoginItemSettings().wasOpenedAtLogin)
+  } catch {
+    return false
+  }
+}
 // A nest other than the usual one (NEST_HOME elsewhere) must never be mistaken for the real bots.
 const TEST_MARK = config.isTestCopy ? '测试副本' : ''
 const APP_TITLE = TEST_MARK ? `nest · ${TEST_MARK}` : 'nest'
 
 const APP_ID = 'nest'
-app.setAppUserModelId(APP_ID)
+if (WINDOWS) app.setAppUserModelId(APP_ID)
 // 语音输入 in the chat window: a nest on another machine is reached over plain http on the home network,
 // where Chromium offers no microphone; this one address is treated as a secure page (nothing else is).
 const PLAIN = config.origins.filter((origin) => origin.startsWith('http://'))
@@ -124,6 +135,7 @@ function run() {
   // Toasts need a Start Menu shortcut carrying our AppUserModelID (install-shortcuts.js makes one).
   // Without it Windows drops them silently, so fall back to a tray balloon.
   function toastsWork() {
+    if (!WINDOWS) return Notification.isSupported() // macOS: the app's own notifications, once allowed
     const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'nest.lnk')
     try {
       return Notification.isSupported() && shell.readShortcutLink(link).appUserModelId === 'nest'
@@ -153,6 +165,7 @@ function run() {
 
   // In development the login item is electron.exe plus this folder; --hidden keeps it in the tray.
   function loginItem() {
+    if (MAC) return {} // the app itself; it knows it was opened at login (openedAtLogin)
     return app.isPackaged
       ? { path: process.execPath, args: ['--hidden'] }
       : { path: process.execPath, args: [app.getAppPath(), '--hidden'] }
@@ -297,7 +310,44 @@ function run() {
 
   // ---- 电脑上做事 (the Windows executor) ---------------------------------------------------------
 
+  // 电脑上做事: Windows only (PowerShell, drive-letter paths, the Recycle Bin's rules).
+  function startExecutor() {
+    executorStore = new ExecutorStore(EXECUTOR_FILE)
+    confirmations = new Confirmations({ icon: APP_ICON, debug: Boolean(config.debugDir) })
+    executor = new Executor({
+      api: (method, pathname, body, options) => nest.api(method, pathname, body, options),
+      ask: (data) => confirmations.ask(data),
+      settings: () => executorStore.get(),
+      // Deleting goes to the Recycle Bin; opening uses the default program (a page: the default browser).
+      system: {
+        trash: (target) => shell.trashItem(target),
+        open: async ({ path: target, url }) => {
+          if (url) {
+            await shell.openExternal(url)
+            return ''
+          }
+          return shell.openPath(target)
+        },
+      },
+      // This app's own data, a nest running on this PC (its .env, its database) and the nest it brings are never
+      // touched.
+      extraForbidden: [app.getPath('userData'), config.remote ? null : config.home, BUNDLED?.folder].filter(Boolean),
+      // The steps taken, so one nest hands over again is not done twice (also after a restart of this app).
+      stepsFile: path.join(app.getPath('userData'), 'executor-steps.json'),
+      // Switched off: the windows still open are a no.
+      onStop: () => confirmations?.closeAll(),
+      onStatus: (state) => {
+        log.info(`executor: ${state}`)
+        tray?.render(true)
+        if (executorWin && !executorWin.isDestroyed()) executorWin.webContents.send('executor:changed')
+      },
+      log,
+    })
+    setTimeout(() => executor.start(), 3000)
+  }
+
   function openExecutor() {
+    if (!executorStore) return
     if (executorWin && !executorWin.isDestroyed()) {
       executorWin.show()
       executorWin.focus()
@@ -607,7 +657,8 @@ function run() {
       } catch (err) {
         tray.setBusy(null)
         log.error('stop before quit failed:', err)
-        dialog.showErrorBox('nest 没能停止', `${err.message}\n\n应用不会退出；可以稍后再试，或在任务管理器里结束 python.exe。`)
+        const by = WINDOWS ? '在任务管理器里结束 python.exe' : '在「活动监视器」里结束 python3'
+        dialog.showErrorBox('nest 没能停止', `${err.message}\n\n应用不会退出；可以稍后再试，或${by}。`)
         return false
       }
     }
@@ -753,6 +804,13 @@ function run() {
 
   // ---- app lifecycle -------------------------------------------------------------------------
 
+  // macOS: the Dock icon (or opening the app again from Finder) brings its window back.
+  app.on('activate', () => {
+    if (!mainWin) return // not ready yet: the launch shows it
+    if (config.remote) openChat()
+    else openNest()
+  })
+
   app.on('second-instance', (_event, argv) => {
     log.info('second instance: focusing')
     if (argv.includes('--hidden')) return
@@ -787,13 +845,16 @@ function run() {
       config.origin = await pickOrigin(config.origins)
       log.info(`using ${config.origin}`)
     }
-    if (!app.isPackaged) {
+    if (!app.isPackaged && WINDOWS) {
       const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Electron.lnk')
       const options = { appId: APP_ID, execPath: process.execPath, icon: APP_ICON, appPath: app.getAppPath() }
       if (fixElectronLink(link, shell, options)) log.info('gave Electron.lnk the nest icon')
     }
     theme.load()
-    Menu.setApplicationMenu(null)
+    // macOS: an app menu with 编辑 (Cmd+C/V/X/A/Z work in the pages only through it) and 窗口; Windows: none.
+    Menu.setApplicationMenu(
+      MAC ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null,
+    )
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
       if (permission === 'clipboard-sanitized-write') return callback(true)
       // The microphone, for 语音输入: only nest's own pages, and only sound (never the camera or the screen).
@@ -817,7 +878,8 @@ function run() {
       onHiddenToTray: () => {
         if (readPrefs().closeHintShown) return
         writePrefs({ closeHintShown: true })
-        notify('nest 还在后台运行', 'nest 还在后台运行，bot 不受影响。点任务栏右下角的图标可以再打开。')
+        const where = MAC ? '点屏幕顶部菜单栏里的图标，或程序坞里的 nest' : '点任务栏右下角的图标'
+        notify('nest 还在后台运行', `nest 还在后台运行，bot 不受影响。${where}可以再打开。`)
       },
     })
     chatWin = new MainWindow({
@@ -870,7 +932,7 @@ function run() {
         openChat: () => openChat(),
         openHome: () => openChat('@home'),
         openConnection: () => openConnection(),
-        openExecutor: () => openExecutor(),
+        openExecutor: WINDOWS ? () => openExecutor() : undefined,
         updateItem: () => updates?.menuItem() ?? null,
         update: () => updates?.ask(),
         executorState: () => executor?.state ?? 'off',
@@ -928,38 +990,7 @@ function run() {
       onMessage: (message) => unread.heard(message),
     })
     pets.start()
-    executorStore = new ExecutorStore(EXECUTOR_FILE)
-    confirmations = new Confirmations({ icon: APP_ICON, debug: Boolean(config.debugDir) })
-    executor = new Executor({
-      api: (method, pathname, body, options) => nest.api(method, pathname, body, options),
-      ask: (data) => confirmations.ask(data),
-      settings: () => executorStore.get(),
-      // Deleting goes to the Recycle Bin; opening uses the default program (a page: the default browser).
-      system: {
-        trash: (target) => shell.trashItem(target),
-        open: async ({ path: target, url }) => {
-          if (url) {
-            await shell.openExternal(url)
-            return ''
-          }
-          return shell.openPath(target)
-        },
-      },
-      // This app's own data, a nest running on this PC (its .env, its database) and the nest it brings are never
-      // touched.
-      extraForbidden: [app.getPath('userData'), config.remote ? null : config.home, BUNDLED?.folder].filter(Boolean),
-      // The steps taken, so one nest hands over again is not done twice (also after a restart of this app).
-      stepsFile: path.join(app.getPath('userData'), 'executor-steps.json'),
-      // Switched off: the windows still open are a no.
-      onStop: () => confirmations?.closeAll(),
-      onStatus: (state) => {
-        log.info(`executor: ${state}`)
-        tray?.render(true)
-        if (executorWin && !executorWin.isDestroyed()) executorWin.webContents.send('executor:changed')
-      },
-      log,
-    })
-    setTimeout(() => executor.start(), 3000)
+    if (WINDOWS) startExecutor()
     // nest sends reminders here rather than to QQ while it hears from this app (about every minute).
     // How long the user has been idle too: nest only comes to them (主动找你) while they are at the computer.
     // And how long 安静一会儿 still holds: then nobody comes to them, not even with a message.

@@ -68,3 +68,25 @@ export function ball(r: number, color: string, x: number, y: number, z: number) 
   mesh.position.set(x, y, z)
   return mesh
 }
+
+/** A puffy five-pointed star facing +z, its middle at x, y, z. `glow`: it lights up with the lamps (named 'shade'). */
+export function star(r: number, color: string, x: number, y: number, z: number, glow = false) {
+  const shape = new THREE.Shape()
+  for (let k = 0; k < 10; k++) {
+    const [a, far] = [(k * Math.PI) / 5 + Math.PI / 2, k % 2 ? r * 0.5 : r]
+    if (k) shape.lineTo(Math.cos(a) * far, Math.sin(a) * far)
+    else shape.moveTo(Math.cos(a) * far, Math.sin(a) * far)
+  }
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: r * 0.3,
+    bevelEnabled: true,
+    bevelThickness: r * 0.14,
+    bevelSize: r * 0.12,
+    bevelSegments: 2,
+  })
+  geometry.center()
+  const mesh = solid(geometry, color, glow ? { material: toon(color, { emissive: color, emissiveIntensity: 0 }) } : {})
+  if (glow) mesh.name = 'shade'
+  mesh.position.set(x, y, z)
+  return mesh
+}

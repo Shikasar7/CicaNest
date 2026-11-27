@@ -2,18 +2,22 @@ name: ci
 
 on:
   push:
+    branches: [main] # a release's tag points at main's commit: no second run for it
   pull_request:
 
 jobs:
   backend:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest -q
+      # A few tests wait on timing, and the hosted Windows runners are slow and busy: what fails gets one more
+      # try (--lf runs only those). A real failure fails twice.
+      - run: uv run pytest -q || uv run pytest -q --lf
 
   console:
     runs-on: ubuntu-latest

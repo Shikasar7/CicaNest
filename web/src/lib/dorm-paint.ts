@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import { flooringOf, hangingOf, wallpaperOf, type FloorKind, type Flooring, type HangKind, type Pattern, type WallKind } from './dorm-look.ts'
-import { ball, box, canvas, toon, turned } from './dorm-shapes.ts'
+import { ball, box, canvas, star, toon, turned } from './dorm-shapes.ts'
 
 /** Wallpaper, floors and what hangs on the walls of the 3D 小窝 (lib/dorm-look.ts), drawn in code. */
 
@@ -285,6 +285,27 @@ const shape = (g: Pen, color: string, ...points: [number, number][]) => {
 }
 
 const PAINT: Partial<Record<HangKind, (g: Pen, w: number, h: number) => void>> = {
+  haitang: (g, w, h) => {
+    fill(g, '#f6ede0', 0, 0, w, h)
+    g.strokeStyle = '#5b3d36'
+    g.lineCap = 'round'
+    for (const [x1, y1, x2, y2, lw] of [[0, h * 0.95, w * 0.62, h * 0.32, 9], [w * 0.36, h * 0.6, w * 0.9, h * 0.52, 5], [w * 0.5, h * 0.46, w * 0.42, h * 0.12, 4]]) {
+      g.lineWidth = lw
+      g.beginPath()
+      g.moveTo(x1, y1)
+      g.quadraticCurveTo((x1 + x2) / 2 + 10, (y1 + y2) / 2 - 14, x2, y2)
+      g.stroke()
+    }
+    for (const [x, y, r] of [[w * 0.62, h * 0.3, 15], [w * 0.5, h * 0.42, 12], [w * 0.88, h * 0.5, 13], [w * 0.72, h * 0.56, 11], [w * 0.42, h * 0.14, 12], [w * 0.28, h * 0.7, 13], [w * 0.16, h * 0.82, 10]]) {
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2 + x
+        oval(g, k % 2 ? '#f2a4b4' : '#e9849a', x + Math.cos(a) * r * 0.55, y + Math.sin(a) * r * 0.55, r * 0.55, r * 0.42, a)
+      }
+      oval(g, '#f7d9a0', x, y, r * 0.25, r * 0.25)
+    }
+    for (const [x, y] of [[w * 0.78, h * 0.4], [w * 0.34, h * 0.56], [w * 0.55, h * 0.2]]) oval(g, '#c95a72', x, y, 5, 7)
+    fill(g, '#b8343f', w * 0.08, h * 0.08, 14, 22)
+  },
   hills: (g, w, h) => {
     fill(g, '#cfe3ee', 0, 0, w, h)
     oval(g, '#fff3d6', w * 0.74, h * 0.28, 24, 24)
@@ -464,11 +485,106 @@ function photos() {
   return g
 }
 
+/** Strings of stars and little crystal balls from a gold branch; they sparkle when the lamps are on. */
+function stars() {
+  const g = new THREE.Group()
+  g.add(box(1.42, 0.035, 0.035, '#d9b45a', 0.75, 0.93, 0.06, 0.015))
+  for (const x of [0.04, 1.46]) g.add(ball(0.03, '#f3cf6a', x, 0.95, 0.06))
+  const colors = ['#f6d36b', '#cdb6f2', '#f7b9d2', '#f6d36b', '#b9d6f4', '#f7b9d2']
+  const lengths = [0.42, 0.62, 0.3, 0.72, 0.5, 0.36]
+  const beads = ['#fff4c9', '#e6f2ff', '#ffe3f1']
+  for (const [n, long] of lengths.entries()) {
+    const x = 0.14 + n * 0.244
+    g.add(box(0.008, long, 0.008, '#efe3c4', x, 0.93 - long, 0.07, 0.003, { line: false, cast: false }))
+    const tip = star(n % 2 ? 0.06 : 0.08, colors[n], x, 0.93 - long - 0.05, 0.075, true)
+    tip.rotation.z = ((n * 37) % 7 - 3) * 0.08
+    g.add(tip)
+    for (let k = 1; k <= (long > 0.45 ? 2 : 1); k++) {
+      const bead = ball(0.026, beads[(n + k) % 3], x, 0.93 - (long * k) / 3, 0.075)
+      bead.name = 'shade'
+      const material = bead.material as THREE.MeshToonMaterial
+      material.emissive.set(beads[(n + k) % 3])
+      material.emissiveIntensity = 0
+      g.add(bead)
+    }
+  }
+  return g
+}
+
+/** A spare maid's dress with its apron on a hanger, from a peg. */
+function apron() {
+  const g = new THREE.Group()
+  g.add(ball(0.03, '#d9b45a', 0.25, 0.95, 0.04))
+  for (const side of [-1, 1]) {
+    const arm = box(0.2, 0.018, 0.018, '#c9956c', 0.25 + side * 0.09, 0.84, 0.06, 0.008)
+    arm.rotation.z = side * -0.45
+    g.add(arm)
+  }
+  g.add(box(0.012, 0.08, 0.012, '#d9b45a', 0.25, 0.88, 0.06, 0.005, { line: false }))
+  const flat = (points: [number, number][], color: string, y: number, z: number, deep = 0.22) => {
+    const mesh = turned(points, color, 0.25, y, z)
+    mesh.scale.z = deep
+    return mesh
+  }
+  g.add(flat([[0, 0], [0.24, 0], [0.2, 0.22], [0.1, 0.46], [0.09, 0.5], [0.12, 0.56], [0.13, 0.62], [0, 0.66]], '#3b3442', 0.12, 0.08))
+  g.add(flat([[0, 0], [0.15, 0], [0.13, 0.3], [0.07, 0.36], [0, 0.37]], '#fffaf2', 0.13, 0.12, 0.12))
+  g.add(flat([[0, 0], [0.1, 0], [0.09, 0.1], [0, 0.12]], '#fffaf2', 0.6, 0.11, 0.14))
+  g.add(box(0.3, 0.035, 0.012, '#fffaf2', 0.25, 0.53, 0.115, 0.01, { line: false }))
+  for (const side of [-1, 1]) g.add(ball(0.03, '#3b3442', 0.25 + side * 0.035, 0.72, 0.13))
+  for (let n = 0; n < 7; n++) g.add(ball(0.022, '#fffaf2', 0.06 + n * 0.063, 0.13, 0.12))
+  return g
+}
+
+/** An open folding fan: clouds and blossoms on pale silk, a tassel below. */
+function fan() {
+  const g = new THREE.Group()
+  const [r, from, span] = [0.46, Math.PI * 0.12, Math.PI * 0.76]
+  const silk = canvas(256, 256, (c) => {
+    const grad = c.createRadialGradient(128, 128, 30, 128, 128, 128)
+    grad.addColorStop(0, '#fff4f7')
+    grad.addColorStop(0.55, '#f6c6d6')
+    grad.addColorStop(1, '#a98fdc')
+    c.fillStyle = grad
+    c.fillRect(0, 0, 256, 256)
+    c.strokeStyle = '#fffaf2'
+    c.lineWidth = 5
+    for (const [x, y] of [[70, 70], [160, 50], [200, 100]]) {
+      c.beginPath()
+      c.arc(x, y, 16, Math.PI, 0)
+      c.arc(x + 26, y, 12, Math.PI, 0)
+      c.stroke()
+    }
+    c.fillStyle = '#f2a7b8'
+    for (const [x, y] of [[110, 92], [128, 70], [96, 60], [180, 78]]) {
+      c.beginPath()
+      c.arc(x, y, 9, 0, 7)
+      c.fill()
+    }
+  })
+  const leaf = new THREE.Mesh(new THREE.RingGeometry(r * 0.38, r, 40, 1, from, span), toon('#ffffff', { map: silk, side: THREE.DoubleSide }))
+  leaf.position.set(0.5, 0.04, 0.075)
+  g.add(leaf)
+  const edge = new THREE.Mesh(new THREE.RingGeometry(r - 0.012, r + 0.012, 40, 1, from, span), toon('#d9b45a', { side: THREE.DoubleSide }))
+  edge.position.set(0.5, 0.04, 0.078)
+  g.add(edge)
+  for (let n = 0; n <= 10; n++) {
+    const a = from + (span * n) / 10
+    const rib = box(0.012, r, 0.012, '#5a4a7a', 0, 0, 0, 0.004, { line: false, cast: false })
+    rib.position.set(0.5 + (Math.cos(a) * r) / 2, 0.04 + (Math.sin(a) * r) / 2, 0.085)
+    rib.rotation.z = a - Math.PI / 2
+    g.add(rib)
+  }
+  g.add(ball(0.03, '#d9b45a', 0.5, 0.04, 0.09))
+  g.add(box(0.01, 0.1, 0.01, '#e0446a', 0.5, -0.07, 0.09, 0.004, { line: false }))
+  g.add(turned([[0, 0], [0.025, 0.01], [0.012, 0.07], [0, 0.075]], '#e0446a', 0.5, -0.15, 0.09))
+  return g
+}
+
 export function hanging(kind: HangKind): THREE.Group {
   const paint = PAINT[kind]
   const g = paint
-    ? framed(kind, paint, kind === 'calendar' ? '#e8ddd0' : kind === 'moon' ? '#5a5568' : '#a97b58')
-    : ({ clock, mirror, shelf: rack, hangplant, flags, lights, wreath, photos } as Record<string, () => THREE.Group>)[kind]()
+    ? framed(kind, paint, kind === 'calendar' ? '#e8ddd0' : kind === 'moon' ? '#5a5568' : kind === 'haitang' ? '#6b3f48' : '#a97b58')
+    : ({ clock, mirror, shelf: rack, hangplant, flags, lights, wreath, photos, stars, apron, fan } as Record<string, () => THREE.Group>)[kind]()
   g.name = kind
   return g
 }

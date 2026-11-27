@@ -103,6 +103,19 @@ def installed(home_dir: Path | None = None) -> bool:
     return supported() and plist_path(home_dir).exists()
 
 
+def serves(nest_home: Path, home_dir: Path | None = None) -> bool:
+    """Whether the installed agent runs *this* nest (its folder): another copy on the same Mac — a test one,
+    the desktop app's own — is started by itself, never by starting the agent's (someone else's) nest."""
+    if not installed(home_dir):
+        return False
+    try:
+        job = plistlib.loads(plist_path(home_dir).read_bytes())
+        folder = Path(str(job.get("WorkingDirectory") or ""))
+        return bool(job.get("WorkingDirectory")) and folder.resolve() == nest_home.resolve()
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return False
+
+
 def kickstart(*, run: Runner = _run) -> bool:
     """Start the installed agent's job now (it is not running after `nest stop`)."""
     return run(["launchctl", "kickstart", f"{domain()}/{LABEL}"]).returncode == 0

@@ -1,7 +1,7 @@
 {
   "name": "nest-desktop",
   "productName": "nest",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "description": "nest 桌面外壳：一键启动后台、托盘常驻、控制台窗口",
   "main": "src/main.js",
@@ -12,7 +12,8 @@
     "shortcuts": "electron scripts/install-shortcuts.js",
     "test": "node --test \"test/*.test.js\"",
     "backend": "node scripts/build-backend.js",
-    "dist": "npm run backend && electron-builder --win nsis --publish never"
+    "dist": "npm run backend && electron-builder --win nsis --publish never",
+    "dist:mac": "npm run backend && electron-builder --mac dmg --arm64 --publish never"
   },
   "devDependencies": {
     "electron": "45.0.0",
@@ -62,6 +63,28 @@
       "shortcutName": "nest",
       "deleteAppDataOnUninstall": false,
       "artifactName": "nest-setup-${version}.exe"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icons/nest-512.png",
+      "category": "public.app-category.social-networking",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "12.0",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "语音输入：你按住说话时，nest 把声音转成文字发给伙伴。"
+      }
+    },
+    "dmg": {
+      "artifactName": "nest-${version}-${arch}.dmg",
+      "title": "nest ${version}"
     },
     "electronLanguages": [
       "zh-CN",

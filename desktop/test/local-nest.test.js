@@ -9,7 +9,7 @@ const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 
-const { bundledBackend, loadConfig, portFromDotenv } = require('../src/config')
+const { bundledBackend, loadConfig, portFromDotenv, pythonIn } = require('../src/config')
 const { prepareHome } = require('../src/local-setup')
 const { movedAway } = require('../src/login-item')
 const { Nest, backendEnv, portTaken } = require('../src/nest')
@@ -23,10 +23,18 @@ function temp(t) {
 /** The resources folder of an app built with a nest in it. */
 function resources(dir) {
   const folder = path.join(dir, 'resources')
-  fs.mkdirSync(path.join(folder, 'backend', 'python'), { recursive: true })
-  fs.writeFileSync(path.join(folder, 'backend', 'python', 'python.exe'), '')
+  const python = pythonIn(path.join(folder, 'backend', 'python'))
+  fs.mkdirSync(path.dirname(python), { recursive: true })
+  fs.writeFileSync(python, '')
   return folder
 }
+
+test('the bundled Python is where each system keeps it', () => {
+  assert.equal(pythonIn('/b', { platform: 'darwin' }), path.join('/b', 'bin', 'python3'))
+  assert.equal(pythonIn('/h/.venv', { venv: true, platform: 'darwin' }), path.join('/h/.venv', 'bin', 'python'))
+  assert.equal(pythonIn('C:\\b', { platform: 'win32' }), path.join('C:\\b', 'python.exe'))
+  assert.equal(pythonIn('C:\\h', { venv: true, platform: 'win32' }), path.join('C:\\h', 'Scripts', 'python.exe'))
+})
 
 test('installed: undecided until the user picks, then local or remote', (t) => {
   const dir = temp(t)

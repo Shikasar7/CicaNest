@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 
 import { CELL, FURNITURE, type Kind } from './dorm.ts'
-import { ball, box, canvas, outline, solid, toon, turned } from './dorm-shapes.ts'
+import { ball, box, canvas, outline, solid, star, toon, turned } from './dorm-shapes.ts'
 
 /** The furniture of the 3D 小窝 (lib/dorm.ts says how large it is and what one does on it): each in its own cells, its
  * far corner at 0, 0, facing +z. */
@@ -584,9 +584,345 @@ function mat() {
   return g
 }
 
+// -- for a cat ------------------------------------------------------------------------------------------------
+
+const LILAC = '#c9b5ee'
+const FLUFF = '#fbf5ff'
+
+/** A soft dried-fish pillow, `long` metres from nose to tail, lying along x with its middle at x, z. */
+function fish(long: number, x: number, z: number, turn = 0, y = 0, color = '#f3bd84') {
+  const f = new THREE.Group()
+  const tall = long * 0.17
+  const body = solid(new THREE.SphereGeometry(1, 28, 18).scale(long * 0.38, tall, long * 0.13), color)
+  body.position.set(0, tall, 0)
+  const belly = solid(new THREE.SphereGeometry(1, 24, 14).scale(long * 0.3, tall * 0.55, long * 0.125), '#f8dfb4', { line: false })
+  belly.position.set(long * 0.02, tall * 0.62, 0.004)
+  f.add(body, belly)
+  // Its tail, two lobes; a fin on its back; stripes of a fish dried in the sun.
+  for (const side of [-1, 1]) {
+    const lobe = solid(new THREE.SphereGeometry(1, 16, 10).scale(long * 0.11, long * 0.075, long * 0.03), '#e09a5e')
+    lobe.position.set(-long * 0.44, tall + side * long * 0.06, 0)
+    lobe.rotation.z = side * 0.7
+    f.add(lobe)
+  }
+  const fin = solid(new THREE.SphereGeometry(1, 14, 8).scale(long * 0.1, long * 0.05, long * 0.025), '#e09a5e')
+  fin.position.set(-long * 0.02, tall * 1.9, 0)
+  f.add(fin)
+  for (const n of [-1, 0, 1]) {
+    const band = solid(new THREE.TorusGeometry(1, 0.035, 6, 24).scale(tall * 0.72, tall * 0.98, long * 0.135), '#d98f5c', { line: false, cast: false })
+    band.rotation.y = Math.PI / 2
+    band.position.set(-long * 0.12 + n * long * 0.09, tall, 0)
+    f.add(band)
+  }
+  // A face on either side: an eye and a pink cheek.
+  for (const side of [-1, 1]) {
+    f.add(ball(long * 0.035, '#fffaf2', long * 0.27, tall * 1.2, side * long * 0.105))
+    f.add(ball(long * 0.022, '#4a3a48', long * 0.28, tall * 1.2, side * long * 0.125))
+    f.add(ball(long * 0.022, '#f2a7b3', long * 0.22, tall * 0.85, side * long * 0.115))
+  }
+  f.position.set(x, y, z)
+  f.rotation.y = turn
+  return f
+}
+
+function catbed() {
+  const g = new THREE.Group()
+  const [x, z] = [(FURNITURE.catbed.w * CELL) / 2, (FURNITURE.catbed.d * CELL) / 2]
+  // A round bed, deep and soft: its bowl, a fat rim all round, a cushion inside.
+  g.add(turned([[0, 0], [0.84, 0], [0.95, 0.06], [0.98, 0.2], [0.9, 0.3], [0.72, 0.26], [0, 0.17]], LILAC, x, 0, z))
+  const rim = solid(new THREE.TorusGeometry(0.8, 0.19, 18, 48), '#dacbf6')
+  rim.rotation.x = -Math.PI / 2
+  rim.position.set(x, 0.32, z)
+  g.add(rim)
+  g.add(turned([[0, 0], [0.62, 0], [0.66, 0.05], [0.6, 0.11], [0, 0.12]], FLUFF, x, 0.15, z))
+  // Cat ears on the rim at the back.
+  for (const side of [-1, 1]) {
+    const a = side * 0.55
+    const [ex, ez] = [x + Math.sin(a) * 0.78, z - Math.cos(a) * 0.78]
+    const ear = solid(new THREE.ConeGeometry(0.27, 0.46, 4), '#dacbf6')
+    ear.position.set(ex, 0.68, ez)
+    ear.rotation.set(0, Math.PI / 4 - a, side * -0.18)
+    const inner = solid(new THREE.ConeGeometry(0.16, 0.3, 4), '#f6c3d6', { line: false })
+    inner.position.set(ex, 0.64, ez + 0.1)
+    inner.rotation.copy(ear.rotation)
+    g.add(ear, inner)
+  }
+  // A tail curled round the front of the rim, with a star at its tip.
+  const tail = solid(new THREE.TorusGeometry(1.03, 0.07, 10, 32, 1.1), '#bda6ea')
+  tail.rotation.set(Math.PI / 2, 0, 0.25)
+  tail.position.set(x, 0.1, z)
+  g.add(tail, star(0.09, '#f3cf6a', x + Math.cos(1.35) * 1.03, 0.22, z + Math.sin(1.35) * 1.03))
+  // What is in it: a fish pillow, a star cushion, a little ball of wool.
+  g.add(fish(0.72, x - 0.2, z - 0.25, 0.35, 0.26))
+  const pillow = star(0.2, '#f6d27a', x + 0.38, 0.38, z - 0.28)
+  pillow.rotation.x = -0.9
+  g.add(pillow)
+  g.add(ball(0.08, '#f2a7b3', x + 0.42, 0.33, z + 0.36))
+  return g
+}
+
+function cattree() {
+  const g = new THREE.Group()
+  const [w, d] = [FURNITURE.cattree.w * CELL, FURNITURE.cattree.d * CELL]
+  const [board, sisal, pad] = ['#e3cfb2', '#d9bb8b', '#efe6fb']
+  g.add(box(w - 0.04, 0.08, d - 0.04, board, w / 2, 0, d / 2, 0.03))
+  const post = (px: number, from: number, to: number) => {
+    const points: [number, number][] = [[0, 0]]
+    for (let h = 0; h <= to - from; h += 0.04) points.push([h % 0.08 < 0.04 ? 0.068 : 0.074, h])
+    points.push([0, to - from])
+    g.add(turned(points, sisal, px, from, d / 2))
+  }
+  // A little house below, with a round door and a cushion on its roof.
+  g.add(box(0.64, 0.56, 0.64, '#bfa8ea', 0.38, 0.08, d / 2, 0.08))
+  const door = new THREE.Mesh(new THREE.CircleGeometry(0.17, 28), toon('#5d4a7c'))
+  door.position.set(0.38, 0.33, d / 2 + 0.325)
+  g.add(door)
+  g.add(box(0.7, 0.07, 0.7, board, 0.38, 0.64, d / 2, 0.03), box(0.62, 0.06, 0.62, pad, 0.38, 0.71, d / 2, 0.03))
+  // A perch on the right, where one sits up high.
+  post(1.15, 0.08, 0.9)
+  g.add(box(0.66, 0.07, 0.66, board, 1.15, 0.9, d / 2, 0.03), box(0.6, 0.07, 0.6, pad, 1.15, 0.97, d / 2, 0.035))
+  // The top: a round basket on a tall post.
+  post(0.58, 0.77, 1.45)
+  g.add(turned([[0, 0], [0.3, 0], [0.34, 0.06], [0.33, 0.15], [0.28, 0.16], [0.26, 0.08], [0, 0.07]], LILAC, 0.42, 1.45, d / 2))
+  g.add(turned([[0, 0], [0.25, 0], [0.26, 0.04], [0, 0.05]], pad, 0.42, 1.51, d / 2))
+  // Toys hanging: a star from the perch, a pompom from the basket.
+  g.add(box(0.012, 0.32, 0.012, '#8f7a64', 1.42, 0.6, d / 2 + 0.28, 0.004, { line: false, cast: false }))
+  g.add(star(0.07, '#f3cf6a', 1.42, 0.55, d / 2 + 0.28))
+  g.add(box(0.012, 0.22, 0.012, '#8f7a64', 0.7, 1.32, d / 2 + 0.18, 0.004, { line: false, cast: false }))
+  g.add(ball(0.055, '#f2a7b3', 0.7, 1.3, d / 2 + 0.18))
+  return g
+}
+
+function fishpillow() {
+  const g = new THREE.Group()
+  g.add(fish(0.96, (FURNITURE.fishpillow.w * CELL) / 2, (FURNITURE.fishpillow.d * CELL) / 2))
+  return g
+}
+
+// -- for a princess, a maid and a bad maid --------------------------------------------------------------------
+
+const GOLD = '#dcb65c'
+const SNOW = '#fbf7f4'
+
+/** Something see-through (a veil, glass): by itself, not merged, so it keeps its own material. */
+function sheer(geometry: THREE.BufferGeometry, color: string, opacity: number, x: number, y: number, z: number) {
+  const mesh = new THREE.Mesh(geometry, toon(color, { transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false }))
+  mesh.name = 'veil'
+  mesh.position.set(x, y, z)
+  mesh.receiveShadow = true
+  return mesh
+}
+
+function canopy() {
+  const g = new THREE.Group()
+  const [w, d, top] = [1.5, 2.5, 2.05]
+  // A white bed with a high, rounded head.
+  const head = box(w - 0.06, 1.05, 0.12, SNOW, w / 2, 0, 0.08, 0.05)
+  const arch = solid(new THREE.CylinderGeometry(0.45, 0.45, 0.12, 32, 1, false, -Math.PI / 2, Math.PI), SNOW)
+  arch.rotation.x = -Math.PI / 2
+  arch.position.set(w / 2, 0.98, 0.08)
+  g.add(head, arch, ball(0.06, GOLD, w / 2, 1.42, 0.12))
+  g.add(box(w - 0.06, 0.45, 0.1, SNOW, w / 2, 0, d - 0.07, 0.04))
+  g.add(box(w - 0.1, 0.22, d - 0.16, '#e9dcd2', w / 2, 0.1, d / 2, 0.04))
+  g.add(box(w - 0.14, 0.2, d - 0.28, PALE, w / 2, 0.3, d / 2 + 0.02, 0.09))
+  for (const x of [w / 2 - 0.3, w / 2 + 0.3]) {
+    const pillow = box(0.52, 0.2, 0.38, '#fdf3f6', x, 0.5, 0.38, 0.1)
+    pillow.rotation.x = -0.14
+    g.add(pillow)
+  }
+  // A pink quilt with a frilled edge, turned down; a heart cushion.
+  g.add(box(w - 0.04, 0.2, d - 1.1, '#efc9d8', w / 2, 0.37, d / 2 + 0.44, 0.09))
+  g.add(box(w - 0.03, 0.22, 0.26, SNOW, w / 2, 0.37, 1.0, 0.1))
+  g.add(box(w + 0.02, 0.06, d - 1.1, '#fbe3ec', w / 2, 0.3, d / 2 + 0.44, 0.03, { cast: false }))
+  g.add(ball(0.1, '#e7a2b8', w / 2 + 0.2, 0.68, 0.62), ball(0.1, '#e7a2b8', w / 2 + 0.34, 0.68, 0.62))
+  // Four slim posts and a frame on top; veils gathered at the posts, a frill all round the top.
+  for (const x of [0.06, w - 0.06]) {
+    for (const z of [0.06, d - 0.06]) {
+      g.add(turned([[0.035, 0], [0.03, top - 0.1], [0.05, top - 0.06], [0, top]], SNOW, x, 0, z))
+      g.add(ball(0.05, GOLD, x, top + 0.02, z))
+    }
+  }
+  for (const z of [0.06, d - 0.06]) g.add(box(w - 0.06, 0.05, 0.05, SNOW, w / 2, top - 0.08, z, 0.02))
+  for (const x of [0.06, w - 0.06]) g.add(box(0.05, 0.05, d - 0.06, SNOW, x, top - 0.08, d / 2, 0.02))
+  const veil = '#f4d4e2'
+  g.add(sheer(new THREE.PlaneGeometry(w, 0.28), veil, 0.75, w / 2, top - 0.2, 0.04))
+  g.add(sheer(new THREE.PlaneGeometry(w, 0.28), veil, 0.75, w / 2, top - 0.2, d - 0.04))
+  for (const x of [0.02, w - 0.02]) {
+    const side = sheer(new THREE.PlaneGeometry(d, 0.28), veil, 0.75, x, top - 0.2, d / 2)
+    side.rotation.y = Math.PI / 2
+    g.add(side)
+  }
+  for (const x of [0.12, w - 0.12]) {
+    for (const z of [0.12, d - 0.12]) {
+      g.add(sheer(new THREE.CylinderGeometry(0.1, 0.2, top - 0.15, 16, 1, true), veil, 0.5, x, (top - 0.15) / 2, z))
+      g.add(box(0.2, 0.05, 0.2, GOLD, x, 0.9, z, 0.025, { cast: false }))
+    }
+  }
+  return g
+}
+
+function chaise() {
+  const g = new THREE.Group()
+  const [velvet, dark] = ['#a8404f', '#8c3242']
+  g.add(box(1.86, 0.24, 0.8, dark, 1, 0.12, 0.55, 0.08))
+  g.add(box(1.74, 0.12, 0.7, velvet, 1.02, 0.34, 0.57, 0.06))
+  // A rolled, raised head on the left and a low back along the left half.
+  const roll = solid(new THREE.CylinderGeometry(0.16, 0.16, 0.78, 24), velvet)
+  roll.rotation.x = Math.PI / 2
+  roll.position.set(0.18, 0.56, 0.55)
+  g.add(roll, box(0.22, 0.34, 0.78, dark, 0.16, 0.12, 0.55, 0.06))
+  g.add(box(1.0, 0.36, 0.14, velvet, 0.62, 0.38, 0.2, 0.06))
+  for (const x of [0.12, 1.88]) for (const z of [0.24, 0.86]) g.add(turned([[0.025, 0], [0.04, 0.13]], GOLD, x, 0, z))
+  for (let n = 0; n < 7; n++) g.add(ball(0.018, GOLD, 0.2 + n * 0.12, 0.66, 0.13))
+  g.add(ball(0.13, '#f1b7c3', 0.48, 0.56, 0.4), ball(0.1, '#fbeee8', 1.65, 0.5, 0.42))
+  return g
+}
+
+function teacart() {
+  const g = new THREE.Group()
+  for (const y of [0.24, 0.72]) g.add(box(0.86, 0.04, 0.4, SNOW, 0.5, y, 0.25, 0.02))
+  for (const x of [0.1, 0.9]) for (const z of [0.08, 0.42]) g.add(box(0.03, 0.74, 0.03, GOLD, x, 0.06, z, 0.012))
+  g.add(box(0.03, 0.03, 0.4, GOLD, 0.96, 0.92, 0.25, 0.012))
+  for (const x of [0.1, 0.9]) for (const z of [0.08, 0.42]) {
+    const wheel = solid(new THREE.CylinderGeometry(0.055, 0.055, 0.03, 18), '#5a4650')
+    wheel.rotation.z = Math.PI / 2
+    wheel.position.set(x, 0.055, z)
+    g.add(wheel)
+  }
+  // A teapot and cups on top; a stand of little cakes; a tin of biscuits below.
+  g.add(turned([[0, 0], [0.08, 0.01], [0.11, 0.06], [0.09, 0.13], [0.035, 0.15], [0, 0.155]], '#f6eef6', 0.3, 0.76, 0.25))
+  g.add(ball(0.025, GOLD, 0.3, 0.93, 0.25))
+  const spout = box(0.1, 0.03, 0.03, '#f6eef6', 0.42, 0.82, 0.25, 0.014)
+  spout.rotation.z = 0.6
+  g.add(spout)
+  for (const z of [0.15, 0.35]) {
+    g.add(turned([[0.06, 0], [0.07, 0.01], [0.025, 0.014]], '#efe2f0', 0.52, 0.76, z))
+    g.add(turned([[0, 0], [0.03, 0.004], [0.045, 0.06], [0.04, 0.06], [0.026, 0.016], [0, 0.016]], SNOW, 0.52, 0.772, z))
+  }
+  g.add(turned([[0.008, 0], [0.008, 0.3], [0, 0.3]], GOLD, 0.74, 0.76, 0.25))
+  for (const [y, r] of [[0.8, 0.12], [0.92, 0.09], [1.03, 0.065]]) {
+    g.add(turned([[0, 0], [r, 0.004], [r, 0.014], [0, 0.014]], SNOW, 0.74, y, 0.25))
+    for (let n = 0; n < 3; n++) {
+      const a = n * 2.1 + y * 5
+      g.add(box(0.045, 0.04, 0.045, ['#f2b4c3', '#f3dca0', '#c9b5ee'][n], 0.74 + Math.cos(a) * r * 0.55, y + 0.014, 0.25 + Math.sin(a) * r * 0.55, 0.012))
+    }
+  }
+  g.add(turned([[0.13, 0], [0.13, 0.12], [0, 0.12]], '#c9b5ee', 0.32, 0.28, 0.25))
+  g.add(turned([[0.135, 0], [0.135, 0.02], [0, 0.02]], GOLD, 0.32, 0.4, 0.25))
+  return g
+}
+
+function vanity() {
+  const g = new THREE.Group()
+  g.add(box(0.94, 0.08, 0.44, SNOW, 0.5, 0.7, 0.25, 0.03))
+  g.add(box(0.26, 0.5, 0.4, SNOW, 0.17, 0.2, 0.25, 0.03), box(0.26, 0.5, 0.4, SNOW, 0.83, 0.2, 0.25, 0.03))
+  for (const x of [0.17, 0.83]) for (const y of [0.3, 0.52]) g.add(ball(0.018, GOLD, x, y, 0.46))
+  legs(g, [0.08, 0.92], [0.1, 0.4], 0.22, GOLD, 0.022)
+  // An oval mirror in a gold frame, bottles, a jewel box.
+  const frame = solid(new THREE.TorusGeometry(0.27, 0.035, 10, 40).scale(0.8, 1, 1), GOLD)
+  frame.position.set(0.5, 1.16, 0.09)
+  g.add(frame, box(0.05, 0.2, 0.05, GOLD, 0.5, 0.78, 0.09, 0.02))
+  const glass = new THREE.Mesh(new THREE.CircleGeometry(0.27, 36).scale(0.8, 1, 1), toon('#dfe9f2', { emissive: '#ffffff', emissiveIntensity: 0.15 }))
+  glass.position.set(0.5, 1.16, 0.095)
+  g.add(glass)
+  for (const [x, color, h] of [[0.2, '#f2b4c3', 0.12], [0.28, '#c9b5ee', 0.09], [0.78, '#f3dca0', 0.1]] as const) {
+    g.add(turned([[0, 0], [0.035, 0.003], [0.038, h * 0.7], [0.015, h], [0, h]], color, x, 0.78, 0.33))
+    g.add(ball(0.018, GOLD, x, 0.78 + h + 0.01, 0.33))
+  }
+  g.add(box(0.16, 0.08, 0.1, '#8c3242', 0.62, 0.78, 0.36, 0.02), box(0.17, 0.02, 0.11, GOLD, 0.62, 0.86, 0.36, 0.008))
+  return g
+}
+
+function hoard() {
+  const g = new THREE.Group()
+  const coin = '#f2c95a'
+  // A heap of gold, coins all round it, a crown on top.
+  g.add(turned([[0, 0], [0.6, 0], [0.56, 0.1], [0.44, 0.26], [0.28, 0.42], [0.12, 0.5], [0, 0.52]], coin, 0.6, 0, 0.5))
+  g.add(turned([[0, 0], [0.3, 0], [0.24, 0.12], [0.1, 0.2], [0, 0.22]], '#f6d877', 1.08, 0, 0.7))
+  for (let n = 0; n < 22; n++) {
+    const a = n * 2.399
+    const r = 0.25 + ((n * 37) % 11) * 0.04
+    const c = turned([[0.045, 0], [0.045, 0.012], [0, 0.012]], n % 3 ? coin : '#e6b445', 0.65 + Math.cos(a) * r, 0.005, 0.5 + Math.sin(a) * r * 0.8)
+    c.rotation.set(Math.sin(n) * 0.5, 0, Math.cos(n * 1.7) * 0.5)
+    c.position.y = Math.max(0.005, 0.5 - r * 0.7)
+    g.add(c)
+  }
+  const gems = ['#e0446a', '#4a7fd9', '#3fbf8f', '#9a6ee0', '#f2f6ff', '#e0446a']
+  for (const [n, [x, y, z]] of [[0.4, 0.36, 0.66], [0.8, 0.3, 0.72], [0.52, 0.44, 0.4], [1.08, 0.2, 0.8], [0.26, 0.22, 0.36], [0.92, 0.36, 0.44]].entries()) {
+    const gem = solid(new THREE.OctahedronGeometry(0.075), gems[n], { material: toon(gems[n], { emissive: gems[n], emissiveIntensity: 0 }) })
+    gem.name = 'shade'
+    gem.scale.y = 1.4
+    gem.position.set(x, y, z)
+    gem.rotation.set(n, n * 0.7, 0)
+    g.add(gem)
+  }
+  g.add(turned([[0.13, 0], [0.13, 0.08], [0.125, 0.08], [0.125, 0.01], [0, 0.01]], GOLD, 0.6, 0.5, 0.5))
+  for (let n = 0; n < 5; n++) {
+    const a = (n / 5) * Math.PI * 2
+    g.add(ball(0.028, n % 2 ? '#e0446a' : '#f2f6ff', 0.6 + Math.cos(a) * 0.13, 0.61, 0.5 + Math.sin(a) * 0.13))
+  }
+  // An open chest on the right, full.
+  g.add(box(0.5, 0.3, 0.34, '#8a5a3c', 1.2, 0, 0.3, 0.03))
+  for (const x of [0.97, 1.43]) g.add(box(0.04, 0.31, 0.35, GOLD, x, 0, 0.3, 0.01))
+  g.add(turned([[0, 0], [0.22, 0], [0.12, 0.08], [0, 0.1]], coin, 1.2, 0.27, 0.3))
+  const lid = box(0.5, 0.06, 0.34, '#8a5a3c', 1.2, 0, 0, 0.03)
+  lid.rotation.x = -1.2
+  lid.position.set(1.2, 0.42, 0.12)
+  g.add(lid)
+  return g
+}
+
+function orb() {
+  const g = new THREE.Group()
+  const c = CELL / 2
+  g.add(turned([[0.16, 0], [0.16, 0.05], [0.07, 0.1], [0.055, 0.7], [0.12, 0.76], [0.13, 0.8], [0, 0.8]], SNOW, c, 0, c))
+  g.add(turned([[0.11, 0], [0.12, 0.04], [0.06, 0.07], [0, 0.07]], '#c9b5ee', c, 0.8, c))
+  const pearl = solid(new THREE.SphereGeometry(0.12, 28, 20), '#f3eefc', { material: toon('#f3eefc', { emissive: '#d9ccff', emissiveIntensity: 0 }) })
+  pearl.name = 'shade'
+  pearl.position.set(c, 0.98, c)
+  g.add(pearl)
+  for (const [n, turn] of [0.5, -0.4].entries()) {
+    const ring = solid(new THREE.TorusGeometry(0.19 + n * 0.03, 0.008, 6, 40), GOLD, { line: false, cast: false })
+    ring.rotation.set(Math.PI / 2 + turn, turn, 0)
+    ring.position.set(c, 0.98, c)
+    g.add(ring)
+  }
+  return g
+}
+
+function blossom() {
+  const g = new THREE.Group()
+  const c = CELL / 2
+  g.add(turned([[0, 0], [0.08, 0], [0.13, 0.12], [0.11, 0.3], [0.05, 0.38], [0.06, 0.42], [0, 0.42]], '#f4ece6', c, 0, c))
+  g.add(turned([[0.125, 0], [0.13, 0.04], [0.12, 0.06], [0, 0.06]], '#a8404f', c, 0.14, c))
+  const branch = (from: THREE.Vector3, to: THREE.Vector3, r: number) => {
+    const long = from.distanceTo(to)
+    const twig = solid(new THREE.CylinderGeometry(r * 0.6, r, long, 6), '#6b4a42', { line: false })
+    twig.position.copy(from.clone().lerp(to, 0.5))
+    twig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize())
+    g.add(twig)
+  }
+  const base = new THREE.Vector3(c, 0.4, c)
+  const tips = [
+    [c - 0.3, 1.25, c - 0.05], [c + 0.25, 1.4, c + 0.05], [c + 0.05, 1.55, c - 0.1], [c - 0.15, 1.0, c + 0.15], [c + 0.32, 1.05, c - 0.1],
+  ].map(([x, y, z]) => new THREE.Vector3(x, y, z))
+  for (const tip of tips) branch(base, tip, 0.02)
+  for (const [n, tip] of tips.entries()) {
+    for (let k = 0; k < 5; k++) {
+      const at = base.clone().lerp(tip, 0.55 + k * 0.11)
+      at.x += Math.sin(n * 3 + k) * 0.05
+      at.z += Math.cos(n * 5 + k) * 0.05
+      g.add(ball(0.045 + (k % 2) * 0.012, k % 3 ? '#f4a6b6' : '#fbd3dc', at.x, at.y, at.z))
+      if (k % 2) g.add(ball(0.014, '#e9c46a', at.x, at.y + 0.02, at.z + 0.04))
+    }
+  }
+  return g
+}
+
 const MAKE: Record<Kind, () => THREE.Group> = {
   sofa, armchair, beanbag, bench, bed, table, dining, bistro, chess, desk, easel, tv, shelf, dresser, wardrobe,
-  nightstand, counter, sink, stove, fridge, lamp, lantern, plant, planter, rug, mat,
+  nightstand, counter, sink, stove, fridge, lamp, lantern, plant, planter, rug, mat, catbed, cattree, fishpillow,
+  canopy, chaise, teacart, vanity, hoard, orb, blossom,
 }
 
 /** All of one piece in as few meshes as can be: its plain parts as one (coloured by vertex) with one outline; what

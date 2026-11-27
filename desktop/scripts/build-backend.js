@@ -9,6 +9,9 @@
 //
 // Needs uv. Nothing in it may name this machine: the installer is published (no direct_url.json, no build paths
 // in the compiled files, no launchers).
+//
+// For the system it runs on (uv fetches that system's Python): on Windows for the .exe, on a Mac with Apple
+// silicon for the .dmg. The two lay Python out differently (python.exe, Lib\ vs bin/python3, lib/python3.12/).
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -19,22 +22,26 @@ const DESKTOP = path.resolve(__dirname, '..')
 const REPO = path.resolve(DESKTOP, '..')
 const OUT = path.join(DESKTOP, 'out', 'backend')
 const WORK = path.join(DESKTOP, 'out', 'backend-work')
+const WINDOWS = process.platform === 'win32'
+const { pythonIn } = require('../src/config')
 
 // The longest path in OUT: with the install folder (installer.nsh: NEST_LONGEST) and resources/backend/ in front it
 // has to stay under Windows' 260.
 const LONGEST = 115
 
+// The standard library: Lib on Windows, lib/python3.12 elsewhere; its compiled modules are in DLLs or lib-dynload.
+const STDLIB = WINDOWS ? 'Lib' : `lib/python${PYTHON}`
+const MODULES = WINDOWS ? 'DLLs' : `${STDLIB}/lib-dynload`
 // Parts of the standard library nest never uses (tkinter and its Tcl, the tests, pip's bootstrap, …).
 const UNUSED = [
-  'Scripts',
   'include',
-  'libs',
-  'tcl',
-  'pythonw.exe',
-  ...['idlelib', 'tkinter', 'turtledemo', 'turtle.py', 'ensurepip', 'test', 'lib2to3', 'pydoc_data', 'venv'].map((n) => `Lib/${n}`),
-  ...['_tkinter.pyd', 'tcl86t.dll', 'tk86t.dll'].map((n) => `DLLs/${n}`),
-  'Lib/EXTERNALLY-MANAGED',
+  ...(WINDOWS ? ['Scripts', 'libs', 'tcl', 'pythonw.exe'] : ['share', 'lib/pkgconfig']),
+  ...['idlelib', 'tkinter', 'turtledemo', 'turtle.py', 'ensurepip', 'test', 'lib2to3', 'pydoc_data', 'venv'].map((n) => `${STDLIB}/${n}`),
+  ...(WINDOWS ? ['_tkinter.pyd', 'tcl86t.dll', 'tk86t.dll'] : []).map((n) => `${MODULES}/${n}`),
+  `${STDLIB}/EXTERNALLY-MANAGED`,
 ]
+// What may stay in bin (macOS): the interpreter. pip's and the packages' launchers name this machine's paths.
+const KEEP_IN_BIN = new Set(['python3', `python${PYTHON}`, 'python'])
 
 function run(command, args, options = {}) {
   const done = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, ...options })
@@ -56,6 +63,22 @@ function walk(dir, each) {
     } else {
       each(full, false)
     }
+  }
+}
+
+/** macOS: uv wrote where it installed Python into the library's own name and the build settings; give them
+ * back python-build-standalone's /install (nothing reads them at run time; the library is found through bin/'s
+ * python, which has it built in) and sign the library again, as changing it undid its (ad-hoc) signature. */
+function unnameMachine(installedAt, python) {
+  const lib = path.join(python, STDLIB)
+  for (const name of fs.readdirSync(lib).filter((n) => /^_sysconfigdata_.*\.py$/.test(n))) {
+    const file = path.join(lib, name)
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replaceAll(installedAt, '/install'))
+  }
+  const dylib = path.join(python, 'lib', `libpython${PYTHON}.dylib`)
+  if (fs.existsSync(dylib)) {
+    run('install_name_tool', ['-id', `@rpath/libpython${PYTHON}.dylib`, dylib])
+    run('codesign', ['--force', '--sign', '-', dylib])
   }
 }
 
@@ -84,12 +107,19 @@ function build() {
   if (!found) throw new Error(`uv 没有装好 Python ${PYTHON}`)
   const python = path.join(OUT, 'python')
   fs.renameSync(path.join(installs, found.name), python)
-  const exe = path.join(python, 'python.exe')
+  const exe = pythonIn(python)
   for (const name of UNUSED) remove(path.join(python, name))
-  for (const name of fs.readdirSync(path.join(python, 'DLLs'))) {
-    if (/^_(test|ctypes_test)/.test(name)) remove(path.join(python, 'DLLs', name))
+  for (const name of fs.readdirSync(path.join(python, MODULES))) {
+    if (/^_(test|ctypes_test|tkinter)/.test(name)) remove(path.join(python, MODULES, name))
   }
-  const site = path.join(python, 'Lib', 'site-packages')
+  if (!WINDOWS) {
+    // Tcl/Tk and its packages (tcl9, itcl4.3.8, thread3.0.6…), only for tkinter
+    for (const name of fs.readdirSync(path.join(python, 'lib'))) {
+      if (/^(lib)?(tcl|tk|itcl|thread)\d/.test(name)) remove(path.join(python, 'lib', name))
+    }
+    unnameMachine(path.join(installs, found.name), python)
+  }
+  const site = path.join(python, STDLIB, 'site-packages')
   remove(site)
   fs.mkdirSync(site, { recursive: true })
 
@@ -102,6 +132,11 @@ function build() {
   run('uv', ['pip', 'install', '-q', '--python', exe, '--no-deps', '--no-compile-bytecode', path.join(WORK, wheel)])
   remove(path.join(python, 'Scripts'))
   remove(path.join(site, 'bin'))
+  if (!WINDOWS) {
+    for (const name of fs.readdirSync(path.join(python, 'bin'))) {
+      if (!KEEP_IN_BIN.has(name)) remove(path.join(python, 'bin', name))
+    }
+  }
   walk(python, (full, dir) => {
     if (dir && path.basename(full) === '__pycache__') {
       remove(full)
@@ -111,8 +146,8 @@ function build() {
     return true
   })
   // Compiled now: the app's folder is not written to while it runs. unchecked-hash: no source times to compare
-  // (unpacking changes them). -s: the paths in tracebacks start at Lib.
-  spawnSync(exe, ['-I', '-B', '-m', 'compileall', '-q', '-f', '-j', '0', '-s', python, '--invalidation-mode', 'unchecked-hash', path.join(python, 'Lib')], {
+  // (unpacking changes them). -s: the paths in tracebacks start at the standard library's folder.
+  spawnSync(exe, ['-I', '-B', '-m', 'compileall', '-q', '-f', '-j', '0', '-s', python, '--invalidation-mode', 'unchecked-hash', path.join(python, STDLIB)], {
     stdio: 'ignore',
     windowsHide: true,
   })
@@ -139,7 +174,7 @@ function check(exe, nest) {
       'for m in pkgutil.walk_packages(nest.__path__, "nest."):\n' +
       '    if not m.name.endswith("__main__"): importlib.import_module(m.name)',
   ])
-  const here = [REPO, REPO.replaceAll('\\', '/'), REPO.replaceAll('\\', '\\\\'), process.env.USERPROFILE]
+  const here = [REPO, REPO.replaceAll('\\', '/'), REPO.replaceAll('\\', '\\\\'), process.env.USERPROFILE || process.env.HOME]
     .filter(Boolean)
     .map((text) => Buffer.from(text.toLowerCase()))
   const bad = []
@@ -147,6 +182,7 @@ function check(exe, nest) {
   let bytes = 0
   walk(OUT, (full, dir) => {
     if (dir) return true
+    if (fs.lstatSync(full).isSymbolicLink()) return true // bin/python3 -> python3.12
     if (path.relative(OUT, full).length > LONGEST) long.push(path.relative(OUT, full))
     const data = fs.readFileSync(full)
     bytes += data.length

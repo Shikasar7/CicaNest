@@ -33,7 +33,7 @@ type Use = { pose: Pose; x: number; z: number; y: number; from: Cell[]; for: Act
 
 type Furniture = {
   label: string
-  group: '坐和躺' | '桌子' | '柜子' | '厨房' | '灯和花草' | '地毯'
+  group: '坐和躺' | '桌子' | '柜子' | '厨房' | '灯和花草' | '地毯' | '猫咪' | '摆件'
   /** Cells taken along x and z while it faces the front (turn 0). */
   w: number
   d: number
@@ -147,6 +147,61 @@ export const FURNITURE = {
   planter: { label: '花槽', group: '灯和花草', w: 3, d: 1, uses: [stand(1.5, 1.6, [c(1, 1), c(2, 1), c(0, 1)], 'water')] },
   rug: { label: '大地毯', group: '地毯', w: 7, d: 6, flat: true },
   mat: { label: '小地毯', group: '地毯', w: 4, d: 3, flat: true },
+  catbed: {
+    label: '大猫窝',
+    group: '猫咪',
+    w: 4,
+    d: 4,
+    uses: [
+      { pose: 'lie', x: 2, z: 2.1, y: 0.22, from: [c(4, 2), c(-1, 2), c(2, 4), c(1, 4)], for: ['sleep'] },
+      sit(2.6, 2.6, 0.22, [c(3, 4), c(4, 3), c(2, 4)], 'read', 'tv'),
+    ],
+  },
+  cattree: {
+    label: '猫爬架',
+    group: '猫咪',
+    w: 3,
+    d: 2,
+    uses: [sit(2.3, 1, 1.03, [c(2, 2), c(3, 1), c(1, 2)], 'read', 'tea')],
+  },
+  fishpillow: {
+    label: '小鱼干抱枕',
+    group: '猫咪',
+    w: 2,
+    d: 1,
+    uses: [sit(1, 0.6, 0.2, [c(1, 1), c(0, 1), c(2, 0), c(-1, 0)], 'read', 'tv')],
+  },
+  canopy: {
+    label: '帐幔床',
+    group: '坐和躺',
+    w: 3,
+    d: 5,
+    uses: [
+      { pose: 'lie', x: 1.5, z: 1.5, y: 0.34, from: [c(3, 2), c(-1, 2), c(3, 3), c(-1, 3)], for: ['sleep'] },
+      sit(2.2, 3.9, 0.5, [c(3, 3), c(3, 4), c(2, 5), c(1, 5)], 'read'),
+    ],
+  },
+  chaise: {
+    label: '贵妃榻',
+    group: '坐和躺',
+    w: 4,
+    d: 2,
+    uses: [
+      sit(1.3, 1.2, 0.42, [c(1, 2), c(0, 2), c(-1, 1)], 'tea', 'read', 'tv'),
+      sit(2.8, 1.2, 0.42, [c(3, 2), c(2, 2), c(4, 1)], 'tea', 'read', 'tv'),
+    ],
+  },
+  teacart: { label: '茶车', group: '桌子', w: 2, d: 1, uses: [stand(1, 1.5, [c(0, 1), c(1, 1)], 'tea')] },
+  vanity: { label: '梳妆台', group: '柜子', w: 2, d: 1 },
+  hoard: { label: '宝藏堆', group: '摆件', w: 3, d: 2 },
+  orb: { label: '龙珠台', group: '摆件', w: 1, d: 1 },
+  blossom: {
+    label: '海棠花瓶',
+    group: '摆件',
+    w: 1,
+    d: 1,
+    uses: [stand(0.5, 1.6, [c(0, 1), c(1, 0), c(-1, 0)], 'water')],
+  },
 } satisfies Record<string, Furniture>
 
 export type Kind = keyof typeof FURNITURE

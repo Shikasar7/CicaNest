@@ -18,6 +18,9 @@ const MAX_HOPS = 5
 const MAX_TEXT = 2 * 1024 * 1024 // an answer that is read as text
 const MAX_INSTALLER = 600 * 1024 * 1024
 const INSTALLER = /^nest-setup-(\d+\.\d+\.\d+)\.exe$/
+// What a new version is downloaded as here: Windows' installer, or (macOS) the disk image to drag in.
+const MAC = process.platform === 'darwin'
+const installerName = (version) => (MAC ? `nest-${version}-arm64.dmg` : `nest-setup-${version}.exe`)
 const PENDING = 'installing.json'
 const PENDING_FOR = 15 * 60_000 // an installer that takes longer than this is not waited for
 
@@ -93,10 +96,10 @@ function offer(release, current, source) {
     }
     return { name, url, size: Number(asset.size), digest: /^sha256:([0-9a-f]{64})$/i.exec(asset.digest ?? '')?.[1].toLowerCase() ?? '' }
   }
-  const installer = named(`nest-setup-${version}.exe`)
+  const installer = named(installerName(version))
   const page = String(release.html_url ?? '')
   const found = { version, notes: plainNotes(release.body), page: allowed(source, page) ? page : '' }
-  if (!installer) throw Object.assign(new UpdateError(`有新版本 ${version}，但发布页上没有它的 Windows 安装包。`), { found })
+  if (!installer) throw Object.assign(new UpdateError(`有新版本 ${version}，但发布页上没有它的${MAC ? ' Mac ' : ' Windows '}安装包。`), { found })
   if (!(installer.size > 0 && installer.size <= MAX_INSTALLER)) {
     throw Object.assign(new UpdateError(`有新版本 ${version}，但它的安装包大小不对。`), { found })
   }

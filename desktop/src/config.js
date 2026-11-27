@@ -18,7 +18,7 @@
 // NEST_HOME   the nest folder (default: the folder that contains desktop/);
 //             any other folder is a test copy and is labelled 「测试副本」 wherever the app shows itself
 // NEST_PORT   the console port (default: NEST_PORT in <home>\.env, else 18800)
-// NEST_PYTHON the Python that runs nest (default: <home>\.venv\Scripts\python.exe, else the bundled one)
+// NEST_PYTHON the Python that runs nest (default: the one in <home>\.venv, else the bundled one)
 // NEST_REMOTE_URL  a nest elsewhere, e.g. http://My-Mac.local:18800 (overrides connection.json)
 // NEST_DESKTOP_PROFILE  a separate Electron profile folder (window size, single-instance lock); for testing
 // NEST_PETS_DIR    the 桌宠 sprite packs (default: <profile>\pets)
@@ -77,10 +77,17 @@ function readConnection(file) {
 
 const DEFAULT_HOME = path.resolve(__dirname, '..', '..')
 
+/** A Python's program in its folder (a standalone one, or a venv): Windows keeps it at the top or in Scripts,
+ * macOS in bin. */
+function pythonIn(folder, { venv = false, platform = process.platform } = {}) {
+  if (platform === 'win32') return venv ? path.join(folder, 'Scripts', 'python.exe') : path.join(folder, 'python.exe')
+  return path.join(folder, 'bin', venv ? 'python' : 'python3')
+}
+
 /** The nest an installed app brings (its resources folder), null when it was built without one. */
-function bundledBackend(resources) {
+function bundledBackend(resources, platform = process.platform) {
   const folder = path.join(resources, 'backend')
-  const python = path.join(folder, 'python', 'python.exe')
+  const python = pythonIn(path.join(folder, 'python'), { platform })
   return fs.existsSync(python) ? { folder, python, web: path.join(folder, 'web') } : null
 }
 
@@ -96,7 +103,7 @@ function loadConfig(env = process.env, connection = {}, installed = null, bundle
   // Another way to the same nest (Tailscale first, the home network second, say): tried when the first does
   // not answer at start.
   const other = remote && !fromEnv ? remoteOrigin(connection.other) : null
-  const ownPython = path.join(home, '.venv', 'Scripts', 'python.exe')
+  const ownPython = pythonIn(path.join(home, '.venv'), { venv: true })
   const brought = Boolean(bundled) && !env.NEST_PYTHON && !fs.existsSync(ownPython)
   const chosen = Boolean(env.NEST_HOME) || (connection.mode === 'local' && brought)
   return Object.freeze({
@@ -121,4 +128,4 @@ function loadConfig(env = process.env, connection = {}, installed = null, bundle
   })
 }
 
-module.exports = { loadConfig, readConnection, remoteOrigin, portFromDotenv, bundledBackend, DEFAULT_PORT }
+module.exports = { loadConfig, readConnection, remoteOrigin, portFromDotenv, bundledBackend, pythonIn, DEFAULT_PORT }

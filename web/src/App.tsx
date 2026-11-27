@@ -34,7 +34,7 @@ import { Segmented, type SegmentedOption } from '@/components/Segmented'
 import { SignIn } from '@/components/SignIn'
 import { StatusDot, type Tone } from '@/components/StatusDot'
 import { sendJson, type Bot } from '@/lib/api'
-import { chatView, desktop, openChatWindow, openConsole } from '@/lib/desktop'
+import { captionRoom, chatView, desktop, openChatWindow, openConsole } from '@/lib/desktop'
 import { cn } from '@/lib/utils'
 import { LiveProvider, useBots, useLive, type LiveState } from '@/lib/live'
 import { useLiveData } from '@/lib/live-data'
@@ -288,7 +288,7 @@ function ChatWindow() {
     <div className="flex h-svh flex-col overflow-hidden bg-surface">
       <header
         className="drag-region flex h-10 shrink-0 items-center gap-2 px-4"
-        style={desktop ? { paddingRight: desktop.captionWidth + 12 } : undefined}
+        style={captionRoom(12)}
       >
         <NestMark className="size-5" />
         <span className="text-sm font-medium">聊天</span>
@@ -328,7 +328,14 @@ function Shell() {
   return (
     <div className="flex h-svh overflow-hidden">
       <aside className="hidden w-52 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
-        <div className="drag-region flex h-14 items-center gap-2.5 px-4">
+        {/* macOS: the window's lights get a strip of their own above the brand. */}
+        {desktop?.captionSide === 'left' && <div className="drag-region h-10 shrink-0" />}
+        <div
+          className={cn(
+            'drag-region flex items-center gap-2.5 px-4',
+            desktop?.captionSide === 'left' ? 'h-12 pb-1' : 'h-14',
+          )}
+        >
           <NestMark />
           <span className="text-[15px] font-semibold tracking-tight">nest</span>
         </div>
@@ -355,7 +362,7 @@ function Shell() {
         </div>
         <header
           className="drag-region flex h-14 shrink-0 items-center gap-4 px-6 md:px-8"
-          style={desktop ? { paddingRight: desktop.captionWidth + 16 } : undefined}
+          style={desktop?.captionSide === 'left' ? undefined : captionRoom(16)}
         >
           <h1 className="text-lg font-semibold tracking-tight">{page.label}</h1>
           {page.hash === '#/chat' && (

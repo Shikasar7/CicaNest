@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 /** A companion's desktop pet (its default skin): sheets of frames side by side, as data URLs. */
 export type PetSprite = {
   rendering: 'smooth' | 'pixel'
@@ -44,7 +46,11 @@ export type NestDesktop = {
   /** "chat": the app's chat window, drawn without the console's navigation. */
   view?: 'console' | 'chat'
   titleBarHeight: number
+  /** How wide the window's own buttons are, and on which side (macOS: left; absent on an app from before it). */
   captionWidth: number
+  captionSide?: 'left' | 'right'
+  /** The app's system: win32 or darwin (absent on an app from before the Mac one: Windows). */
+  platform?: string
   restartNest(): Promise<void>
   openLogsFolder(): Promise<void>
   openDataFolder(): Promise<void>
@@ -87,6 +93,14 @@ declare global {
 }
 
 export const desktop: NestDesktop | undefined = typeof window === 'undefined' ? undefined : window.nestDesktop
+
+/** Room for the window's own buttons in a strip at the top: `gap` more than they take, on their side. */
+export function captionRoom(gap: number): CSSProperties | undefined {
+  if (!desktop) return undefined
+  return desktop.captionSide === 'left'
+    ? { paddingLeft: desktop.captionWidth + gap }
+    : { paddingRight: desktop.captionWidth + gap }
+}
 
 /** The chat window of the desktop app (or a browser opened at ?view=chat): only the chat, full height. */
 export const chatView: boolean =

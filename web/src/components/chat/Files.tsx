@@ -261,7 +261,7 @@ function Reach({ access }: { access: Access }) {
       </div>
     )
   }
-  if (!desktop) return null
+  if (!desktop || (desktop.platform ?? 'win32') !== 'win32') return null // 电脑上做事: Windows only
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border p-3 text-xs text-muted-foreground">
       {access.windows ? (

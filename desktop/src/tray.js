@@ -9,6 +9,8 @@ const { Tray, Menu, nativeImage } = require('electron')
 const POLL_MS = 10_000
 const ICON_DIR = path.join(__dirname, '..', 'assets', 'icons')
 const KINDS = ['ok', 'starting', 'attention', 'down']
+// Windows takes the .ico (all its sizes); macOS reads PNGs (tray-ok.png, picking tray-ok@2x.png on Retina).
+const ICON_TYPE = process.platform === 'win32' ? 'ico' : 'png'
 
 const isOnline = (account) => account?.status?.state === 'connected'
 
@@ -55,7 +57,7 @@ class TrayController {
 
   start() {
     this.icons = Object.fromEntries(
-      KINDS.map((kind) => [kind, nativeImage.createFromPath(path.join(ICON_DIR, `tray-${kind}.ico`))]),
+      KINDS.map((kind) => [kind, nativeImage.createFromPath(path.join(ICON_DIR, `tray-${kind}.${ICON_TYPE}`))]),
     )
     this.tray = new Tray(this.icons.starting)
     this.tray.on('click', () => this.actions.openChat())
@@ -228,10 +230,15 @@ class TrayController {
         checked: autostart,
         click: (item) => this.actions.setAutostart(item.checked),
       },
-      {
-        label: `电脑上做事${EXECUTOR_STATE[executor] ? `（${EXECUTOR_STATE[executor]}）` : ''}…`,
-        click: () => this.actions.openExecutor?.(),
-      },
+      // 电脑上做事 is Windows' only (its tools are PowerShell and drive-letter paths).
+      ...(this.actions.openExecutor
+        ? [
+            {
+              label: `电脑上做事${EXECUTOR_STATE[executor] ? `（${EXECUTOR_STATE[executor]}）` : ''}…`,
+              click: () => this.actions.openExecutor(),
+            },
+          ]
+        : []),
       { label: '连接设置…', click: () => this.actions.openConnection() },
       { label: '打开日志文件夹', click: () => this.actions.openLogs() },
       ...(update ? [{ ...update, click: () => this.actions.update() }] : []),
