@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { getJson, type GameView } from '@/lib/api'
+import { getJson, type GameKind, type GameView } from '@/lib/api'
 import { useSubscribe } from '@/lib/live'
 
 const newer = (a: GameView | null, b: GameView) =>
@@ -34,4 +34,17 @@ export function useGame(botId: string) {
     [subscribe, botId, take],
   )
   return { game, loaded, take }
+}
+
+/** 她邀请你玩: the card she sends in the chat ([一起玩：五子棋] in her answer, nest.core.games). */
+export type Invite = { kind: GameKind; mode: 'you' | 'her'; name: string }
+
+const KINDS: readonly GameKind[] = ['gomoku', 'reversi', 'soup', 'draw']
+
+export function inviteOf(segments: { type: string; data: Record<string, unknown> }[]): Invite | null {
+  const found = segments.find((s) => s.type === 'game')
+  const kind = found?.data.kind as GameKind | undefined
+  if (!found || !kind || !KINDS.includes(kind)) return null
+  const mode = found.data.mode === 'her' ? 'her' : 'you'
+  return { kind, mode, name: String(found.data.name || kind) }
 }

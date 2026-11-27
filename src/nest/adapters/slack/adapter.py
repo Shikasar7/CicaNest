@@ -73,7 +73,7 @@ SEND_WINDOW = 20.0
 NAMES_KEPT = 5000
 THREADS_KEPT = 4096
 NAME_AGE = 24 * 3600.0
-NO_SOCKET_MODE = "这个 Slack 应用没有打开 Socket Mode：打开以后，到「系统」页保存一次连接设置"
+NO_SOCKET_MODE = "这个 Slack 应用没有打开 Socket Mode：打开以后，到「平台接入」页保存一次连接设置"
 
 
 class Wrong(Exception):
@@ -313,7 +313,7 @@ class SlackAdapter:
                 self._status.set("misconfigured", str(exc))
                 return
             except Unauthorized:
-                self._status.set("auth_failed", "Slack 不认这两个 Token：到「系统」页填新的")
+                self._status.set("auth_failed", "Slack 不认这两个 Token：到「平台接入」页填新的")
                 return
             except MissingScope as exc:
                 self._status.set("misconfigured", f"{self._api.clean(str(exc))}；加上以后重新安装应用")

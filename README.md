@@ -37,7 +37,7 @@
 
 <img src="docs/images/stickers.webp" alt="三花的表情包：打招呼、犯困、得意">
 
-**替你做事**：查资料、写文件、设提醒、定时任务，每一步都看得到。命令默认在她自己的 Docker 容器里跑；装了桌面端，还能在你的 Windows 上读写你授权的文件夹、跑命令：动手之前先问你，哪些能自动做由你在那台电脑上定。
+**替你做事**：查资料、写文件、设提醒、定时任务，每一步都看得到。命令默认在她自己的 Docker 容器里跑。要她直接读写你的文件，不用一个个发给她：在聊天页的「文件」里把文件夹共享给她，只能看或能改，改之前留一份旧版本。装了 Windows 桌面端，还能在你授权的文件夹里读写、跑命令：动手之前先问你，哪些文件夹改了不用问由你在那台电脑上定。这些都要模型能调用工具：OpenAI 兼容接口的模型在「模型」页打开「工具调用」。
 
 <img src="docs/images/tasks.webp" alt="一个任务的每一步：翻回忆、联网搜索、写文件，最后是她的汇报">
 
@@ -124,11 +124,14 @@ nest 跑在常开的另一台电脑上，Windows 只当聊天窗口和桌宠：
 
 | 平台 | 怎么接 |
 | --- | --- |
-| QQ | NapCat（OneBot 11）。一个号一个 Docker 容器，控制台里建容器、扫码 |
+| QQ | OneBot 11 协议端（NapCat 这类）。nest 能给每个号建一个 NapCat 容器、在控制台扫码，也能接你自己运行的协议端 |
 | Discord、Telegram、Slack | 填官方 Bot 的 Token，支持代理 |
 | 企业微信 | 智能机器人，填 BotID 和 Secret |
 
 在控制台「伙伴」页点「添伙伴」，选「从号开始加」。桌面上的伙伴也能在她的「接入」里接一个平台，聊天和记忆跟着过去。接好的号在「平台接入」页看连接和在线情况。
+
+> [!NOTE]
+> NapCat 在 2026 年 11 月停止了维护，官方镜像 `mlikiowa/napcat-docker` 已经从 Docker Hub 下架，nest 不自带它。已经有这个镜像的电脑照常能用；新电脑要先自己弄到一个 NapCat 镜像（比如在有它的电脑上 `docker save`，再到这台 `docker load`），在控制台「平台接入」页的「QQ 容器的镜像」里填它的名字。也可以自己运行任何一个 OneBot 11 协议端，在「伙伴」页加号时选「接我自己运行的协议端」，填它的 HTTP 地址、正向 WebSocket 地址和令牌。
 
 模型支持 OpenAI 兼容接口（Chat Completions、Responses）、Anthropic、Gemini（Gemini API 和 Vertex AI），以及 ChatGPT 的 Codex 订阅。每个 bot 可以再设一个备用模型。
 

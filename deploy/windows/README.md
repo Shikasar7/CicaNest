@@ -43,10 +43,15 @@ npm run shortcuts   # 在桌面和开始菜单放「nest」快捷方式
 
 ## 三、接 QQ（Docker Desktop + NapCat）
 
+> [!NOTE]
+> NapCat 在 2026 年 11 月停止了维护，官方镜像 `mlikiowa/napcat-docker` 已经从 Docker Hub 下架，nest 不自带它。已经有这个镜像的电脑照常能用；新电脑要先自己弄到一个 NapCat 镜像（比如在有它的电脑上 `docker save`，再到这台 `docker load`），在控制台「平台接入」页的「QQ 容器的镜像」里填它的名字。也可以自己运行任何一个 OneBot 11 协议端，在「伙伴」页加号时选「接我自己运行的协议端」，填它的 HTTP 地址、正向 WebSocket 地址和令牌。
+
 1. 装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（用 WSL 2 后端），在它的设置里打开「登录 Windows 时启动」。
-2. 在控制台「模型」页加一个模型，再到「Bot」页点「增加 bot」，选 QQ，填名字和 QQ 号。nest 会自己建容器 `napcat-<QQ号>`，QQ 的登录和缓存放在 nest 文件夹旁边的 `qq` 文件夹里（安装包是 `%APPDATA%\nest\qq`）。
-3. 在「系统」页那个容器点「扫码登录」，用这个号的手机 QQ 扫码。之后容器或电脑重启，QQ 会自己登录。
-4. 「系统」页「位置和网络」的运行方式是「Docker 容器」（默认）。
+2. 在控制台「模型」页加一个模型，再到「伙伴」页点「添伙伴」→「从号开始加」，选 QQ 和「nest 建 QQ 容器」，填名字和 QQ 号。nest 会自己建容器 `napcat-<QQ号>`，QQ 的登录和缓存放在 nest 文件夹旁边的 `qq` 文件夹里（安装包是 `%APPDATA%\nest\qq`）。
+3. 加好以后会直接显示二维码；之后也可以在「平台接入」页那个容器点「扫码登录」。用这个号的手机 QQ 扫码，之后容器或电脑重启，QQ 会自己登录。
+4. 「平台接入」页「QQ 的运行方式」里是「Docker 容器（NapCat）」（默认），「QQ 容器的镜像」是这台电脑上有的 NapCat 镜像。
+
+不想装 Docker：自己运行一个 OneBot 11 协议端，加号时选「接我自己运行的协议端」，填它的地址和令牌。
 
 想自己写 compose 管容器，参照 [deploy/mac/docker-compose.example.yml](../mac/docker-compose.example.yml)，写法在 Windows 上也一样。
 

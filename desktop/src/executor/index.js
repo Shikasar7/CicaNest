@@ -51,7 +51,7 @@ class Executor {
   /**
    * api(method, path, body, { timeout }) -> { status, json }: nest's API, signed in.
    * ask(data) -> 'once' | 'kind' | 'deny' | 'busy': the confirm window.
-   * settings() -> { enabled, allowAll, openForbidden, folders: [{ path, readOnly }], key }.
+   * settings() -> { enabled, allowAll, openForbidden, folders: [{ path, readOnly, freeChange }], key }.
    * extraForbidden: more folders nothing may touch (this app's data, a local nest's).
    * system: what needs Electron — trash(path), open({ path } | { url }) -> error text or ''.
    * stepsFile: where the steps taken are kept across restarts (none: kept in memory only).
@@ -165,7 +165,12 @@ class Executor {
 
   async report() {
     const settings = this.settings()
-    const folders = settings.folders.map((f) => ({ path: f.path, read_only: Boolean(f.readOnly) }))
+    // free_change only when on: a nest from before it refuses a field it does not know.
+    const folders = settings.folders.map((f) => ({
+      path: f.path,
+      read_only: Boolean(f.readOnly),
+      ...(!f.readOnly && f.freeChange === true ? { free_change: true } : {}),
+    }))
     try {
       await this.api('PUT', '/api/executor/folders', {
         device: this.device,

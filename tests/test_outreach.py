@@ -9,6 +9,7 @@ from typing import Any
 from nest.core.events import Segment
 from nest.core.life import today_key
 from nest.core.outreach import OutreachConfig, OutreachKeeper, from_outreach
+from tests.helpers import eventually
 from tests.test_bot_settings_api import PONY, WHALE, World, world  # noqa: F401 (fixture)
 from tests.test_desk import private_chat
 
@@ -176,9 +177,20 @@ async def test_she_asks_about_what_you_told_her_and_invites_you_to_play(world: W
     await on_the_clock(world, clock.at)
     clock.at += 120
     outreach.chance = lambda: 0.0  # the dice say: let us play
-    model.queue("好无聊呀，来玩成语接龙吗？")
+    model.queue("好无聊呀，来下五子棋吗？[一起玩：五子棋]")
     assert await outreach.tick() == 1
     assert "成语接龙" in model.requests[-1][1].content
+
+    # A game of 「一起玩」 comes as a card after her words, which it is taken out of.
+    async def card() -> list[dict[str, Any]] | None:
+        rows = (await world.http.get(f"/api/channels/{chat}/messages")).json()
+        return rows[-2:] if rows[-1]["text"] == "[邀请你一起玩五子棋]" else None
+
+    said = await eventually(card)
+    assert said[0]["text"] == "好无聊呀，来下五子棋吗？"
+    assert said[1]["segments"] == [
+        {"type": "game", "data": {"kind": "gomoku", "mode": "you", "name": "五子棋"}}
+    ]
 
     # The rules come with her prompt once a game is being talked about.
     assert games_hint([{"text": "来玩成语接龙吧"}]).startswith("（要是你们在玩小游戏")

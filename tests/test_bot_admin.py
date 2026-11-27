@@ -10,11 +10,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 
 from nest import docker, napcat
+from nest.adapters.onebot11 import probe
 from nest.app import create_app
 from nest.config import Settings
 from nest.secrets import SecretStore
@@ -102,7 +104,7 @@ async def test_a_bot_is_added_with_its_own_container(
     assert response.json() == {"bot_id": "qq:123456789", "container": "napcat-123456789"}
 
     [args] = box.created
-    assert args[:2] == ["run", "-d"] and args[-1] == napcat.IMAGE
+    assert args[:2] == ["run", "-d"] and args[-1] == napcat.DEFAULT_IMAGE
     assert args[args.index("--hostname") + 1] == "napcat-123456789"
     assert args[args.index("--mac-address") + 1] == napcat.mac_for("123456789")
     ports = [args[n + 1] for n, a in enumerate(args) if a == "-p"]
@@ -205,3 +207,112 @@ def test_the_console_can_live_apart_from_the_data(tmp_path: Path) -> None:
     built = tmp_path / "image" / "dist"
     assert Settings(home=tmp_path, _env_file=None).web_dist == tmp_path / "web" / "dist"
     assert Settings(home=tmp_path, web_dist_dir=built, _env_file=None).web_dist == built
+
+
+# -- the image, and QQ on an endpoint someone runs ------------------------------------------------------
+
+
+async def test_new_containers_use_the_image_set_on_the_platform_page(
+    http: httpx.AsyncClient, box: FakeDocker
+) -> None:
+    system = (await http.get("/api/system")).json()
+    assert (system["qq"]["napcat_image"], system["qq"]["napcat_image_default"]) == (
+        napcat.DEFAULT_IMAGE,
+        True,
+    )
+    bad = await http.patch("/api/system/settings", json={"napcat_image": "Napcat; rm -rf /"})
+    assert bad.status_code == 422
+    mine = "registry.local:5000/me/napcat:4.18.4"
+    system = (await http.patch("/api/system/settings", json={"napcat_image": f" {mine} "})).json()
+    assert (system["qq"]["napcat_image"], system["qq"]["napcat_image_default"]) == (mine, False)
+    assert (await http.post("/api/bots", json={"name": "小海豚", "self_id": "123456789"})).status_code == 201
+    assert box.created[0][-1] == mine
+    system = (await http.patch("/api/system/settings", json={"napcat_image": ""})).json()
+    assert system["qq"]["napcat_image"] == napcat.DEFAULT_IMAGE  # empty: back to the default
+
+
+async def test_an_image_docker_cannot_get_says_what_to_do(
+    http: httpx.AsyncClient, box: FakeDocker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def gone(args: list[str]) -> None:
+        raise docker.ImageMissing("docker 出错：Error response from daemon: pull access denied")
+
+    monkeypatch.setattr(docker, "create", gone)
+    response = await http.post("/api/bots", json={"name": "小海豚", "self_id": "123456789"})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert napcat.DEFAULT_IMAGE in detail and "下架" in detail and "接我自己运行的协议端" in detail
+    assert (await http.get("/api/bots")).json() == []
+
+
+@pytest.fixture
+def endpoint(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """The protocol program someone runs: what nest asked it, and what it answers."""
+    seen: dict[str, Any] = {"http": [], "ws": [], "login": "123456789"}
+
+    async def check_http(url: str, token: str, *, self_id: str, transport: Any = None) -> probe.Result:
+        seen["http"].append((url, token, self_id))
+        if seen["login"] != self_id:
+            return probe.Result(False, f"这个地址登录的是 QQ {seen['login']}，不是 {self_id}")
+        return probe.Result(True, "连上了")
+
+    async def check_ws(url: str, token: str) -> probe.Result:
+        seen["ws"].append((url, token))
+        return probe.Result(True, "WebSocket 连上了")
+
+    monkeypatch.setattr(probe, "check_http", check_http)
+    monkeypatch.setattr(probe, "check_ws", check_ws)
+    return seen
+
+
+OWN = {"http_url": "http://192.168.1.20:3000/", "ws_url": "ws://192.168.1.20:3001", "token": " t0ken "}
+
+
+async def test_a_qq_bot_can_use_a_protocol_program_someone_runs(
+    http: httpx.AsyncClient, box: FakeDocker, endpoint: dict[str, Any], tmp_path: Path
+) -> None:
+    # whichever way QQ is set to run: this does not need nest's containers
+    assert (await http.patch("/api/system/settings", json={"snowluma_mode": "program"})).status_code == 200
+    body = {"name": "小海豚", "self_id": "123456789", "onebot": OWN}
+    response = await http.post("/api/bots", json=body)
+    assert response.status_code == 201, response.text
+    assert response.json() == {"bot_id": "qq:123456789", "container": None}
+    assert box.created == []
+    assert endpoint["http"] == [("http://192.168.1.20:3000", "t0ken", "123456789")]
+    assert endpoint["ws"] == [("ws://192.168.1.20:3001", "t0ken")]
+    [conn] = (await http.get("/api/accounts/connections")).json()
+    assert (conn["http_url"], conn["ws_url"], conn["http_token"], conn["ws_token"]) == (
+        "http://192.168.1.20:3000",
+        "ws://192.168.1.20:3001",
+        True,
+        True,
+    )
+    secrets = env_file(tmp_path)
+    assert secrets.get("NEST_QQ_123456789_HTTP_TOKEN") == secrets.get("NEST_QQ_123456789_WS_TOKEN") == "t0ken"
+    [bot] = (await http.get("/api/bots")).json()
+    assert (bot["name"], bot["mode"]) == ("小海豚", "observe")
+
+
+async def test_a_protocol_program_that_does_not_answer_for_the_number_is_not_kept(
+    http: httpx.AsyncClient, endpoint: dict[str, Any]
+) -> None:
+    endpoint["login"] = "987654321"
+    response = await http.post("/api/bots", json={"name": "小海豚", "self_id": "123456789", "onebot": OWN})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "HTTP：这个地址登录的是 QQ 987654321，不是 123456789"
+    assert (await http.get("/api/bots")).json() == []
+    wrong = {**OWN, "http_url": "ftp://192.168.1.20"}
+    response = await http.post("/api/bots", json={"name": "小海豚", "self_id": "123456789", "onebot": wrong})
+    assert response.status_code == 422
+
+
+async def test_removing_it_leaves_a_container_nest_does_not_list(
+    http: httpx.AsyncClient, box: FakeDocker, endpoint: dict[str, Any]
+) -> None:
+    # someone's own NapCat container for the same number, not one nest made or was told about
+    box.boxes["my-napcat"] = replace(WHALE, account="123456789")
+    body = {"name": "小海豚", "self_id": "123456789", "onebot": OWN}
+    assert (await http.post("/api/bots", json=body)).status_code == 201
+    response = await http.delete("/api/bots/qq:123456789")
+    assert response.json() == {"ok": True, "container": None, "problem": ""}
+    assert box.removed == [] and "my-napcat" in box.boxes

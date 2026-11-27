@@ -59,7 +59,7 @@ PER_MINUTE, PER_HOUR = 30, 1000  # per conversation, replies and pushes together
 RETRY_CODES = (-1, 45009, 45033)  # busy or too fast: try again later
 KICKED = (
     "这个企业微信机器人在别处连上了，nest 这边被顶了下来，没有再连：两边抢会一直互相踢。"
-    "确认只有一处在用这个 BotID 后，到「系统」页保存一次连接设置"
+    "确认只有一处在用这个 BotID 后，到「平台接入」页保存一次连接设置"
 )
 
 

@@ -35,6 +35,7 @@ class Folder(BaseModel):
 
     path: str = Field(max_length=400)
     read_only: bool = False
+    free_change: bool = False  # 改不用问: she changes files there without the user's nod
 
 
 class Folders(BaseModel):

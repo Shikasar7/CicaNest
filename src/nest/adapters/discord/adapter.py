@@ -265,7 +265,7 @@ class DiscordAdapter:
                 self._status.set(exc.state, exc.detail)  # type: ignore[arg-type]
                 return
             except Unauthorized:
-                self._status.set("auth_failed", "Discord 不认这个 Token：到「系统」页填新的")
+                self._status.set("auth_failed", "Discord 不认这个 Token：到「平台接入」页填新的")
                 return
             except (Dropped, DiscordError) as exc:
                 detail = self._said(exc)

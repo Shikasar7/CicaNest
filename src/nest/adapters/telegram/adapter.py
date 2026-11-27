@@ -256,7 +256,7 @@ class TelegramAdapter:
                 self._status.set("misconfigured", str(exc))
                 return
             except Unauthorized:
-                self._status.set("auth_failed", "Telegram 不认这个 Token：到「系统」页填新的")
+                self._status.set("auth_failed", "Telegram 不认这个 Token：到「平台接入」页填新的")
                 return
             except TelegramError as exc:
                 detail = scrub(str(exc), self._token)

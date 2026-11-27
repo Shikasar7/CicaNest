@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -49,6 +50,31 @@ LEVELS = ("easy", "normal", "hard")
 LEVEL_NAMES = {"easy": "轻松", "normal": "认真", "hard": "全力"}
 COLOR_NAMES = {BLACK: "黑子", WHITE: "白子"}
 KIND = "g:"  # her lines in a game: "app:g:…" (not answers: no 重说)
+# 她邀请你玩: [一起玩：五子棋] in her answer in the desk chat becomes a card there; a tap starts the game.
+INVITE_MARK = re.compile(r"\[\s*一起玩\s*[:：]\s*([^\]\n]{1,12})\]")
+INVITES = {  # what she may write → (kind, mode)
+    "五子棋": ("gomoku", "you"),
+    "黑白棋": ("reversi", "you"),
+    "翻转棋": ("reversi", "you"),
+    "海龟汤": ("soup", "you"),
+    "你画我猜": ("draw", "you"),
+    "我画你猜": ("draw", "her"),
+    "她画你猜": ("draw", "her"),
+}
+INVITE_NAMES = {
+    "gomoku": "五子棋",
+    "reversi": "黑白棋",
+    "soup": "海龟汤",
+    "draw": "你画我猜",
+    "draw:her": "她画你猜",
+}
+INVITE_HINT = (
+    "你们可以在聊天页的「一起玩」里玩：五子棋、黑白棋、海龟汤（你出题）、"
+    "你画我猜（对方画你猜）、我画你猜（你画对方猜）。"
+    "那里有棋盘和画板，比在聊天里用文字下棋、报坐标好玩得多。你想和对方玩、或者对方说想玩这些的时候，"
+    "不要在聊天里用文字下棋或出题，在回复最后写 [一起玩：五子棋]（换成要玩的那个），"
+    "对方会收到一张邀请卡片，点一下就开始。正在一起玩的时候不用再发。"
+)
 THINK = (0.7, 1.8)  # seconds she 「想」 before a move
 REACT_GAP = 20.0  # seconds between two lines of hers in the middle of a game
 REACT_CHANCE = 0.6  # something notable on the board gets a line this often
@@ -926,6 +952,16 @@ class GameKeeper:
 
     # -- what she says ---------------------------------------------------------------------------------
 
+    async def invite(self, bot: BotConfig, chat: BotChannel, kind: str, mode: str = "you") -> None:
+        """她邀请你玩: a card in her chat with the user; it starts nothing until it is tapped."""
+        desk = self.brain.desk
+        if desk is None or kind not in KINDS:
+            return
+        name = invite_name(kind, mode)
+        card = Segment("game", {"kind": kind, "mode": mode, "name": name})
+        live = self.brain.bots.get(bot.id) or bot
+        await desk.deliver(live, chat, [card], kind=KIND)
+
     def _talk(
         self, bot: BotConfig, chat: BotChannel, game_id: int, moment: str, *, final: bool = False, **what: Any
     ) -> None:
@@ -1099,3 +1135,18 @@ class GameKeeper:
                 record=record_line(await self.store.record(bot_id, kind), kind),
             )
         return ""
+
+
+def split_invite(raw: str) -> tuple[str, dict[str, str] | None]:
+    """(her answer without the 一起玩 mark, the game she invites to as {"kind", "mode"}, or None). A mark
+    naming no game we have is only taken out."""
+    found = INVITE_MARK.search(raw)
+    if found is None:
+        return raw, None
+    rest = (raw[: found.start()] + raw[found.end() :]).strip()
+    game = INVITES.get("".join(found.group(1).split()))
+    return rest, ({"kind": game[0], "mode": game[1]} if game else None)
+
+
+def invite_name(kind: str, mode: str = "you") -> str:
+    return INVITE_NAMES.get(f"{kind}:{mode}", INVITE_NAMES.get(kind, kind))

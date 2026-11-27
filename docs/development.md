@@ -9,7 +9,7 @@
 | 后端 | Python 3.12，asyncio，FastAPI + uvicorn，SQLite（aiosqlite，编号迁移），httpx，pydantic；uv 管依赖，ruff 检查，pytest 测试（全部离线：假 OneBot、假 Discord、假 Telegram、假 Slack、假企业微信、假模型） |
 | 控制台 | React + TypeScript + Vite + Tailwind + shadcn/ui，构建后由后端直接提供 |
 | 桌面外壳 | Electron（Windows 托盘和启动器，可选） |
-| QQ | OneBot 11（HTTP + 正向 WebSocket），断线自动重连并补收消息；一个号一个 NapCat Docker 容器，控制台能建容器、扫码、重启 |
+| QQ | OneBot 11（HTTP + 正向 WebSocket），断线自动重连并补收消息；一个号一个 NapCat Docker 容器（镜像在控制台设），控制台能建容器、扫码、重启；也能接自己运行的协议端 |
 | Discord | 自己写的 Gateway + REST 客户端（httpx、websockets），支持代理 |
 | Telegram | 自己写的 Bot API 客户端（httpx，长轮询），支持代理 |
 | Slack | 自己写的 Socket Mode + Web API 客户端（websockets、httpx），支持代理 |

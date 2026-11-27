@@ -42,7 +42,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from nest import docker
-from nest.core.workspace import Workspace, folder_name
+from nest.core.workspace import SHARED, Shared, Workspace, folder_name
 from nest.proc import NO_WINDOW
 
 log = logging.getLogger(__name__)
@@ -238,8 +238,17 @@ def _container_args(
     ]
 
 
-def run_args(bot_id: str, folder: Path, *, online: bool) -> list[str]:
-    """`docker run` for her container: only her folder."""
+def shared_stamp(shared: tuple[Shared, ...]) -> str:
+    """Which folders are shared with her, in a label: a container made with others is made again."""
+    if not shared:
+        return ""
+    text = "\n".join(f"{s.name}\t{s.path}" for s in shared)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def run_args(bot_id: str, folder: Path, *, online: bool, shared: tuple[Shared, ...] = ()) -> list[str]:
+    """`docker run` for her container: her folder, and the folders shared with her read-only (only her
+    file tools change those, keeping the old version: nest.core.workspace)."""
     return _container_args(
         container_name(bot_id),
         bot_id,
@@ -249,8 +258,12 @@ def run_args(bot_id: str, folder: Path, *, online: bool) -> list[str]:
             "npm_config_prefix": "/work/.local",
             "PATH": "/work/.local/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         },
-        labels={"nest.workspace": VERSION, "nest.online": str(int(online))},
-        mounts=[f"{folder}:/work"],
+        labels={
+            "nest.workspace": VERSION,
+            "nest.online": str(int(online)),
+            "nest.shared": shared_stamp(shared),
+        },
+        mounts=[f"{folder}:/work", *(f"{s.path}:/work/{SHARED}/{s.name}:ro" for s in shared)],
         workdir="/work",
     )
 
@@ -537,11 +550,17 @@ class Sandbox:
         name = container_name(bot_id)
         online = await self.is_online(bot_id)
 
+        shared = await asyncio.to_thread(self.workspace.shared, bot_id)
+
         async def make() -> list[str]:
             folder = await asyncio.to_thread(self.workspace.folder, bot_id)
-            return run_args(bot_id, folder.resolve(), online=online)
+            return run_args(bot_id, folder.resolve(), online=online, shared=shared)
 
-        wanted = {"nest.workspace": VERSION, "nest.online": str(int(online))}
+        wanted = {
+            "nest.workspace": VERSION,
+            "nest.online": str(int(online)),
+            "nest.shared": shared_stamp(shared),
+        }
         await self._ensure(bot_id, name, wanted, online, make)
         return name
 

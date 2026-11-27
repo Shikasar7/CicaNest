@@ -39,6 +39,7 @@ from nest.core.desk import Desk, bubbles, from_app, sticker_segment, voice_segme
 from nest.core.desk_files import with_files
 from nest.core.desk_stream import DeskStream
 from nest.core.events import CaughtUp, ChannelRef, MemberJoined, MessageEvent, Segment, SendMessage
+from nest.core.games import INVITE_HINT, invite_name, split_invite
 from nest.core.group_games import END_MARK, GroupGames
 from nest.core.group_games import KINDS as GROUP_GAMES
 from nest.core.groups import GROUP_MARK_HINT, create_group_tool, is_desk_group, split_group
@@ -69,6 +70,7 @@ from nest.core.prompt import (
     worth_sorting,
 )
 from nest.core.screenshots import ScreenshotReader, pictures
+from nest.core.segments import render_text
 from nest.core.slang import SlangLearner
 from nest.core.speech import SpeechKeeper
 from nest.core.sticker_packs import PackKeeper
@@ -86,6 +88,8 @@ from nest.storage.slang import group_key_of
 from nest.storage.tones import ToneRepo
 
 log = logging.getLogger(__name__)
+
+SPOKEN_WAIT = 60.0  # seconds a voice message she sends on a platform waits for the platform to tell of it
 # 桌面聊天: no sticker when one of her last this many replies there carried one (at most one in four).
 DESK_STICKER_EVERY = 3
 
@@ -219,6 +223,7 @@ class Draft:
     gap: dict[str, Any] | None = None  # 项目资料: a project question the docs did not answer (base_id, …)
     project: ProjectContext | None = None  # 项目资料: what the docs gave the answer (for 看源码)
     streamed: bool = False  # 逐字流式: seen being written, so its messages come without typing pauses
+    invite: dict[str, str] | None = None  # 她邀请你玩: the game of the card that follows (nest.core.games)
 
 
 class Brain:
@@ -247,6 +252,9 @@ class Brain:
         # tell nest's own messages from ones another program sent with the same account.
         self.adapters: Mapping[str, Adapter] = {}
         self.foreign_at: dict[str, float] = {}  # bot id -> last time another program spoke as this bot
+        # Her voice messages on a platform on their way out: (when, audio file, words) per chat, for when the
+        # platform tells of them (heard_own_voice).
+        self._speaking: dict[ChannelRef, list[tuple[float, str | None, str]]] = {}
         # What small talk and day plans are written with (nest.core.initiative): purpose -> model id.
         self.small: dict[str, str | None] = {}
         # Optional modules, set by the app: 表情包 and 黑话. Off per bot and group by default.
@@ -1078,6 +1086,8 @@ class Brain:
     ) -> Draft:
         regenerated = False
         made_group = False  # 她拉群 by a mark: once, even when the answer is written again
+        invite: dict[str, str] | None = None  # 她邀请你玩 by a mark
+        invites = False  # …which she is told she may send
         kit: tuple[Any, Any] = ((), None)  # her tools in the chat with the user (nest.core.tools)
         private = _private(channel)
         lines = channel.reply_lines if self.chance() * 100 < channel.split_rate else 1  # 分条频率
@@ -1211,11 +1221,14 @@ class Brain:
                     self._searched.setdefault(bot.id, []).append(time.time())
             # Her tools in her chat with the user, whichever way the message is answered: a request that
             # reads as a question (答题) still gets them, or "can you look at that folder?" never could.
-            kit, note = ((), None), ""
+            kit, note, lacking = ((), None), "", ""
             if private and self.tools is not None and await self.tools.available(bot, channel):
                 await self.tools.prepare(bot)
                 kit = self.tools.for_chat(bot, channel)
                 note = self.tools.hint(bot)
+            elif private and self.tools is not None:
+                # Her model calls no tools: she is told, so she says so instead of pretending.
+                lacking = note = await self.tools.missing(bot, channel)
             # 她拉群 without tools: a mark in her reply (nest.core.groups.split_group).
             mark_groups = private and kit[1] is None and self.groups is not None and len(self.bots) >= 2
             if mark_groups:
@@ -1243,13 +1256,19 @@ class Brain:
                     searched=searched,
                 )
             elif private:
+                # 一起玩: in the app the games have a board of their own; she invites to one with a mark.
+                invites = (
+                    self.desk is not None and self.games is not None and from_app(target.get("external_id"))
+                )
                 memory, _ = await self.store.memory(channel.channel_id)
                 keepsake = await self.keepsakes.recall(bot, channel, shown) if self.keepsakes else ""
                 if kit[1] is None and not again:
                     # Without tools a reminder she is asked for is read from the request here; with them she
                     # sets it herself.
                     asked = await self.reminders.from_chat(bot, channel, shown) if self.reminders else ""
-                    note = "\n".join(x for x in (asked, GROUP_MARK_HINT if mark_groups else "") if x)
+                    note = "\n".join(x for x in (lacking, asked, GROUP_MARK_HINT if mark_groups else "") if x)
+                if invites:
+                    note = f"{note}\n{INVITE_HINT}" if note else INVITE_HINT
                 messages = build_private_prompt(
                     persona=self._persona(bot, channel),
                     bot_name=bot.name,
@@ -1339,6 +1358,12 @@ class Brain:
                     made_group = True
                     made = await create_group_tool(self.groups, bot, group_asked)
                     sorted_as = f"{sorted_as}；拉群：{made}" if sorted_as else f"拉群：{made}"
+            if private and not answering:
+                raw, invite = split_invite(raw)
+                if not invites:
+                    invite = None
+                if invite is not None and not raw.strip():
+                    raw = "一起玩吧～"
             offered = [self.stickers.describe_choice(s) for s in choices] if self.stickers else []
             raw, number = split_sticker(raw, offered)
             if self.group_games is not None and not _private(channel) and not is_desk_group(channel.channel):
@@ -1441,6 +1466,7 @@ class Brain:
                 gap=gap,
                 project=project,
                 streamed=stream is not None and bool(stream.shown),
+                invite=invite,
             )
 
     def _desk_stream(
@@ -1624,6 +1650,13 @@ class Brain:
         except SpeechError as exc:
             log.warning("%s 的语音没合成出来：%s", bot.name, exc)
             return replace(draft, voice_note=f"语音没合成出来：{exc}"), False
+        # Kept for the desk chat, where it plays, and with the words she said (heard_own_voice).
+        name = None
+        if self.desk_media is not None:
+            name = await asyncio.to_thread(self.desk_media.save_audio, audio)
+        now = time.time()
+        waiting = [w for w in self._speaking.get(channel.channel, []) if now - w[0] < SPOKEN_WAIT]
+        self._speaking[channel.channel] = [*waiting, (now, name, draft.reply)]
         sent = await self._perform(bot, channel, draft, [self.speech.segment(audio)])
         if sent.outcome == "replied":
             return replace(sent, voice_state="sent", reason="已唱歌" if draft.sing else "已发送语音"), True
@@ -1660,6 +1693,13 @@ class Brain:
     async def _send(self, bot: BotConfig, channel: BotChannel, draft: Draft) -> Draft:
         """_deliver, with a note in the reason when a reply meant to be spoken went out as text."""
         sent = await self._deliver(bot, channel, draft)
+        if draft.invite is not None and sent.outcome == "replied" and self.games is not None:
+            try:
+                await self.games.invite(bot, channel, **draft.invite)
+            except Exception:
+                log.exception("%s 发一起玩的邀请时出错", bot.name)
+            else:
+                sent = replace(sent, reason=f"{sent.reason}；邀请一起玩{invite_name(**draft.invite)}")
         return replace(sent, reason=f"{sent.reason}；{sent.voice_note}") if sent.voice_note else sent
 
     async def _deliver(self, bot: BotConfig, channel: BotChannel, draft: Draft) -> Draft:
@@ -1826,6 +1866,26 @@ class Brain:
             reason = f"发送结果不确定，没有重发：{result.error}"
             return replace(draft, outcome="failed", reason=reason, maybe_sent=True)
         return replace(draft, outcome="failed", reason=f"发送失败：{result.error}")
+
+    def heard_own_voice(self, event: MessageEvent) -> MessageEvent:
+        """Her voice message as the platform tells of it, before it is stored: with the words she said (in
+        her history it reads as them, not as 「[语音]」) and the audio, which plays in the desk chat."""
+        if not event.from_self or not any(s.type == "record" for s in event.segments):
+            return event
+        now = time.time()
+        waiting = [w for w in self._speaking.get(event.channel, []) if now - w[0] < SPOKEN_WAIT]
+        if not waiting:
+            return event
+        _, name, words = waiting.pop(0)
+        self._speaking[event.channel] = waiting
+        said = " ".join(words.split())
+        segments = tuple(
+            Segment(s.type, {**s.data, "words": said}) if s.type == "record" else s for s in event.segments
+        )
+        text = render_text(segments)
+        if name is not None:
+            segments += (voice_segment(name),)
+        return replace(event, segments=segments, text=text)
 
     def _at_desk(self, draft: Draft) -> bool:
         """桌面聊天: the answer to a message typed in the app is shown there, not sent to the platform."""

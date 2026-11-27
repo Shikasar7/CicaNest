@@ -169,7 +169,11 @@ class ExecutorHub:
         if not self._seen(device.strip()[:DEVICE_MAX] or "?", key):
             return False
         self.folders = [
-            {"path": str(f.get("path") or "")[:400], "read_only": bool(f.get("read_only"))}
+            {
+                "path": str(f.get("path") or "")[:400],
+                "read_only": bool(f.get("read_only")),
+                "free_change": not f.get("read_only") and bool(f.get("free_change")),
+            }
             for f in folders[:FOLDERS_MAX]
             if isinstance(f, dict) and f.get("path")
         ]

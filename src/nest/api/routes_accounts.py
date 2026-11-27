@@ -108,7 +108,7 @@ def _saved_fields(state: Any, spec: PlatformSpec, account: Account) -> dict[str,
     return saved | {name: state.secrets.get(ref) for name, ref in account.refs.items()}
 
 
-def _url(kind: str, value: str) -> str:
+def checked_url(kind: str, value: str) -> str:
     label, schemes = KINDS[kind]
     url = value.strip()
     try:
@@ -160,8 +160,8 @@ async def _account(request: Request, account_id: str) -> Account:
 
 async def _resolve(request: Request, account: Account, body: Connection) -> dict[str, str]:
     state = request.app.state
-    http_url = _url("http", body.http_url) if body.http_url is not None else account.http_url
-    ws_url = _url("ws", body.ws_url) if body.ws_url is not None else account.ws_url
+    http_url = checked_url("http", body.http_url) if body.http_url is not None else account.http_url
+    ws_url = checked_url("ws", body.ws_url) if body.ws_url is not None else account.ws_url
     return {
         "http_url": http_url,
         "ws_url": ws_url,

@@ -4,6 +4,9 @@ nest 原生运行（uv），每个 bot 的 QQ 跑在一个 NapCat 容器里（�
 
 > **风险**：NapCat 这类程序是用个人 QQ 号挂 bot，不是腾讯官方的机器人接口，违反 QQ 的用户协议。号可能被提示「风险设备」、限制功能甚至冻结。请用专门的小号，不要用主号。
 
+> [!NOTE]
+> NapCat 在 2026 年 11 月停止了维护，官方镜像 `mlikiowa/napcat-docker` 已经从 Docker Hub 下架，nest 不自带它。已经有这个镜像的电脑照常能用；新电脑要先自己弄到一个 NapCat 镜像（比如在有它的电脑上 `docker save`，再到这台 `docker load`），在控制台「平台接入」页的「QQ 容器的镜像」里填它的名字。也可以自己运行任何一个 OneBot 11 协议端，在「伙伴」页加号时选「接我自己运行的协议端」，填它的 HTTP 地址、正向 WebSocket 地址和令牌。
+
 ## 一、准备机器
 
 1. 系统设置：
@@ -20,12 +23,12 @@ nest 原生运行（uv），每个 bot 的 QQ 跑在一个 NapCat 容器里（�
 2. 同一个文件夹的 `.env` 里写一行 `NAPCAT_WEBUI_TOKEN=<一个长密码>`：NapCat 管理页的密码。
 3. 每个号的 `config/onebot11.json` 里开一个 HTTP 服务（容器里的 3040）和一个 WebSocket 服务（3041），`host` 填 `0.0.0.0`，令牌和 nest `.env` 里的 `NEST_QQ_<QQ号>_HTTP_TOKEN`、`NEST_QQ_<QQ号>_WS_TOKEN` 一样。
 4. `docker compose up -d`。
-5. 扫码：nest 跑起来以后，在控制台「系统」页那个号的容器点「扫码登录」，二维码直接显示在控制台里。还没有 nest 时，用 SSH 转发管理页端口，打开 `http://127.0.0.1:<管理页端口>/webui`。二维码约 2 分钟换一张。
+5. 扫码：nest 跑起来以后，在控制台「平台接入」页那个号的容器点「扫码登录」，二维码直接显示在控制台里。还没有 nest 时，用 SSH 转发管理页端口，打开 `http://127.0.0.1:<管理页端口>/webui`。二维码约 2 分钟换一张。
    - **重启后自动登录**：每个服务设了 `ACCOUNT`，NapCat 启动时先用保存的登录快速登录。
-   - **登录失效时不一直刷二维码**：连着两次在等扫码、又没人在控制台打开二维码的容器，nest 会停下它（`src/nest/qr_guard.py`）。在手机上解除限制后，再到「系统」页点「扫码登录」。
-   - **掉线提醒**：「系统」页「掉线提醒」填一个 QQ 号，某个号断开超过设定的分钟数时，还在线的 bot 会私聊它。
-   - **回退密码（可选）**：「系统」页每个容器有「回退密码」，nest 只存密码的 MD5。保存的登录失效时 NapCat 先用密码登录。MD5 也能用来登录这个号，所以 `.env` 要当密码一样保管。
-6. 也可以不写 compose：在控制台 Bot 页点「增加 bot」，nest 自己建容器 `napcat-<QQ号>`，主机名和网卡地址由 QQ 号算出来、每次都一样。
+   - **登录失效时不一直刷二维码**：连着两次在等扫码、又没人在控制台打开二维码的容器，nest 会停下它（`src/nest/qr_guard.py`）。在手机上解除限制后，再到「平台接入」页点「扫码登录」。
+   - **掉线提醒**：「平台接入」页「掉线提醒」填一个 QQ 号，某个号断开超过设定的分钟数时，还在线的 bot 会私聊它。
+   - **回退密码（可选）**：「平台接入」页每个容器有「回退密码」，nest 只存密码的 MD5。保存的登录失效时 NapCat 先用密码登录。MD5 也能用来登录这个号，所以 `.env` 要当密码一样保管。
+6. 也可以不写 compose：在控制台「伙伴」页点「添伙伴」→「从号开始加」，nest 自己建容器 `napcat-<QQ号>`，主机名和网卡地址由 QQ 号算出来、每次都一样。
 7. 每周自动重启一次 QQ 容器（QQ 跑久了内存会慢慢涨）：把 `com.nest.qq-restart.plist` 里的路径改成你的，再 `cp com.nest.qq-restart.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nest.qq-restart.plist`。它每周一 5:00 逐个重启在运行的容器。
 
 ## 三、nest

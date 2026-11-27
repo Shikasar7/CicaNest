@@ -155,7 +155,7 @@ BUILTIN = (
     Builtin(
         "nest.files",
         "工作区文件",
-        "在她自己的文件夹里看、读、写、改文件，把做好的交给你",
+        "在她自己的文件夹和你共享给她的文件夹里看、读、写、改文件，把做好的交给你",
         ("list_files", "read_file", "write_file", "edit_file", "deliver_file"),
     ),
     Builtin(
@@ -189,7 +189,7 @@ BUILTIN = (
         "nest.windows",
         "电脑上做事",
         "在你的 Windows 电脑上看、写、改、删（进回收站）、移动文件，跑 PowerShell 命令，打开文件或网址"
-        "（要桌面端开着；除了在授权文件夹里看，每一步都要你在电脑上点头）",
+        "（要桌面端开着；除了在授权文件夹里看、在设成「改不用问」的文件夹里改，每一步都要你在电脑上点头）",
         (
             "win_list_files",
             "win_read_file",

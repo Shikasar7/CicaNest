@@ -156,7 +156,15 @@ export type SystemView = {
   }
   /** clients: QQ programs running here; null in docker mode (they are inside the container).
    * login_url: the container's remote desktop page for scanning the login QR code (docker mode). */
-  qq: { executable: string; configured: boolean; clients: number | null; login_url?: string }
+  /** napcat_image: what a new QQ container is made from (docker mode); _default: it is the built-in one. */
+  qq: {
+    executable: string
+    configured: boolean
+    clients: number | null
+    login_url?: string
+    napcat_image?: string
+    napcat_image_default?: boolean
+  }
   /** Docker mode: each QQ container, with the page to scan its login QR code on. Empty in program mode;
    * absent on a nest from before several containers. */
   containers?: QQContainer[]
@@ -174,6 +182,7 @@ export type SystemSettings = {
   qq_executable?: string
   snowluma_container?: string
   qq_login_url?: string
+  napcat_image?: string
   fetch_proxy?: string
   /** Days of history kept (1–365). */
   history_days?: number

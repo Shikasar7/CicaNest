@@ -365,9 +365,23 @@ function run() {
     executorChanged()
   })
 
-  ipcMain.handle('executor:read-only', (event, folder, on) => {
+  ipcMain.handle('executor:folder-mode', async (event, folder, mode) => {
     if (!fromExecutor(event)) throw new Error('not allowed')
-    executorStore.setReadOnly(folder, on)
+    if (!['read', 'ask', 'free'].includes(mode)) return
+    if (
+      mode === 'free' &&
+      !(await sure(
+        '这个文件夹里改文件不再问你？',
+        `${folder}
+
+伙伴在这个文件夹里写、改、删（进回收站）、移动文件都直接做，不弹窗，定时任务里也一样。` +
+          '跑命令、打开文件和别的地方照旧要问你。她会读群聊、网页和插件给的东西，里面有人写了指挥她的话，她也可能照做。',
+      ))
+    ) {
+      return
+    }
+    executorStore.setMode(folder, mode)
+    log.info(`executor: folder mode ${mode}`)
     executorChanged()
   })
 
@@ -672,6 +686,10 @@ function run() {
   handle('nest:set-theme', (value) => theme.set(value))
   handle('nest:open-logs', () => openFolder(config.logsDir))
   handle('nest:open-data', () => openFolder(config.dataDir))
+  handle('nest:open-executor', () => {
+    openExecutor()
+    return true
+  })
   handle('nest:get-autostart', () => getAutostart())
   handle('nest:set-autostart', (enabled) => setAutostart(Boolean(enabled)))
   // Updates (null: this app cannot be updated). Installing asks in a window of this app, whoever calls.

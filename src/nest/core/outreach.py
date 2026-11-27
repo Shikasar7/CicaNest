@@ -39,6 +39,7 @@ from typing import Any
 from nest.core.chatter import start_of_day
 from nest.core.desk import APP, PROACTIVE, chat_of, chosen_chats, unanswered
 from nest.core.events import Segment
+from nest.core.games import split_invite
 from nest.core.groups import GroupError
 from nest.core.initiative import DAY_STARTS, into_day, quiet_now
 from nest.core.life import BEDROOM, block_at, today_key
@@ -114,8 +115,9 @@ REASONS = {
     "follow": "你记得对方说过：{content}（{when}）。你想问问对方这件事怎么样了。",
     "play": (
         "你有点无聊，想叫对方一起玩个小游戏（成语接龙、猜数字、二十个问题、真心话，"
-        "或者桌面上「一起玩」里的五子棋、黑白棋、海龟汤，挑一个），"
-        "用你的语气邀请一下。"
+        "或者桌面上「一起玩」里的五子棋、黑白棋、海龟汤、你画我猜，挑一个），"
+        "用你的语气邀请一下。挑「一起玩」里的就在最后写 [一起玩：五子棋]（换成你挑的），"
+        "对方会收到一张邀请卡片，点一下就开始，不用在聊天里讲规则。"
     ),
 }
 GAMES = (
@@ -405,12 +407,21 @@ class OutreachKeeper:
         )
         self._done.add((day, bot.id, what))  # tried once: not again today, said or not
         line = await self._write(bot, self.brain._persona(bot, chat), ask)
+        line, invite = split_invite(line)  # 叫你一起玩: a card of 「一起玩」 may follow (nest.core.games)
+        if not line and invite is not None:
+            line = "一起玩吧～"
         if not line:
             await self._save(now)
             return False
         shown = await self.desk.deliver(bot, chat, [Segment("text", {"text": line})], kind=KIND)
         if shown.state != "succeeded":
             return False
+        games = getattr(self.brain, "games", None)
+        if invite is not None and games is not None:
+            try:
+                await games.invite(bot, chat, **invite)
+            except Exception:
+                log.exception("%s 发一起玩的邀请时出错", bot.name)
         self._sent.append((bot.id, now, chat.channel_id, kind))
         await self._save(now)
         if kind == "share":

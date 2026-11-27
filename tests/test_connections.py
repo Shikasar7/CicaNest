@@ -243,4 +243,4 @@ async def test_the_real_http_check_reads_onebot_answers() -> None:
     detail = (
         await probe.check_http("http://x:1", "", self_id="1", transport=httpx.MockTransport(refuse))
     ).detail
-    assert detail == "连不上 x:1：SnowLuma 没开，或者端口不对"
+    assert detail == "连不上 x:1：协议端（NapCat、SnowLuma 这类）没开，或者端口不对"

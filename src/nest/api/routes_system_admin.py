@@ -44,8 +44,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
 PATH_LIMIT = 500
-NOT_SET_SNOWLUMA = "还没有设置 SnowLuma 文件夹，请先在「系统」页填写"
-NOT_SET_QQ = "还没有设置 QQ 程序的位置，请先在「系统」页填写"
+NOT_SET_SNOWLUMA = "还没有设置 SnowLuma 文件夹，请先在「平台接入」页填写"
+NOT_SET_QQ = "还没有设置 QQ 程序的位置，请先在「平台接入」页填写"
 DEFAULT_MODE = "docker"  # NapCat containers; "program" (a SnowLuma folder on Windows) is set on the 系统 page
 DEFAULT_CONTAINER = ""  # none until a bot is added (增加 bot names its container here)
 DEFAULT_LOGIN_URL = "http://127.0.0.1:6081"  # SnowLuma's noVNC, when Docker does not say where it is
@@ -69,6 +69,7 @@ class SystemSettingsPatch(BaseModel):
     snowluma_mode: Literal["program", "docker"] | None = None
     snowluma_container: str | None = None
     qq_login_url: str | None = None
+    napcat_image: str | None = None  # "" goes back to napcat.DEFAULT_IMAGE
     history_days: int | None = Field(default=None, ge=1, le=housekeeping.MAX_DAYS)
     qq_cache_days: int | None = Field(default=None, ge=0, le=housekeeping.MAX_DAYS)  # 0: never clean
     offline_alert_to: str | None = None  # 掉线提醒: whom to tell (check_recipient); "" turns it off
@@ -98,6 +99,7 @@ async def machine_settings(state: Any) -> dict[str, str]:
         "qq_executable": text("qq_executable", system.default_qq_executable()),
         "snowluma_container": text("snowluma_container", DEFAULT_CONTAINER),
         "qq_login_url": text("qq_login_url", DEFAULT_LOGIN_URL),
+        "napcat_image": text("napcat_image", "") or napcat.DEFAULT_IMAGE,
         "fetch_proxy": text("fetch_proxy", ""),
     }
 
@@ -175,6 +177,15 @@ def _login_url(value: str) -> str:
     if parts is None or parts.scheme not in ("http", "https") or not parts.hostname or has_bad_chars(url):
         raise _invalid("扫码页地址要写成 http://主机:端口，例如 http://127.0.0.1:6081")
     return url.rstrip("/")
+
+
+def _napcat_image(value: str) -> str:
+    ref = value.strip()
+    if ref and not napcat.valid_image(ref):
+        raise _invalid(
+            "镜像名要写成 名字:标签 这样，只用小写字母、数字和 . _ - / :，例如 mlikiowa/napcat-docker:latest"
+        )
+    return ref
 
 
 def _fetch_proxy(value: str) -> str:
@@ -278,6 +289,9 @@ async def system_view(state: Any) -> dict[str, Any]:
             "configured": probe["qq_configured"],
             "clients": probe["qq_clients"],
             "login_url": paths["qq_login_url"] if in_docker else "",
+            # the image a new QQ container is made from, and whether it is the built-in default
+            "napcat_image": paths["napcat_image"],
+            "napcat_image_default": paths["napcat_image"] == napcat.DEFAULT_IMAGE,
         },
         "fetch_proxy": paths["fetch_proxy"],
         # 掉线提醒
@@ -313,6 +327,8 @@ async def update_settings(request: Request, patch: SystemSettingsPatch) -> dict[
             values["snowluma_container"] = _containers(patch.snowluma_container)
         if patch.qq_login_url is not None:
             values["qq_login_url"] = _login_url(patch.qq_login_url)
+        if patch.napcat_image is not None:
+            values["napcat_image"] = _napcat_image(patch.napcat_image)
         if patch.snowluma_dir is not None:
             values["snowluma_dir"] = _snowluma_dir(patch.snowluma_dir)
         if patch.qq_executable is not None:
@@ -467,7 +483,7 @@ async def _container_names(state: Any, only: str | None = None) -> list[str] | N
     if only is None:
         return names
     if only not in names:
-        raise HTTPException(status_code=400, detail=f"{only} 不是「系统」页设置里的 QQ 容器")
+        raise HTTPException(status_code=400, detail=f"{only} 不是「平台接入」页设置里的 QQ 容器")
     return [only]
 
 

@@ -36,7 +36,7 @@ async def check_http(
     except httpx.TimeoutException:
         return Result(False, f"{_where(url)} 在 {TIMEOUT:.0f} 秒内没有回应")
     except httpx.HTTPError:
-        return Result(False, f"连不上 {_where(url)}：SnowLuma 没开，或者端口不对")
+        return Result(False, f"连不上 {_where(url)}：协议端（NapCat、SnowLuma 这类）没开，或者端口不对")
     if response.status_code in (401, 403):
         return Result(False, "令牌不对：HTTP 接口拒绝了它")
     if response.status_code >= 400:
@@ -69,5 +69,5 @@ async def check_ws(url: str, token: str) -> Result:
     except TimeoutError:
         return Result(False, f"{_where(url)} 在 {TIMEOUT:.0f} 秒内没有回应")
     except (OSError, websockets.exceptions.WebSocketException, ValueError):
-        return Result(False, f"连不上 {_where(url)}：SnowLuma 没开，或者端口不对")
+        return Result(False, f"连不上 {_where(url)}：协议端（NapCat、SnowLuma 这类）没开，或者端口不对")
     return Result(True, "WebSocket 连上了")

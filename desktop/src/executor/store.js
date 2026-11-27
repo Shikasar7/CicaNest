@@ -1,7 +1,7 @@
 'use strict'
 
 // 电脑上做事 settings, kept on this PC (executor.json in the app's profile folder): on or off, and the
-// folders the user authorized (each may be read-only), and 完全允许 (allowAll: no nod anywhere) with, only
+// folders the user authorized (each read-only, changed with a nod, or changed freely: freeChange), and 完全允许 (allowAll: no nod anywhere) with, only
 // on top of it, the never-list opened (openForbidden). Only the settings window changes them — never nest,
 // never a companion.
 //
@@ -40,7 +40,11 @@ class ExecutorStore {
         folders: (Array.isArray(raw.folders) ? raw.folders : [])
           .filter((f) => f && typeof f.path === 'string' && path.win32.isAbsolute(f.path))
           .slice(0, FOLDERS_MAX)
-          .map((f) => ({ path: f.path, readOnly: Boolean(f.readOnly) })),
+          .map((f) => ({
+            path: f.path,
+            readOnly: Boolean(f.readOnly),
+            freeChange: !f.readOnly && f.freeChange === true,
+          })),
       }
     } catch {
       return { enabled: true, allowAll: false, openForbidden: false, key: '', folders: [] }
@@ -85,7 +89,7 @@ class ExecutorStore {
   add(folder) {
     const known = this.data.folders.some((f) => f.path.toLowerCase() === folder.toLowerCase())
     if (!known && this.data.folders.length < FOLDERS_MAX) {
-      this.data.folders.push({ path: folder, readOnly: false })
+      this.data.folders.push({ path: folder, readOnly: false, freeChange: false })
       this.save()
     }
   }
@@ -95,8 +99,13 @@ class ExecutorStore {
     this.save()
   }
 
-  setReadOnly(folder, readOnly) {
-    for (const f of this.data.folders) if (f.path === folder) f.readOnly = Boolean(readOnly)
+  /** How a folder may be changed: 'read' (not at all), 'ask' (each change asked), 'free' (no nod). */
+  setMode(folder, mode) {
+    for (const f of this.data.folders) {
+      if (f.path !== folder) continue
+      f.readOnly = mode === 'read'
+      f.freeChange = mode === 'free'
+    }
     this.save()
   }
 }

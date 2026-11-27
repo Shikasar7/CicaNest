@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld('nestDesktop', {
   petSprite: (botId) => ipcRenderer.invoke('nest:pet-sprite', String(botId || '')),
   openChat: () => ipcRenderer.invoke('nest:open-chat'),
   openConsole: () => ipcRenderer.invoke('nest:open-console'),
+  // The 电脑上做事 settings window (its folders, 改不用问), from the console's 文件 page.
+  openExecutor: () => ipcRenderer.invoke('nest:open-executor'),
   // Light or dark and the theme's colours, for the app's own windows and the title bar (src/theme.js).
   setTheme: (theme) =>
     ipcRenderer.invoke('nest:set-theme', {

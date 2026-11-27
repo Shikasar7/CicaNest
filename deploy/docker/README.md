@@ -4,6 +4,9 @@ nest 和它的控制台在一个容器里；每个 QQ 号再各用一个 NapCat 
 
 > **风险**：NapCat 这类程序是用个人 QQ 号挂 bot，不是腾讯官方的机器人接口，违反 QQ 的用户协议。号可能被提示「风险设备」、限制功能甚至冻结。请用专门的小号，不要用主号。
 
+> [!NOTE]
+> NapCat 在 2026 年 11 月停止了维护，官方镜像 `mlikiowa/napcat-docker` 已经从 Docker Hub 下架，nest 不自带它。已经有这个镜像的电脑照常能用；新电脑要先自己弄到一个 NapCat 镜像（比如在有它的电脑上 `docker save`，再到这台 `docker load`），在控制台「平台接入」页的「QQ 容器的镜像」里填它的名字。也可以自己运行任何一个 OneBot 11 协议端，在「伙伴」页加号时选「接我自己运行的协议端」，填它的 HTTP 地址、正向 WebSocket 地址和令牌。
+
 ## 一、启动
 
 需要 Docker Engine 和 Docker Compose。
@@ -22,8 +25,8 @@ docker compose exec -it cicanest nest set-password
 ## 二、添加 bot
 
 1. 「模型」页加一个模型。
-2. 「Bot」页点「增加 bot」，选平台：
-   - **QQ**：填名字和 QQ 号。nest 会建容器 `napcat-<QQ号>`，再到「系统」页那个容器点「扫码登录」，用这个号的手机 QQ 扫码。
+2. 「伙伴」页点「添伙伴」→「从号开始加」，选平台：
+   - **QQ**：填名字和 QQ 号。nest 会建容器 `napcat-<QQ号>` 并显示二维码，用这个号的手机 QQ 扫码；之后也可以在「平台接入」页那个容器点「扫码登录」。自己运行协议端的话，选「接我自己运行的协议端」，填它的地址和令牌。
    - **Discord**、**企业微信**：填 Token 或 BotID 和 Secret，不需要别的容器。
 3. 连上以后，在 bot 的设置里打开它要说话的群。
 
@@ -39,4 +42,5 @@ docker compose exec -it cicanest nest set-password
 - **更新**：`git pull`，再 `docker compose up -d --build`。
 - **时区**：默认 `Asia/Shanghai`，在本文件夹的 `.env` 里写 `TZ=...` 改。
 - **日志**：`docker compose logs -f cicanest`，或 `/opt/cicanest/nest/data/logs/nest.log`。
+- **把文件夹共享给伙伴**：nest 在容器里，只看得到挂进去的文件夹。在 `docker-compose.yml` 的 `volumes` 里加一行同路径挂载（比如 `- /srv/资料:/srv/资料`），`docker compose up -d`，再在聊天页「文件」里填 `/srv/资料`。容器里外的路径要一样，她跑命令的容器才挂得上。
 - **换端口**：在 `/opt/cicanest/nest/.env` 里写 `NEST_PORT=其他端口`，再 `docker compose restart`。

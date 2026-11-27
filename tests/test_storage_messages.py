@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,18 @@ async def test_channel_names_and_backfill_targets(store: MessageStore) -> None:
     assert names == {"42": "测试群", "77": "没人说话的群"}
     # Only channels with stored messages are worth asking history for, from the newest stored message on.
     assert await store.backfill_targets("qq", "10001") == [(GROUP, 200.0)]
+
+
+async def test_a_desk_group_is_not_asked_of_the_platform(store: MessageStore) -> None:
+    from nest.core.broadcast import Broadcaster
+    from nest.core.hub import Hub
+
+    desk = ChannelRef("qq", "10001", "group", "desk-g5")  # a 桌面群, kept under the member's account
+    await store.save(message("1", at=100.0))
+    await store.save(replace(message("2", at=300.0), channel=desk))
+    assert len(await store.backfill_targets("qq", "10001")) == 2
+    hub = Hub(store.db, store, None, Broadcaster())  # type: ignore[arg-type]
+    assert await hub._backfill_targets("qq", "10001") == [(GROUP, 100.0)]
 
 
 async def test_purge_removes_only_old_messages(store: MessageStore) -> None:

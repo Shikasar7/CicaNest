@@ -30,7 +30,15 @@ SCAN_FAILED = re.compile(r"\[Login\] Login Error\s*,\s*Err(?:Type|Info):\s*([^\n
 SCAN_EXPIRED = re.compile(r"1\s+ErrCode:\s*3\b")  # the code ran out: NapCat shows a new one by itself
 ASKS_FOR_SCAN = "请扫描下面的二维码"
 
-IMAGE = "mlikiowa/napcat-docker:latest"
+# The image nest makes a container from. NapCat stopped in 2026-11 and its image left Docker Hub, so a machine
+# that does not have it yet needs one of its own (docker load, a mirror): 平台接入 → 「QQ 容器的镜像」.
+DEFAULT_IMAGE = "mlikiowa/napcat-docker:latest"
+IMAGE_LIMIT = 200
+# [registry[:port]/]path[:tag][@sha256:digest], lower case as Docker wants it
+IMAGE_REF = re.compile(
+    r"(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[\w][\w.-]{0,127})?(?:@sha256:[0-9a-f]{64})?"
+)
 FIRST_ONEBOT = 3046  # 3040–3045 are the first three accounts' (HTTP, WebSocket pairs)
 LAST_ONEBOT = 3199
 FIRST_WEBUI = 6100  # 6097–6099 are theirs
@@ -197,9 +205,16 @@ def offset_zone(offset: timedelta) -> str:
     return "UTC" if hours == 0 else f"Etc/GMT{-hours:+d}"
 
 
-def run_args(plan: Plan, *, webui_token: str, password_md5: str = "") -> list[str]:
+def valid_image(ref: str) -> bool:
+    return len(ref) <= IMAGE_LIMIT and IMAGE_REF.fullmatch(ref) is not None
+
+
+def run_args(
+    plan: Plan, *, webui_token: str, password_md5: str = "", image: str = DEFAULT_IMAGE
+) -> list[str]:
     """The arguments after `docker`, as deploy/mac/docker-compose.yml's services. `password_md5`: the
-    account's 回退密码 as NapCat takes it (32 hex digits), used when the saved login stops working."""
+    account's 回退密码 as NapCat takes it (32 hex digits), used when the saved login stops working. `image`:
+    a NapCat image (平台接入's 「QQ 容器的镜像」)."""
     uid = os.getuid() if hasattr(os, "getuid") else 501
     gid = os.getgid() if hasattr(os, "getgid") else 20
     env = {
@@ -245,7 +260,7 @@ def run_args(plan: Plan, *, webui_token: str, password_md5: str = "") -> list[st
         ("plugins", "/app/napcat/plugins"),
     ):
         args += ["-v", f"{plan.folder / part}:{inside}"]
-    return [*args, IMAGE]
+    return [*args, image]
 
 
 def scan_failed(log: str) -> str | None:

@@ -30,6 +30,7 @@ import { BotGlyph } from '@/components/BotGlyph'
 import { ChatSettings } from '@/components/chat/ChatSettings'
 import { Files } from '@/components/chat/Files'
 import { GameRoom } from '@/components/chat/GameRoom'
+import { InviteCard } from '@/components/chat/games/Invite'
 import { Home } from '@/components/chat/Home'
 import { GroupConversation, GroupGlyph, GroupSettings, NewGroup } from '@/components/chat/GroupChat'
 import { Keepsakes } from '@/components/chat/Keepsakes'
@@ -47,7 +48,7 @@ import { STATUS_LABEL, Tasks, useTasks } from '@/components/chat/Tasks'
 import { getJson, sendBlob, sendJson, type BotMode, type Message } from '@/lib/api'
 import { rowsOf, shortTime, timeLine } from '@/lib/chat-time'
 import { bubbles } from '@/lib/desk-stream'
-import { useGame } from '@/lib/games'
+import { inviteOf, useGame, type Invite } from '@/lib/games'
 import { groupLine, type DeskGroup } from '@/lib/groups'
 import type { LifeView } from '@/lib/life'
 import { useLiveData } from '@/lib/live-data'
@@ -219,6 +220,7 @@ const Bubble = memo(function Bubble({
   last,
   takeBack,
   again,
+  play,
 }: {
   message: Message
   botId: string
@@ -230,14 +232,19 @@ const Bubble = memo(function Bubble({
   /** Your newest one, or the end of her newest answer: its button shows on a phone too. */
   last: boolean
   takeBack: (message: Message) => Promise<void>
+  /** 她邀请你玩: start the game of her card and go to it. */
+  play: (invite: Invite) => Promise<boolean>
   /** 重说 (only for her newest answer). */
   again: ((message: Message) => Promise<void>) | null
 }) {
   const hers = message.from_self
   const own = hers && voiceOf(message.segments) !== null
   const sticker = stickerOf(message.segments)
+  const invite = hers ? inviteOf(message.segments) : null
   const pictures = picturesOf(message.segments)
-  const words = pictures.length ? wordsOf(message.segments) : message.text || '（一条图片或别的消息）'
+  const said = invite ? '' : pictures.length ? wordsOf(message.segments) : message.text || '（一条图片或别的消息）'
+  // Her voice from a platform, kept with its audio: the words, and the voice plays beside them.
+  const words = own ? said.replace(/^（语音）/, '') : said
   if (takenBack(message)) {
     return (
       <li data-message={message.id} className="mt-2 text-center text-[11px] text-muted-foreground">
@@ -265,7 +272,9 @@ const Bubble = memo(function Bubble({
         <span aria-hidden className="w-10 shrink-0" />
       )}
       <div className={cn('flex max-w-[72%] min-w-0 flex-col', !hers && 'items-end')}>
-        {sticker ? (
+        {invite ? (
+          <InviteCard invite={invite} name={botName} onPlay={play} fresh={fresh} />
+        ) : sticker ? (
           // A 表情包 goes out as itself, without a bubble.
           <Picture
             src={stickerImage(sticker.id)}
@@ -585,6 +594,31 @@ function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, 
   // Messages that came in while the chat was open pop in; the history loaded with it does not.
   const [arrived, setArrived] = useState<ReadonlySet<number>>(new Set())
   const [error, setError] = useState('')
+  // 她邀请你玩: a tap on her card starts that game (or goes back to it, when it is the one being played).
+  const now = useRef({ game, onGame })
+  useEffect(() => {
+    now.current = { game, onGame }
+  })
+  const play = useCallback(
+    async (invite: Invite) => {
+      const { game: current, onGame: open } = now.current
+      const same =
+        current?.status === 'playing' &&
+        current.kind === invite.kind &&
+        (invite.kind !== 'draw' || (current.draw?.mode ?? 'you') === invite.mode)
+      if (!same) {
+        try {
+          await sendJson('POST', '/api/games', { bot_id: bot.bot_id, kind: invite.kind, mode: invite.mode })
+        } catch (e) {
+          setError(`没开成：${(e as Error).message}`)
+          return false
+        }
+      }
+      open()
+      return true
+    },
+    [bot.bot_id],
+  )
   const [note, setNote] = useState('')
   // Why she did not answer, in nest's own words: shown only when you ask (「为什么？」).
   const [why, setWhy] = useState('')
@@ -1128,6 +1162,7 @@ function Conversation({ bot, channel, activity, room, onKeepsakes, onReminders, 
                 found={row.message.id === found}
                 last={row.message.id === lastMine?.id || row.message.id === lastAnswer}
                 takeBack={takeBack}
+                play={play}
                 again={waitingSince === null && !writing && !blocked && answers.has(row.message.id) ? again : null}
               />
             ),

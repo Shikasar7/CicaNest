@@ -166,6 +166,15 @@ async def test_she_is_told_when_the_pc_allows_everything() -> None:
     bot: Any = None  # looked at only by plugins (none here)
     hub.report("PC-1", [{"path": r"D:\资料"}])
     assert WIN_ASKS in tools._windows_hint(bot) and WIN_ALLOWS not in tools._windows_hint(bot)
+    # 改不用问 is shown on the folder; read-only wins over it.
+    hub.report(
+        "PC-1",
+        [
+            {"path": r"D:\工作", "free_change": True},
+            {"path": r"D:\资料", "read_only": True, "free_change": True},
+        ],
+    )
+    assert r"D:\工作（改不用问）、D:\资料（只读）" in tools._windows_hint(bot)
     hub.report("PC-1", [], allow_all=True)
     assert hub.status()["allow_all"] is True
     assert WIN_ALLOWS in tools._windows_hint(bot) and WIN_ASKS not in tools._windows_hint(bot)

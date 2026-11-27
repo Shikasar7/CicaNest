@@ -28,10 +28,11 @@ KNOWN_PLACES = (
 )
 # The state, the published ports (HostConfig's: they are known while the container is stopped too), the
 # environment, for ACCOUNT: the QQ number a NapCat container logs in (deploy/mac/docker-compose.yml), and
-# whether a 回退密码 is set (never its value; the others, WEBUI_TOKEN…, are never kept), and the labels,
-# for the docker compose service a container belongs to.
+# whether a 回退密码 is set (never its value; the others, WEBUI_TOKEN…, are never kept), the labels,
+# for the docker compose service a container belongs to, and the image it was made from.
 INSPECT_FORMAT = (
     "{{json .State}}\t{{json .HostConfig.PortBindings}}\t{{json .Config.Env}}\t{{json .Config.Labels}}"
+    "\t{{json .Config.Image}}"
 )
 PASSWORD_VARIABLES = ("NAPCAT_QUICK_PASSWORD_MD5", "NAPCAT_QUICK_PASSWORD")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
@@ -57,6 +58,7 @@ class Container:
     account: str = ""  # the QQ number in its ACCOUNT variable (NapCat), when set
     quick_password: bool = False  # NapCat has a 回退密码 (NAPCAT_QUICK_PASSWORD[_MD5]) to log in with
     compose: Compose | None = None  # made by docker compose (the first three accounts), else None
+    image: str = ""  # what it was made from, e.g. mlikiowa/napcat-docker:latest
 
 
 @dataclass(frozen=True)
@@ -84,14 +86,38 @@ def cli() -> str | None:
     return None
 
 
+class ImageMissing(ProcessError):
+    """`docker run` could not find its image here and could not download it either."""
+
+
+# What Docker says when an image is neither on this machine nor where it would download it from (Docker Hub
+# and other registries word it differently; a deleted repository usually reads as "pull access denied").
+IMAGE_MISSING = (
+    "pull access denied",
+    "repository does not exist",
+    "manifest unknown",
+    "not found: manifest",
+    "manifest for ",
+    "no such image",
+)
+
+
 def _problem(stderr: str) -> str:
     text = stderr.strip()
     lowered = text.lower()
     if "cannot connect to the docker daemon" in lowered or "error during connect" in lowered:
         return "Docker 没有在运行：请先打开 OrbStack 或 Docker Desktop"
-    if "permission denied" in lowered:
+    if "permission denied" in lowered and "pull access denied" not in lowered:
         return "没有权限使用 Docker"
-    return f"docker 出错：{text.splitlines()[0] if text else '没有说明原因'}"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    # `docker run` starts with "Unable to find image … locally" before saying what went wrong
+    said = next((line for line in lines if "error" in line.lower()), lines[0] if lines else "没有说明原因")
+    return f"docker 出错：{said.removeprefix('docker: ')}"
+
+
+def _image_missing(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return any(words in lowered for words in IMAGE_MISSING)
 
 
 def container(name: str) -> Container:
@@ -120,12 +146,14 @@ def container(name: str) -> Container:
         return Container(False, problem=_problem(done.stderr))
     state_text, _, rest = done.stdout.strip().partition("\t")
     ports_text, _, rest = rest.partition("\t")
-    env_text, _, labels_text = rest.partition("\t")
+    env_text, _, rest = rest.partition("\t")
+    labels_text, _, image_text = rest.partition("\t")
     try:
         state = json.loads(state_text)
         bindings = json.loads(ports_text) if ports_text else None
         env = json.loads(env_text) if env_text else None
         labels = json.loads(labels_text) if labels_text else None
+        image = json.loads(image_text) if image_text else None
     except ValueError:
         return Container(False, problem="看不懂 docker 的回答")
     if not isinstance(state, dict):
@@ -141,6 +169,7 @@ def container(name: str) -> Container:
         account=_variable(env, "ACCOUNT") if _variable(env, "ACCOUNT").isdigit() else "",
         quick_password=any(_variable(env, name) for name in PASSWORD_VARIABLES),
         compose=_compose(labels),
+        image=image if isinstance(image, str) else "",
     )
 
 
@@ -309,5 +338,7 @@ def _run(args: list[str], timeout: float) -> str:
     except OSError as exc:
         raise ProcessError(f"运行 docker 失败：{exc.strerror or exc}") from None
     if done.returncode != 0:
+        if _image_missing(done.stderr):
+            raise ImageMissing(_problem(done.stderr))
         raise ProcessError(_problem(done.stderr))
     return done.stdout

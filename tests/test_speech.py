@@ -276,6 +276,33 @@ async def test_a_bot_remembers_what_it_said_in_a_voice_message(kit: Kit) -> None
     assert "你（阿鲸）：（语音）哼 才不是" in kit.w.providers["10001"].requests[-1][1].content
 
 
+async def test_her_voice_on_the_platform_is_kept_with_its_words_and_plays_in_the_app(
+    kit: Kit, tmp_path: Path
+) -> None:
+    from nest.core.desk_media import DeskMedia
+
+    kit.w.brain.desk_media = DeskMedia(tmp_path / "media")
+    await kit.set_mode("on")
+    await kit.reply("[语音] 哼\n才不是")
+    told = MessageEvent(  # what comes back from QQ: a voice message, no words
+        channel=kit.channel.channel,
+        message_id="900",
+        sender_id="10001",
+        sender_name="阿鲸",
+        segments=(Segment("record", {"file": "x.amr"}),),
+        text="[语音]",
+        timestamp=time.time(),
+        from_self=True,
+    )
+    heard = kit.w.brain.heard_own_voice(told)
+    assert heard.text == "（语音）哼 才不是"
+    record, voice = heard.segments
+    assert record.data == {"file": "x.amr", "words": "哼 才不是"} and voice.type == "voice"
+    assert (tmp_path / "media" / voice.data["media"]).read_bytes() == MP3
+    # Only once: the next voice message of hers (sent some other way) stays as it came.
+    assert kit.w.brain.heard_own_voice(told) is told
+
+
 async def test_someone_who_asks_for_voice_gets_it_right_after_another_bots(kit: Kit) -> None:
     await kit.set_mode("on")
     await kit.reply("[语音] 第一条")

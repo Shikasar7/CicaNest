@@ -90,11 +90,19 @@ h2 {
   font-family: Consolas, 'Cascadia Mono', monospace;
 }
 
-.ro {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  color: var(--muted);
+.mode {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.mode:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .btn.small {

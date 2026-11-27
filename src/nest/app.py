@@ -273,7 +273,7 @@ def create_app(
             app.state.reminders = ReminderKeeper(db, app.state.brain, app.state.desk, app.state.broadcaster)
             app.state.brain.reminders = app.state.reminders
             app.state.chatter = ChatterKeeper(db, app.state.brain, app.state.desk)
-            app.state.workspace = Workspace(settings.workspaces)
+            app.state.workspace = Workspace(settings.workspaces, guarded=(settings.home, settings.data_dir))
             app.state.sandbox = (
                 Sandbox(
                     app.state.workspace,

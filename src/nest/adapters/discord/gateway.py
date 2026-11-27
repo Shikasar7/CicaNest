@@ -49,11 +49,15 @@ DISPATCH, HEARTBEAT, IDENTIFY, RESUME, RECONNECT, INVALID_SESSION, HELLO, HEARTB
 )
 
 MESSAGE_CONTENT_HINT = (
-    "Discord 不让收消息内容：到 Developer Portal 的 Bot 页打开 Message Content Intent，再到「系统」页保存一次"
+    "Discord 不让收消息内容：到 Developer Portal 的 Bot 页打开 Message Content Intent，"
+    "再到「平台接入」页保存一次"
 )
 # Close codes that retrying cannot fix. Reconnecting after these only burns the Identify allowance.
 FATAL = {
-    4004: ("auth_failed", "Discord 不认这个 Token：到 Developer Portal 的 Bot 页重置，再到「系统」页填新的"),
+    4004: (
+        "auth_failed",
+        "Discord 不认这个 Token：到 Developer Portal 的 Bot 页重置，再到「平台接入」页填新的",
+    ),
     4010: ("misconfigured", "Discord 说分片设置不对（4010）"),
     4011: ("misconfigured", "这个 bot 的服务器太多，Discord 要求分片（4011），nest 还不支持"),
     4012: ("misconfigured", "Discord 说接口版本不对（4012）：nest 要升级"),

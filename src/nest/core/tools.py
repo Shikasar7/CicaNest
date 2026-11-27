@@ -32,7 +32,7 @@ from nest.core.plugins import PluginManager
 from nest.core.prompt import speaker
 from nest.core.reminders import REPEAT_LABELS, parse_request, when_label
 from nest.core.sandbox import Sandbox
-from nest.core.workspace import RECEIVED, Workspace, WorkspaceError
+from nest.core.workspace import OLD, RECEIVED, SHARED, Workspace, WorkspaceError
 from nest.llm.base import Tool, ToolRunner
 from nest.storage.bots import BotChannel, BotConfig
 from nest.watch.check import reading_lines
@@ -87,7 +87,25 @@ WORK_HINT = (
     "（Linux，有 Python 和 pip，通常能上公网，本机和局域网不通）。"
     "做出来要给对方的东西用 deliver_file 交给对方。）"
 )
-PATH = {"type": "string", "description": "工作区里的相对路径，比如 笔记/草稿.md；空着是工作区本身"}
+SHARED_HINT = (
+    "（对方把 nest 那台电脑上的文件夹共享给了你：{folders}。用同样的工具读写，路径写成 共享/文件夹名/…；"
+    "能改的文件夹里覆盖或修改文件前，原来的会自动存进你工作区的 旧版本/。在你的容器里它们是只读的，"
+    "命令只能读，要改就用 write_file / edit_file。）"
+)
+SHARE_HOW = (
+    "（对方电脑上的其他文件你碰不到。对方想让你直接读写电脑上的文件时，告诉对方在聊天页的「文件」里"
+    "把文件夹共享给你，就不用一个个发过来了。）"
+)
+# A model that calls no tools: she is told so in her chat with the user, so she does not pretend.
+NO_TOOLS = (
+    "（你现在用的模型不能调用工具：读写文件、读网页、设提醒这些你都做不了，也碰不到对方电脑上的文件。"
+    "对方要你做这类事时别假装做了，直接说做不了，并告诉对方：去控制台「模型」页把这个模型的「工具调用」打开"
+    "（OpenAI 兼容接口才有这个开关，接口本身也要支持），或者给你换一个能用工具的模型。）"
+)
+PATH = {
+    "type": "string",
+    "description": "工作区里的相对路径，比如 笔记/草稿.md；共享的文件夹是 共享/文件夹名/…；空着是工作区本身",
+}
 WORK_TOOLS = (
     Tool(
         "list_files",
@@ -223,7 +241,8 @@ WIN_HINT = (
     "{folders}{elsewhere}）"
 )
 WIN_ASKS = (
-    "除了在授权文件夹里看，每一步都要对方在电脑上点头（会给对方看改动和完整命令），对方不在电脑前就做不了。"
+    "除了在授权文件夹里看、在标了「改不用问」的文件夹里写改删移动，"
+    "每一步都要对方在电脑上点头（会给对方看改动和完整命令），对方不在电脑前就做不了。"
 )
 # The PC away: in her chat she is told she can hand it to a task; in a task a step waits for it.
 WIN_AWAY = (
@@ -236,6 +255,13 @@ WIN_ALLOWS = (
     "对方开了「完全允许」：看、写、改、删、移动文件在别的地方也直接能做，不用等对方点头；"
     "跑命令、打开不常见的文件仍然每次要对方点头，定时任务里也不算。"
 )
+
+
+def _folder_note(folder: dict[str, Any]) -> str:
+    if folder.get("read_only"):
+        return "（只读）"
+    return "（改不用问）" if folder.get("free_change") else ""
+
 
 READ_SKILL = Tool(
     "read_skill",
@@ -598,12 +624,32 @@ class CompanionTools:
         )
         return (
             HINT
-            + (WORK_HINT if self.workspace is not None and self.allowed(bot, "write_file") else "")
+            + self._work_hint(bot)
             + (TASK_HINT if self.brain.tasks is not None and self.allowed(bot, "start_task") else "")
             + (SEARCH_HINT_TOOL if self.search_key() and self.allowed(bot, "web_search") else "")
             + self._windows_hint(bot)
             + known
         )
+
+    def _work_hint(self, bot: BotConfig) -> str:
+        """Her workspace; the folders shared with her, or (none, and no PC to work on) how to get some."""
+        if self.workspace is None or not self.allowed(bot, "write_file"):
+            return ""
+        shared = self.workspace.shared(bot.id)
+        if shared:
+            shown = "、".join(f"{SHARED}/{s.name}" + ("" if s.writable else "（只读）") for s in shared)
+            return WORK_HINT + SHARED_HINT.format(folders=shown)
+        return WORK_HINT + ("" if self._windows_on(bot) else SHARE_HOW)
+
+    async def missing(self, bot: BotConfig, channel: BotChannel) -> str:
+        """In her chat with the user on a model that calls no tools: NO_TOOLS (else "")."""
+        runtime = self.brain._model(bot)
+        if runtime is None or runtime.can_use_tools:
+            return ""
+        keeper = self.brain.reminders or self.brain.keepsakes
+        if keeper is None or not await keeper.is_users_chat(bot, channel):
+            return ""
+        return NO_TOOLS
 
     def _windows_allowed(self, bot: BotConfig) -> bool:
         return self.executor is not None and self.allowed(bot, "win_list_files")
@@ -617,7 +663,7 @@ class CompanionTools:
         if not self.executor.online:
             return WIN_AWAY if self.brain.tasks is not None and self.allowed(bot, "start_task") else ""
         status = self.executor.status()
-        shown = "、".join(f["path"] + ("（只读）" if f["read_only"] else "") for f in status["folders"])
+        shown = "、".join(f["path"] + _folder_note(f) for f in status["folders"])
         return WIN_HINT.format(
             folders=f"对方授权给你的文件夹：{shown}，里面直接能看；" if shown else "",
             elsewhere=WIN_ALLOWS if status.get("allow_all") else WIN_ASKS,
@@ -898,13 +944,13 @@ class CompanionTools:
                 content = str(given.get("content") or "")
                 await asyncio.to_thread(space.write, bot.id, path, content.encode("utf-8"))
                 self._changed(bot)
-                return f"写好了：{path}（{len(content)} 字）"
+                return f"写好了：{path}（{len(content)} 字）{self._kept(path)}"
             if name == "edit_file":
                 await asyncio.to_thread(
                     space.edit, bot.id, path, str(given.get("old") or ""), str(given.get("new") or "")
                 )
                 self._changed(bot)
-                return f"改好了：{path}"
+                return f"改好了：{path}{self._kept(path)}"
             if name == "deliver_file":
                 shelf = await asyncio.to_thread(space.deliver, bot.id, path)
                 self._changed(bot)
@@ -929,6 +975,11 @@ class CompanionTools:
         text = await asyncio.to_thread(skill.path.read_text, encoding="utf-8", errors="replace")
         cut = "\n……（后面略）" if len(text) > SKILL_CHARS else ""
         return f"技能「{skill.name}」的做法：\n{text[:SKILL_CHARS]}{cut}"
+
+    @staticmethod
+    def _kept(path: str) -> str:
+        shared = path.strip().replace("\\", "/").startswith(f"{SHARED}/")
+        return f"（原来有这个文件的话，旧的存进了 {OLD}/）" if shared else ""
 
     def _changed(self, bot: BotConfig) -> None:
         if self._broadcaster is not None:

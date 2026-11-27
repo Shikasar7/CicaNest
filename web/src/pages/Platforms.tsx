@@ -334,21 +334,21 @@ function QQPlaces({ system, save }: { system: SystemView; save: (body: SystemSet
       {system.snowluma.mode && (
         <div className="mb-5 space-y-1.5">
           <p id="snowluma-mode" className="text-sm font-medium">
-            SnowLuma 的运行方式
+            nest 管的 QQ 在哪里运行
           </p>
           <Segmented
             labelledBy="snowluma-mode"
             options={[
-              { value: 'program', label: '这台电脑上的程序' },
-              { value: 'docker', label: 'Docker 容器' },
+              { value: 'docker', label: 'Docker 容器（NapCat）' },
+              { value: 'program', label: '这台电脑上的 SnowLuma' },
             ]}
             value={system.snowluma.mode}
             onChange={(mode) => void save({ snowluma_mode: mode })}
           />
           <p className="text-xs text-muted-foreground">
             {system.snowluma.mode === 'docker'
-              ? 'SnowLuma 和 QQ 在 Docker 容器里：nest 通过 docker 命令启动、停止它，QQ 用扫码登录。'
-              : 'SnowLuma 是这台电脑上的一个文件夹，QQ 是这台电脑上登录的 QQ（Windows 的做法）。'}
+              ? '每个 QQ 号一个 NapCat 容器：nest 通过 docker 命令建、启动、停止它们，QQ 用扫码登录。'
+              : 'SnowLuma 是这台电脑上的一个文件夹，QQ 是这台电脑上登录的 QQ。SnowLuma 已经不再公开发布，只适合已经装好的。'}
           </p>
         </div>
       )}
@@ -361,6 +361,13 @@ function QQPlaces({ system, save }: { system: SystemView; save: (body: SystemSet
               placeholder="napcat-bot1, napcat-bot2, napcat-bot3"
               value={system.snowluma.container ?? 'snowluma'}
               onSave={(v) => save({ snowluma_container: v })}
+            />
+            <PathField
+              label="QQ 容器的镜像"
+              hint="新建 QQ 容器时用。NapCat 官方镜像 2026 年 11 月已经下架：这台电脑上没有的话，填一个你用 docker load 导入或从别处拿到的。留空用默认的 mlikiowa/napcat-docker:latest"
+              placeholder="mlikiowa/napcat-docker:latest"
+              value={system.qq.napcat_image_default ? '' : (system.qq.napcat_image ?? '')}
+              onSave={(v) => save({ napcat_image: v })}
             />
             <PathField
               label="扫码页地址"
@@ -475,7 +482,7 @@ export function Platforms() {
         <details className="rounded-2xl border bg-card px-5 py-4">
           <summary className="cursor-pointer text-sm font-semibold">要接 QQ 的话：QQ 的运行方式</summary>
           <p className="mt-2 mb-4 text-xs text-muted-foreground">
-            QQ 靠 SnowLuma 接到 nest。接第一个 QQ 号之前，先在这里说好它在哪里运行。
+            QQ 要靠一个 OneBot 11 协议端（NapCat、SnowLuma 这类）接到 nest。想让 nest 替每个号建 NapCat 容器，先在这里说好它在哪里运行、用哪个镜像；在「伙伴」页加号时选「接我自己运行的协议端」的话，用不到这一节。
           </p>
           <QQPlaces system={data} save={saveSettings} />
         </details>

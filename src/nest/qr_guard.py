@@ -103,7 +103,7 @@ class QRGuard:
             who = names.get(box.account) or box.account or name
             log.warning(
                 "%s 的 QQ 登录失效了，一直在等扫码：已停下容器 %s，不再刷新二维码。"
-                "要登录时在「系统」页点它的「扫码登录」",
+                "要登录时在「平台接入」页点它的「扫码登录」",
                 who,
                 name,
             )

@@ -66,6 +66,8 @@ export type NestDesktop = {
   openChat?(): Promise<boolean>
   /** Show the console window (the chat window's 「控制台」 button). Absent on an app from before it. */
   openConsole?(): Promise<boolean>
+  /** The 电脑上做事 settings window (authorized folders, 改不用问). Absent on an app from before it. */
+  openExecutor?(): Promise<boolean>
   /** Light or dark, and the colours of the theme picked in nest (null: nest's own look), for the app's own
    * windows and its title bar. Absent on an app from before themes. */
   setTheme?(theme: {

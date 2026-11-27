@@ -459,3 +459,45 @@ test('a routine step (nobody there) that needs a nod is not done and opens no wi
   assert.equal(asked.length, 0)
   assert.equal(await executor.take({ ...step('win_read_file', { path: note }), unattended: false }), '外面的')
 })
+
+test('a folder marked 改不用问 is changed without a nod, also in a routine; elsewhere and for commands it still asks', async () => {
+  const { shared, outside, work, options } = workspace()
+  options.folders[1].freeChange = true
+  const note = path.join(work, '笔记.txt')
+  assert.equal(decide('win_write_file', { path: note }, options).level, 'auto')
+  assert.equal(decide('win_edit_file', { path: note }, options).level, 'auto')
+  fs.writeFileSync(note, 'x')
+  assert.equal(decide('win_delete', { path: note }, options).level, 'auto')
+  // A move needs both ends in such folders: out of it (or in from outside) is asked.
+  fs.mkdirSync(path.join(work, '旧'))
+  assert.equal(decide('win_move', { path: note, to: path.join(work, '旧') }, options).level, 'auto')
+  assert.equal(decide('win_move', { path: note, to: path.join(outside, 'n.txt') }, options).level, 'confirm')
+  // Not the folder itself, not a read-only one even if the flag is there, not a command, not elsewhere.
+  assert.equal(decide('win_delete', { path: work }, options).level, 'deny')
+  options.folders[0].freeChange = true // shared is read-only: the flag counts for nothing there
+  assert.equal(decide('win_write_file', { path: path.join(shared, 'x.txt') }, options).level, 'deny')
+  assert.equal(decide('win_write_file', { path: path.join(outside, 'x.txt') }, options).level, 'confirm')
+  assert.equal(decide('win_run_command', { command: 'dir', cwd: work }, options).level, 'confirm')
+  // In a routine (nobody there) the folder's own setting still holds.
+  const { executor, asked, settings } = stepper(work)
+  settings.folders[0].freeChange = true
+  const step = { id: 'r', scope: 's.0', tool: 'win_write_file', bot_name: '阿鲸', unattended: true }
+  const told = await executor.take({ ...step, given: { path: path.join(work, 'x.txt'), content: '好' } })
+  assert.doesNotMatch(told, /定时任务|没做/)
+  assert.equal(fs.readFileSync(path.join(work, 'x.txt'), 'utf8'), '好')
+  assert.equal(asked.length, 0)
+})
+
+test('the store keeps a folder read-only, asked or free, and never both read-only and free', () => {
+  const { ExecutorStore } = require('../src/executor/store')
+  const store = new ExecutorStore(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nest-store-')), 'executor.json'))
+  const folder = String.raw`D:\资料`
+  store.add(folder)
+  assert.deepEqual(store.get().folders, [{ path: folder, readOnly: false, freeChange: false }])
+  store.setMode(folder, 'free')
+  assert.deepEqual(new ExecutorStore(store.file).get().folders[0], { path: folder, readOnly: false, freeChange: true })
+  store.setMode(folder, 'read')
+  assert.deepEqual(store.get().folders[0], { path: folder, readOnly: true, freeChange: false })
+  fs.writeFileSync(store.file, JSON.stringify({ folders: [{ path: folder, readOnly: true, freeChange: true }] }))
+  assert.equal(new ExecutorStore(store.file).get().folders[0].freeChange, false)
+})

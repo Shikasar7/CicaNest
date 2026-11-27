@@ -97,15 +97,18 @@ async def _through_nest(state: Any, name: str, box: docker.Container, md5: str) 
         )
     variable = nest_variable(box.account)
     before = state.secrets.get(variable)
+    # the image it was made from, which is on this machine: the one set on 平台接入 may not be
+    image = box.image or napcat.DEFAULT_IMAGE
     await asyncio.to_thread(docker.remove, name)
     try:
         await asyncio.to_thread(
-            docker.create, napcat.run_args(plan, webui_token=webui_token, password_md5=md5)
+            docker.create,
+            napcat.run_args(plan, webui_token=webui_token, password_md5=md5, image=image),
         )
     except system.ProcessError as exc:
         log.error("用新的回退密码重建 %s 失败：%s；换回原来的设置再建", name, exc)
         try:
-            args = napcat.run_args(plan, webui_token=webui_token, password_md5=before)
+            args = napcat.run_args(plan, webui_token=webui_token, password_md5=before, image=image)
             await asyncio.to_thread(docker.create, args)
         except system.ProcessError as again:
             log.error("重建 %s 又失败了：%s", name, again)

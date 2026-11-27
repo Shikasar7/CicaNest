@@ -2,7 +2,7 @@
 when it is back.
 
 Every half minute the accounts' connection states are looked at (Hub.account_views). An enabled account
-that has not been connected for the set minutes (「系统」页「掉线提醒」, 5 by default) gets one message,
+that has not been connected for the set minutes (「平台接入」页「掉线提醒」, 5 by default) gets one message,
 sent by any bot that is still connected; when it connects again, one more says so. Short drops (the
 weekly restart, NapCat restarting its login) end before the alert is due and are not reported. With no
 QQ number set it is off. When no bot is connected nobody can send it: logged once, tried again while the
@@ -116,7 +116,7 @@ class OfflineAlert:
                 continue
             down_for = math.floor((now - since) / 60)
             detail = view["status"]["detail"]
-            advice = "如果是 QQ 登录失效，处理好以后到控制台「系统」页点它的「扫码登录」。"
+            advice = "如果是 QQ 登录失效，处理好以后到控制台「平台接入」页点它的「扫码登录」。"
             text = (
                 f"nest 提醒：{who}掉线 {down_for} 分钟了"
                 + (f"：{detail}" if detail else "")
@@ -144,7 +144,7 @@ class OfflineAlert:
             return []
         text = f"nest 提醒：{who}显示在线，其实是假在线。{status['detail']}。这时它不会回消息"
         if account.startswith("qq:"):
-            text += "，可以到控制台「系统」页重启它的容器，不行再点「扫码登录」"
+            text += "，可以到控制台「平台接入」页重启它的容器，不行再点「扫码登录」"
         text += "。"
         if await self._tell(to, text, connected):
             self._deaf_told[account] = status["since"]

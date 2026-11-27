@@ -21,7 +21,16 @@ from nest.adapters.base import Adapter, AdapterStatus, BackfillSource, StatusSin
 from nest.adapters.registry import DESK, PLATFORMS, build_adapter, can
 from nest.core.brain import Brain
 from nest.core.broadcast import Broadcaster
-from nest.core.events import CaughtUp, ChannelsSeen, Event, MemberJoined, MessageEvent, RecallEvent
+from nest.core.events import (
+    CaughtUp,
+    ChannelRef,
+    ChannelsSeen,
+    Event,
+    MemberJoined,
+    MessageEvent,
+    RecallEvent,
+)
+from nest.core.groups import is_desk_group
 from nest.core.stickers import StickerKeeper
 from nest.secrets import SecretStore
 from nest.storage.accounts import Account, get_account, list_accounts
@@ -33,7 +42,7 @@ log = logging.getLogger(__name__)
 
 AdapterFactory = Callable[[Account, SecretStore, StatusSink, BackfillSource], Adapter]
 DAY = 86400.0
-CONTAINER_STOPPED = "QQ 容器已停止，没有在连：在「系统」页启动它，或点「扫码登录」"
+CONTAINER_STOPPED = "QQ 容器已停止，没有在连：在「平台接入」页启动它，或点「扫码登录」"
 
 
 def status_dict(status: AdapterStatus) -> dict[str, Any]:
@@ -97,10 +106,16 @@ class Hub:
             account,
             self.secrets,
             partial(self._status_changed, account.id),
-            partial(self.store.backfill_targets, account.platform, account.self_id),
+            partial(self._backfill_targets, account.platform, account.self_id),
         )
         self.adapters[account.id] = adapter  # the same dict the brain and 监控 send through
         await adapter.start(self._queue.put)
+
+    async def _backfill_targets(self, platform: str, account: str) -> list[tuple[ChannelRef, float]]:
+        """The account's channels the platform is asked for missed messages of: not the 桌面群, which are
+        kept under each member's account too but live in nest alone."""
+        found = await self.store.backfill_targets(platform, account)
+        return [(ref, at) for ref, at in found if not is_desk_group(ref)]
 
     async def reconnect(self, account_id: str) -> None:
         """Pick up an account's changed connection settings: end its connection and open a new one."""
@@ -225,6 +240,8 @@ class Hub:
             event = await self._queue.get()
             try:
                 if isinstance(event, MessageEvent):
+                    if self.brain is not None:
+                        event = self.brain.heard_own_voice(event)
                     row = await self.store.save(event)
                     if row is not None:
                         self.broadcaster.publish("message", row)

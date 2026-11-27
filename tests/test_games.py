@@ -134,6 +134,43 @@ async def _answered(w: World, chat: int, text: str) -> bool:
     return any(r["from_self"] and r["text"] == text for r in await rows(w, chat))
 
 
+async def _cards(w: World, chat: int) -> list[dict[str, Any]]:
+    return [
+        s["data"] for r in await rows(w, chat) if r["from_self"] for s in r["segments"] if s["type"] == "game"
+    ]
+
+
+async def test_she_invites_you_with_a_card_instead_of_playing_in_words(world: World) -> None:  # noqa: F811
+    chat = await _ready(world)
+    model(world).queue("好呀，这次让你先下！[一起玩：五子棋]")
+    await world.http.post(f"/api/desk/{WHALE}/messages", json={"text": "想下五子棋"})
+    cards = await eventually(lambda: _cards(world, chat))
+    assert cards == [{"kind": "gomoku", "mode": "you", "name": "五子棋"}]
+    said = [r for r in await rows(world, chat) if r["from_self"]]
+    assert [r["text"] for r in said] == ["好呀，这次让你先下！", "[邀请你一起玩五子棋]"]
+    assert "[一起玩：五子棋]" in model(world).requests[-1][1].content  # she was told how to invite
+    assert await _current(world) is None  # nothing starts until the card is tapped
+
+    # She draws, you guess; a game we do not have is only taken out of her words.
+    model(world).queue("我来画，你猜！[一起玩：我画你猜]")
+    await world.http.post(f"/api/desk/{WHALE}/messages", json={"text": "换一个"})
+    await eventually(lambda: _answered(world, chat, "我来画，你猜！"))
+    assert (await eventually(lambda: _two(world, chat)))[1] == {
+        "kind": "draw",
+        "mode": "her",
+        "name": "她画你猜",
+    }
+    model(world).queue("飞行棋我不会啦[一起玩：飞行棋]")
+    await world.http.post(f"/api/desk/{WHALE}/messages", json={"text": "飞行棋呢"})
+    await eventually(lambda: _answered(world, chat, "飞行棋我不会啦"))
+    assert len(await _cards(world, chat)) == 2
+
+
+async def _two(w: World, chat: int) -> list[dict[str, Any]] | None:
+    cards = await _cards(w, chat)
+    return cards if len(cards) == 2 else None
+
+
 async def test_no_game_without_a_chat_or_with_an_unknown_bot(world: World) -> None:  # noqa: F811
     response = await world.http.post("/api/games", json={"bot_id": WHALE})
     assert response.status_code == 409 and "聊天" in response.json()["detail"]

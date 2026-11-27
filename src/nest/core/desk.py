@@ -277,12 +277,14 @@ class Desk:
         """The bot's answer to a message typed here (or a reminder, a line of her own: `kind` marks its id,
         "c:" for 主动搭话): stored and shown here, never sent to the platform. Words and 表情包 (sticker
         segments) are shown, with her voice (a voice segment) beside the words; anything else is left out."""
-        shown = tuple(s for s in segments if s.type in ("text", "sticker", "voice"))
+        shown = tuple(s for s in segments if s.type in ("text", "sticker", "voice", "game"))
         text = "".join(str(s.data.get("text", "")) for s in shown if s.type == "text")
         if not text:
             text = "".join(
                 sticker_line(str(s.data.get("label", "")), hers=True) for s in shown if s.type == "sticker"
             )
+        if not text:  # 她邀请你玩 (nest.core.games): a card
+            text = "".join(f"[邀请你一起玩{s.data.get('name', '')}]" for s in shown if s.type == "game")
         if not text:
             return ActionResult("failed", error="桌面聊天现在只能显示文字和表情包")
         message_id = f"{APP}{kind}{uuid.uuid4().hex}"

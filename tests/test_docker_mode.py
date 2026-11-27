@@ -151,7 +151,7 @@ async def test_a_napcat_container_per_account(http: httpx.AsyncClient, box: Fake
     assert (await http.post("/api/system/snowluma/restart", params={"container": "napcat-bot3"})).json()["ok"]
     assert box.calls[-1] == ("restart", "napcat-bot3")
     response = await http.post("/api/system/snowluma/stop", params={"container": "snowluma"})
-    assert response.status_code == 400 and "不是「系统」页设置里的 QQ 容器" in response.json()["detail"]
+    assert response.status_code == 400 and "不是「平台接入」页设置里的 QQ 容器" in response.json()["detail"]
     assert (await http.post("/api/system/snowluma/stop")).json() == {"ok": True, "stopped": True}
     assert box.calls[-3:] == [("stop", "napcat-bot1"), ("stop", "napcat-bot2"), ("stop", "napcat-bot3")]
 
@@ -223,7 +223,7 @@ async def test_the_login_qr_code_in_the_console(http: httpx.AsyncClient, box: Fa
     assert view["qr"] is None and "没有在运行" in view["detail"] and view["running"] is False
 
     response = await http.get("/api/system/qq/login", params={"container": "snowluma"})
-    assert response.status_code == 400 and "不是「系统」页设置里的 QQ 容器" in response.json()["detail"]
+    assert response.status_code == 400 and "不是「平台接入」页设置里的 QQ 容器" in response.json()["detail"]
     box.fail = "docker 出错：boom"
     response = await http.get("/api/system/qq/login", params={"container": "napcat-bot1"})
     assert response.status_code == 500 and response.json()["detail"] == "docker 出错：boom"
@@ -496,3 +496,31 @@ def test_reading_a_containers_log(run: list[Any]) -> None:
     run.append((1, "Error response from daemon: No such container: napcat-x", None))
     with pytest.raises(ProcessError):
         real_login_log("napcat-x")
+
+
+def test_what_went_wrong_is_the_error_line_and_a_missing_image_is_told_apart(run: list[Any]) -> None:
+    run.pop(0)
+    stderr = (
+        "Unable to find image 'mlikiowa/napcat-docker:latest' locally\n"
+        "docker: Error response from daemon: pull access denied for mlikiowa/napcat-docker, repository"
+        " does not exist or may require 'docker login'\n"
+        "Run 'docker run --help' for more information\n"
+    )
+    run.append((125, "", stderr))
+    with pytest.raises(docker.ImageMissing) as caught:
+        docker.create(["run", "-d", "mlikiowa/napcat-docker:latest"])
+    assert str(caught.value).startswith("docker 出错：Error response from daemon: pull access denied")
+    run.append((125, "", "docker: Error response from daemon: Conflict. The container name is in use\n"))
+    with pytest.raises(docker.ProcessError) as caught:
+        docker.create(["run", "-d", "x"])
+    assert not isinstance(caught.value, docker.ImageMissing)
+    assert (
+        str(caught.value) == "docker 出错：Error response from daemon: Conflict. The container name is in use"
+    )
+
+
+def test_a_container_says_what_image_it_was_made_from(run: list[Any]) -> None:
+    run.pop(0)
+    state = json.dumps({"Status": "running", "Running": True})
+    run.append((0, f'{state}\tnull\tnull\tnull\t"mlikiowa/napcat-docker:latest"\n', ""))
+    assert real_container("napcat-bot1").image == "mlikiowa/napcat-docker:latest"

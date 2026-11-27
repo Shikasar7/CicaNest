@@ -49,8 +49,8 @@ from tests.helpers import eventually, free_socket, serve, sse_events
 
 TOKEN = "t"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
-NOT_SET_SNOWLUMA = "还没有设置 SnowLuma 文件夹，请先在「系统」页填写"
-NOT_SET_QQ = "还没有设置 QQ 程序的位置，请先在「系统」页填写"
+NOT_SET_SNOWLUMA = "还没有设置 SnowLuma 文件夹，请先在「平台接入」页填写"
+NOT_SET_QQ = "还没有设置 QQ 程序的位置，请先在「平台接入」页填写"
 
 
 def factory(config: ProviderConfig, secrets: SecretReader) -> FakeProvider:
@@ -208,6 +208,8 @@ async def test_defaults_come_from_disk_and_are_not_stored(nest: Nest) -> None:
         "configured": True,
         "clients": 0,
         "login_url": "",
+        "napcat_image": "mlikiowa/napcat-docker:latest",
+        "napcat_image_default": True,
     }
     assert await nest.rows() == []
 
@@ -228,7 +230,14 @@ async def test_defaults_follow_the_disk_until_saved(nest: Nest) -> None:
         "pid": None,
         "webui_url": "http://127.0.0.1:5099",
     }
-    assert view["qq"] == {"executable": "", "configured": False, "clients": 0, "login_url": ""}
+    assert view["qq"] == {
+        "executable": "",
+        "configured": False,
+        "clients": 0,
+        "login_url": "",
+        "napcat_image": "mlikiowa/napcat-docker:latest",
+        "napcat_image_default": True,
+    }
     qq_program(nest.machine.qq_exe)  # the default appears: picked up on the next read
     assert (await nest.view())["qq"]["executable"] == str(nest.machine.qq_exe)
 
@@ -274,7 +283,14 @@ async def test_saving_paths(nest: Nest, tmp_path: Path) -> None:
         "/api/system/settings", json={"snowluma_dir": str(other), "qq_executable": str(qq)}
     )
     assert response.status_code == 200
-    assert response.json()["qq"] == {"executable": str(qq), "configured": True, "clients": 0, "login_url": ""}
+    assert response.json()["qq"] == {
+        "executable": str(qq),
+        "configured": True,
+        "clients": 0,
+        "login_url": "",
+        "napcat_image": "mlikiowa/napcat-docker:latest",
+        "napcat_image_default": True,
+    }
     assert dict(await nest.rows()) == {
         "snowluma_dir": f'"{other}"'.replace("\\", "\\\\"),
         "qq_executable": f'"{qq}"'.replace("\\", "\\\\"),
@@ -388,6 +404,8 @@ async def test_system_view(nest: Nest) -> None:
         "configured": True,
         "clients": 4,
         "login_url": "",
+        "napcat_image": "mlikiowa/napcat-docker:latest",
+        "napcat_image_default": True,
     }
     assert view["accounts"] == [
         {"id": "qq:10001", "self_id": "10001", "name": "阿鲸", "state": "stopped", "detail": "已停用"}

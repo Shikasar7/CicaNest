@@ -10,6 +10,8 @@
 //   (or, if they said so, for the rest of that answer or task, for the same tool in the same folder).
 // - Changing files (write, edit, delete to the Recycle Bin, move), commands and opening: the user's nod
 //   everywhere, shown exactly (the diff, the whole command). A read-only folder is not changed at all.
+//   A folder the user marked 改不用问 (freeChange) is changed without a nod — also in a routine, since the
+//   user chose that folder by itself: a move only when both ends are in such folders.
 //   "同类" is the same tool in the same folder (a move: from the same folder into the same one, and only
 //   into an authorized folder). Commands have no "同类": each one is asked
 //   ("the same program" is no limit when `a; b` starts with `a`).
@@ -194,7 +196,8 @@ function isFolder(place) {
 
 /**
  * Judge one path. `folders`: [{ path, readOnly }] the user authorized. Returns
- * { ok: false, why } — never; or { ok: true, real, folder (the authorized one it is in, or null), readOnly }.
+ * { ok: false, why } — never; or { ok: true, real, folder (the authorized one it is in, or null), readOnly,
+ * free (that folder is 改不用问) }.
  */
 function judge(given, { folders = [], forbidden = forbiddenRoots(), guard = true } = {}) {
   const text = String(given ?? '').trim()
@@ -222,10 +225,16 @@ function judge(given, { folders = [], forbidden = forbiddenRoots(), guard = true
   for (const f of folders) {
     const root = real(f.path)
     if (root && inside(where, root) && (!folder || root.length > folder.root.length)) {
-      folder = { root, readOnly: Boolean(f.readOnly), path: f.path }
+      folder = { root, readOnly: Boolean(f.readOnly), free: !f.readOnly && f.freeChange === true, path: f.path }
     }
   }
-  return { ok: true, real: where, folder: folder ? folder.root : null, readOnly: folder ? folder.readOnly : false }
+  return {
+    ok: true,
+    real: where,
+    folder: folder ? folder.root : null,
+    readOnly: folder ? folder.readOnly : false,
+    free: folder ? folder.free : false,
+  }
 }
 
 /**
@@ -276,6 +285,7 @@ function decide(tool, given, options = {}) {
         return { level: 'deny', why: '不能删除或移走整个磁盘、整个授权文件夹' }
       }
     }
+    if (judged.every((j) => j.free)) return { ...decision, level: 'auto' }
     return asked(decision, '会改动这台电脑上的文件')
   }
   // open: a program is never run this way (完全允许 or not); a kind this does not know is asked each time.

@@ -11,6 +11,12 @@ const STATUS = {
 }
 
 const api = window.nestExecutor
+// What she may do in an authorized folder: look only, change with a nod each time, change without asking.
+const MODES = [
+  ['read', '只能看'],
+  ['ask', '改要问我'],
+  ['free', '改不用问'],
+]
 
 function render(state) {
   document.getElementById('enabled').checked = state.enabled
@@ -28,19 +34,18 @@ function render(state) {
     name.className = 'path'
     name.textContent = folder.path
     name.title = folder.path
-    const readOnly = document.createElement('label')
-    readOnly.className = 'ro'
-    const box = document.createElement('input')
-    box.type = 'checkbox'
-    box.checked = folder.readOnly
-    box.addEventListener('change', () => api.setReadOnly(folder.path, box.checked).then(refresh))
-    readOnly.append(box, document.createTextNode('只读'))
+    const mode = document.createElement('select')
+    mode.className = 'mode'
+    mode.setAttribute('aria-label', `她在 ${folder.path} 里能做什么`)
+    for (const [value, label] of MODES) mode.append(new Option(label, value))
+    mode.value = folder.readOnly ? 'read' : folder.freeChange ? 'free' : 'ask'
+    mode.addEventListener('change', () => api.setMode(folder.path, mode.value).then(refresh))
     const remove = document.createElement('button')
     remove.className = 'btn ghost small'
     remove.type = 'button'
     remove.textContent = '移除'
     remove.addEventListener('click', () => api.remove(folder.path).then(refresh))
-    item.append(name, readOnly, remove)
+    item.append(name, mode, remove)
     list.append(item)
   }
   document.getElementById('empty').hidden = state.folders.length > 0

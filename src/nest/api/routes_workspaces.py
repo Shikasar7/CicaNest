@@ -1,6 +1,7 @@
 """工作区 in the console and the chat window (伙伴模式): a companion's folder — look through it, download
-what she made (给你的/), send her a file (into 收到的/), delete. Paths are relative to her folder and checked
-like hers (nest.core.workspace)."""
+what she made (给你的/), send her a file (into 收到的/), delete; the folders on this machine shared with her
+(共享/); and what she can reach at all (her model calls tools? the 电脑上做事 plugin on for her?), so the page
+can say what is missing. Paths are relative to her folder and checked like hers (nest.core.workspace)."""
 
 from __future__ import annotations
 
@@ -11,11 +12,11 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from nest.api.auth import require_token
 from nest.core.egress import is_online, recent, set_online
-from nest.core.workspace import FILE_MAX, FOR_YOU, RECEIVED, WorkspaceError
+from nest.core.workspace import FILE_MAX, FOR_YOU, OLD, RECEIVED, SHARED, SHARED_MAX, WorkspaceError
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 CHUNK = 64 * 1024
@@ -46,7 +47,59 @@ async def files(request: Request, bot_id: str, path: str = "") -> dict[str, Any]
         "received": RECEIVED,
         "can_run": request.app.state.sandbox is not None,
         "online": await is_online(request.app.state.db, bot_id),
+        "shared_name": SHARED,
+        "old_name": OLD,
+        "shared": [{"name": s.name, "path": s.path, "writable": s.writable} for s in space.shared(bot_id)],
+        "access": _access(request, bot_id),
     }
+
+
+def _access(request: Request, bot_id: str) -> dict[str, Any]:
+    """What she can reach: `tools` her model calls tools (none at all otherwise), `switch` it is an
+    OpenAI-compatible one whose 工具调用 is off (it can be turned on), `files` her file tools are on for her,
+    `windows` the 电脑上做事 plugin is on for her and `pc` a PC is connected for it."""
+    brain = request.app.state.brain
+    bot = brain.bots[bot_id]
+    runtime = brain._model(bot)
+    tools = getattr(brain, "tools", None)
+    executor = getattr(request.app.state, "executor", None)
+    allowed = (lambda name: tools.allowed(bot, name)) if tools is not None else (lambda name: False)
+    return {
+        "tools": runtime is not None and runtime.can_use_tools,
+        "switch": runtime is not None and not runtime.can_use_tools and runtime.config.kind == "openai_chat",
+        "model": runtime.config.id if runtime is not None else "",
+        "files": allowed("write_file"),
+        "windows": executor is not None and allowed("win_list_files"),
+        "pc": executor is not None and executor.online,
+    }
+
+
+class SharedFolder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(max_length=1000)
+    writable: bool = False
+
+
+class SharedFolders(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    folders: list[SharedFolder] = Field(max_length=SHARED_MAX)
+
+
+@router.put("/workspaces/{bot_id}/shared")
+async def share(request: Request, bot_id: str, body: SharedFolders) -> dict[str, Any]:
+    """The folders on this machine shared with her from now on (the whole list). Her container is made
+    again at her next command, with them mounted."""
+    space = _bot(request, bot_id)
+    try:
+        made = await asyncio.to_thread(space.set_shared, bot_id, [(f.path, f.writable) for f in body.folders])
+    except WorkspaceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if request.app.state.sandbox is not None:
+        await request.app.state.sandbox.forget(bot_id)
+    request.app.state.broadcaster.publish("workspace", {"bot_id": bot_id})
+    return {"shared": [{"name": s.name, "path": s.path, "writable": s.writable} for s in made]}
 
 
 class OnlineSwitch(BaseModel):

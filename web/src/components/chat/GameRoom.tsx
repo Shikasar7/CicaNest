@@ -9,7 +9,7 @@ import { FLAVOR_NAME, SoupBody, SoupInput } from '@/components/chat/games/Soup'
 import { StickerPicker } from '@/components/chat/StickerPicker'
 import { Segmented } from '@/components/Segmented'
 import { getJson, sendJson, type GameKind, type GameLevel, type GameView, type Message, type SoupFlavor } from '@/lib/api'
-import { useGame } from '@/lib/games'
+import { inviteOf, useGame } from '@/lib/games'
 import { useSubscribe } from '@/lib/live'
 import { stickerImage, stickerOf } from '@/lib/sticker-packs'
 import { cn } from '@/lib/utils'
@@ -443,7 +443,8 @@ export function GameRoom({
   }, [giveUp])
 
   const since = game ? game.created_at - 120 : Infinity
-  const shown = messages.filter((m) => m.sent_at >= since && !m.recalled_at)
+  // Her invitation cards stay in the chat: here they would only read as text.
+  const shown = messages.filter((m) => m.sent_at >= since && !m.recalled_at && !inviteOf(m.segments))
   useLayoutEffect(() => {
     const el = log.current
     if (el) el.scrollTop = el.scrollHeight

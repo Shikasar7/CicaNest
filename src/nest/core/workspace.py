@@ -10,6 +10,13 @@ Where the system cannot open relative to a folder (Windows, where nest is only d
 step is checked not to be a link instead. Names of the kind that hold keys (.env, *.pem, id_rsa…) are
 refused outright. A folder may hold at most LIMIT bytes; a write that would go over it is refused.
 
+共享: folders on nest's machine the user lets her into, seen under 共享/<name>/. The list is kept outside
+every companion's folder (.shared.json in the root: her container cannot change it). Each is read-only or
+writable; before a file there is overwritten or edited, the old one is copied into her 旧版本/ first, and
+nothing there is ever deleted from here. In her container they are mounted read-only (a command cannot
+change or delete them; only write_file / edit_file can, which keep the old version). A folder that is, holds
+or sits in nest's own data or a place for keys cannot be shared (check_shared).
+
 Every method blocks (file system): call from a worker thread (asyncio.to_thread).
 """
 
@@ -18,18 +25,54 @@ from __future__ import annotations
 import contextlib
 import errno
 import fnmatch
+import json
 import os
 import re
 import shutil
 import stat
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 LIMIT = 2 * 1024**3
 FOR_YOU = "给你的"
 RECEIVED = "收到的"
+SHARED = "共享"  # her view of the folders the user shared with her
+OLD = "旧版本"  # what a write in a shared folder replaced
+SHARED_MAX = 20
+SHARED_FILE = ".shared.json"
+# Places a shared folder may not be, hold, or sit in (under the user's home): keys, settings, app data.
+PRIVATE_DIRS = (
+    ".ssh",
+    ".aws",
+    ".azure",
+    ".gnupg",
+    ".docker",
+    ".kube",
+    ".config",
+    ".codex",
+    ".claude",
+    ".nest",
+    "Library",
+    "AppData",
+)
+# The system's own: a shared folder may not be in them.
+SYSTEM_DIRS = (
+    "/etc",
+    "/private/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/System",
+    "/Library",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/boot",
+    "/root",
+)
 READ_CHARS = 20_000
 LIST_MAX = 200
 FILE_MAX = 50 * 1024**2  # one upload or one written file
@@ -51,6 +94,15 @@ NOT_FOLDER = "路径上有一段是文件，不是文件夹"
 
 class WorkspaceError(Exception):
     """Why it was not done, in one Chinese sentence (told to her, or shown in the console)."""
+
+
+@dataclass(frozen=True)
+class Shared:
+    """A folder the user shared with her: seen as 共享/<name>; `path` resolved when it was added."""
+
+    name: str
+    path: str
+    writable: bool
 
 
 @dataclass(frozen=True)
@@ -199,9 +251,14 @@ def _numbered(name: str, n: int) -> str:
 
 
 class Workspace:
-    def __init__(self, root: Path, *, limit: int = LIMIT) -> None:
+    def __init__(
+        self, root: Path, *, limit: int = LIMIT, guarded: tuple[Path, ...] = (), home: Path | None = None
+    ) -> None:
         self.root = root
         self.limit = limit
+        self.home = home  # the user's home folder (tests: another); None: this user's
+        # nest's own places (its home, its data): a shared folder may not be, hold or sit in one
+        self.guarded = guarded
 
     def folder(self, bot_id: str) -> Path:
         """Her folder, made with its two standing folders when it is not there yet."""
@@ -223,6 +280,10 @@ class Workspace:
                 raise WorkspaceError("那边的文件夹里已经有东西了")
             shutil.rmtree(target)
         source.rename(target)
+        shared = self._all_shared()
+        if old_bot in shared:
+            shared[new_bot] = shared.pop(old_bot)
+            self._save_shared(shared)
 
     @staticmethod
     def _parts(relative: str) -> tuple[str, ...]:
@@ -239,22 +300,123 @@ class Workspace:
             raise WorkspaceError("这类文件名（.env、密钥、凭据）不能碰")
         return pure.parts
 
+    # -- 共享 --------------------------------------------------------------------------------------------
+
+    def _all_shared(self) -> dict[str, list[dict[str, Any]]]:
+        try:
+            raw = json.loads((self.root / SHARED_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {str(k): v for k, v in raw.items() if isinstance(v, list)} if isinstance(raw, dict) else {}
+
+    def _save_shared(self, everything: dict[str, list[dict[str, Any]]]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        target = self.root / SHARED_FILE
+        temporary = target.with_name(target.name + ".new")
+        temporary.write_text(json.dumps(everything, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(temporary, target)
+
+    def shared(self, bot_id: str) -> tuple[Shared, ...]:
+        """The folders the user shared with her, as kept."""
+        found = []
+        for item in self._all_shared().get(bot_id, [])[:SHARED_MAX]:
+            if isinstance(item, dict) and item.get("name") and item.get("path"):
+                found.append(Shared(str(item["name"]), str(item["path"]), item.get("writable") is True))
+        return tuple(found)
+
+    def check_shared(self, text: str) -> Path:
+        """A folder that may be shared, resolved; WorkspaceError (why, in Chinese) when it may not."""
+        given = (text or "").strip()
+        if not given or BAD_CHARS.search(given):
+            raise WorkspaceError("文件夹的路径不能用")
+        place = Path(given).expanduser()
+        if not place.is_absolute():
+            raise WorkspaceError("要写完整路径，比如 /Users/你/Documents/资料 或 D:\\资料")
+        if not place.is_dir():
+            raise WorkspaceError(f"nest 那台电脑上没有这个文件夹：{given}")
+        real = place.resolve()
+        home = (self.home or Path.home()).resolve()
+        if real == Path(real.anchor) or real == home:
+            raise WorkspaceError("不能共享整个磁盘或整个用户文件夹，挑里面具体的文件夹")
+        if any(secret_name(part) for part in real.parts):
+            raise WorkspaceError("这类文件夹（.env、密钥、凭据）不能共享")
+        guarded = [*self.guarded, self.root, *(home / name for name in PRIVATE_DIRS)]
+        for spot in guarded:
+            spot = spot.resolve()
+            if real == spot or real.is_relative_to(spot) or spot.is_relative_to(real):
+                raise WorkspaceError(
+                    "这个文件夹是、或者装着、或者在 nest 自己的数据、密钥或应用数据的地方里，不能共享"
+                )
+        system = [Path(p) for p in SYSTEM_DIRS]
+        for name in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+            if os.environ.get(name):
+                system.append(Path(os.environ[name]))
+        if any(real == spot or real.is_relative_to(spot) for spot in system):
+            raise WorkspaceError("系统自己的文件夹不能共享")
+        return real
+
+    def set_shared(self, bot_id: str, folders: list[tuple[str, bool]]) -> tuple[Shared, ...]:
+        """Her shared folders from now on: (path, writable) each, checked; named after the folder."""
+        if len(folders) > SHARED_MAX:
+            raise WorkspaceError(f"最多共享 {SHARED_MAX} 个文件夹")
+        made: list[Shared] = []
+        for text, writable in folders:
+            real = self.check_shared(text)
+            if any(Path(s.path) == real for s in made):
+                continue
+            base = real.name.strip() or "文件夹"
+            name, n = base, 2
+            while any(s.name == name for s in made):
+                name, n = f"{base}-{n}", n + 1
+            made.append(Shared(name, str(real), bool(writable)))
+        everything = self._all_shared()
+        if made:
+            everything[bot_id] = [{"name": s.name, "path": s.path, "writable": s.writable} for s in made]
+        else:
+            everything.pop(bot_id, None)
+        self._save_shared(everything)
+        return tuple(made)
+
+    def _place(self, bot_id: str, parts: tuple[str, ...]) -> tuple[Path, tuple[str, ...], Shared | None]:
+        """Where `parts` is: (the folder to go down from, the names below it, the shared folder or None)."""
+        if parts and parts[0] == SHARED:
+            if len(parts) == 1:
+                raise WorkspaceError(f"{SHARED}/ 下面只有对方共享给你的文件夹，要写到其中一个里面")
+            link = next((s for s in self.shared(bot_id) if s.name == parts[1]), None)
+            if link is None:
+                raise WorkspaceError(f"没有叫「{parts[1]}」的共享文件夹")
+            return Path(link.path), parts[2:], link
+        return self.folder(bot_id).resolve(), parts, None
+
+    def _file(
+        self, bot_id: str, parts: tuple[str, ...], missing: str
+    ) -> tuple[Path, tuple[str, ...], Shared | None]:
+        """Like _place, for a file: something must be named below the folder it starts from."""
+        root, rest, link = self._place(bot_id, parts)
+        if not rest:
+            raise WorkspaceError(missing)
+        return root, rest, link
+
     def path(self, bot_id: str, relative: str) -> Path:
         """Where `relative` is, for showing: checked like every use, but never open what it returns (the
         container can change the folder after the check; the methods below go down by name)."""
-        parts = self._parts(relative)
-        base = self.folder(bot_id).resolve()
-        found = (base / Path(*parts)).resolve() if parts else base
+        root, rest, _ = self._place(bot_id, self._parts(relative))
+        base = root.resolve()
+        found = (base / Path(*rest)).resolve() if rest else base
         if found != base and not found.is_relative_to(base):
             raise WorkspaceError(OUTSIDE)
         return found
 
     @contextlib.contextmanager
     def _at(
-        self, bot_id: str, parts: tuple[str, ...], *, missing: str, create: bool = False
+        self, root: Path, parts: tuple[str, ...], *, missing: str, create: bool = False
     ) -> Iterator[_Dir]:
-        """The folder `parts` inside hers, reached one name at a time without following a link."""
-        opened = [_Dir.root(self.folder(bot_id).resolve())]
+        """The folder `parts` inside `root` (hers, or one shared with her), reached one name at a time
+        without following a link."""
+        try:
+            opened = [_Dir.root(root)]
+        except OSError:
+            raise WorkspaceError(f"这个文件夹现在打不开了：{root}") from None
         try:
             for name in parts:
                 opened.append(opened[-1].sub(name, create=create, missing=missing))
@@ -263,12 +425,24 @@ class Workspace:
             for folder in reversed(opened):
                 folder.close()
 
+    def _hers(self, bot_id: str) -> Path:
+        return self.folder(bot_id).resolve()
+
     # -- looking --------------------------------------------------------------------------------------------
 
     def entries(self, bot_id: str, relative: str = "") -> list[Entry]:
         parts = self._parts(relative)
-        with self._at(bot_id, parts, missing=f"没有这个文件夹：{relative or '/'}") as here:
+        shared = self.shared(bot_id)
+        if parts == (SHARED,):
+            listed = []
+            for s in shared:
+                with contextlib.suppress(OSError):
+                    listed.append(Entry(s.name, True, 0, Path(s.path).stat().st_mtime))
+            return listed
+        root, rest, _ = self._place(bot_id, parts)
+        with self._at(root, rest, missing=f"没有这个文件夹：{relative or '/'}") as here:
             items = here.entries()
+        top = not parts
         found = [
             Entry(
                 name,
@@ -277,13 +451,15 @@ class Workspace:
                 info.st_mtime,
             )
             for name, info in items
-            if not secret_name(name)
+            # her real 共享/ only holds the container's mount points: the shared folders are shown instead
+            if not secret_name(name) and not (top and name == SHARED)
         ]
-        top = not parts
+        if top and shared:
+            found.append(Entry(SHARED, True, 0, 0.0))
         found.sort(
             key=lambda e: (
                 not e.folder,
-                {FOR_YOU: 0, RECEIVED: 1}.get(e.name, 2) if top else 2,
+                {FOR_YOU: 0, RECEIVED: 1, SHARED: 2}.get(e.name, 3) if top else 3,
                 e.name.lower(),
             )
         )
@@ -298,15 +474,15 @@ class Workspace:
         return total
 
     def open_file(self, bot_id: str, relative: str) -> tuple[BinaryIO, str, int]:
-        """One of her files open for reading (the caller closes it), its name and size."""
+        """One of her files, or one in a folder shared with her, open for reading (the caller closes it), its
+        name and size."""
         parts = self._parts(relative)
         missing = f"没有这个文件：{relative}"
-        if not parts:
-            raise WorkspaceError(missing)
-        with self._at(bot_id, parts[:-1], missing=missing) as here:
-            fd = here.open(parts[-1], os.O_RDONLY, missing=missing)
+        root, rest, _ = self._file(bot_id, parts, missing)
+        with self._at(root, rest[:-1], missing=missing) as here:
+            fd = here.open(rest[-1], os.O_RDONLY, missing=missing)
         info = _regular(fd, missing)
-        return os.fdopen(fd, "rb"), parts[-1], info.st_size
+        return os.fdopen(fd, "rb"), rest[-1], info.st_size
 
     def read(self, bot_id: str, relative: str, *, chars: int = READ_CHARS) -> str:
         handle, _, size = self.open_file(bot_id, relative)
@@ -328,22 +504,48 @@ class Workspace:
             raise WorkspaceError(f"工作区满了（上限 {self.limit / 1024**3:.0f} GB），先删掉些不用的东西")
 
     def write(self, bot_id: str, relative: str, data: bytes) -> str:
+        """Write a file of hers, or one in a writable shared folder (the old one kept in 旧版本/ first)."""
         parts = self._parts(relative)
-        if not parts:
-            raise WorkspaceError("要写的是文件，不是文件夹")
-        with self._at(bot_id, parts[:-1], missing=NOT_FOLDER, create=True) as here:
-            info = here.stat(parts[-1])
+        root, rest, link = self._file(bot_id, parts, "要写的是文件，不是文件夹")
+        if link is not None and not link.writable:
+            raise WorkspaceError(f"共享文件夹「{link.name}」是只读的，不能改")
+        with self._at(root, rest[:-1], missing=NOT_FOLDER, create=True) as here:
+            info = here.stat(rest[-1])
             if info is not None and stat.S_ISDIR(info.st_mode):
                 raise WorkspaceError("要写的是文件，不是文件夹")
             if info is not None and not stat.S_ISREG(info.st_mode):
                 raise WorkspaceError(OUTSIDE if stat.S_ISLNK(info.st_mode) else "这不是普通文件，写不了")
-            self._room(
-                bot_id, len(data), info.st_size if info is not None and stat.S_ISREG(info.st_mode) else 0
-            )
-            fd = here.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, missing=OUTSIDE)
+            if link is None:
+                self._room(bot_id, len(data), info.st_size if info is not None else 0)
+            elif len(data) > FILE_MAX:
+                raise WorkspaceError(f"单个文件不能超过 {FILE_MAX // 1024**2} MB")
+            elif info is not None:
+                self._keep_old(bot_id, link, rest, here)
+            fd = here.open(rest[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, missing=OUTSIDE)
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
         return "/".join(parts)
+
+    def _keep_old(self, bot_id: str, link: Shared, rest: tuple[str, ...], here: _Dir) -> str:
+        """The file about to be replaced in a shared folder, copied into her 旧版本/<folder>/…: its path."""
+        source = here.open(rest[-1], os.O_RDONLY, missing=OUTSIDE)
+        info = _regular(source, OUTSIDE)
+        with os.fdopen(source, "rb") as old:
+            self._room(bot_id, info.st_size)
+            shelf = (OLD, link.name, *rest[:-1])
+            pure = PurePosixPath(rest[-1])
+            name = f"{pure.stem}-{time.strftime('%Y%m%d-%H%M%S')}{pure.suffix}"
+            with self._at(self._hers(bot_id), shelf, missing=NOT_FOLDER, create=True) as kept:
+                candidate, n = name, 2
+                while True:
+                    try:
+                        fd = kept.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, missing=OUTSIDE)
+                        break
+                    except FileExistsError:
+                        candidate, n = _numbered(name, n), n + 1
+            with os.fdopen(fd, "wb") as copy:
+                shutil.copyfileobj(old, copy)
+        return "/".join((*shelf, candidate))
 
     def edit(self, bot_id: str, relative: str, old: str, new: str) -> str:
         handle, _, _ = self.open_file(bot_id, relative)
@@ -362,7 +564,7 @@ class Workspace:
 
     def _new_file(self, bot_id: str, shelf: str, name: str) -> tuple[int, str]:
         """A new file in `shelf` (给你的 / 收到的) named `name`, or name-2, name-3… when taken."""
-        with self._at(bot_id, (shelf,), missing=OUTSIDE, create=True) as here:
+        with self._at(self._hers(bot_id), (shelf,), missing=OUTSIDE, create=True) as here:
             candidate, n = name, 2
             while True:
                 try:
@@ -398,8 +600,10 @@ class Workspace:
         parts = self._parts(relative)
         if not parts or parts in ((FOR_YOU,), (RECEIVED,)):
             raise WorkspaceError("这个文件夹不能删")
+        if parts[0] == SHARED:
+            raise WorkspaceError("共享文件夹里的东西不在这里删；不想让她碰，就取消共享")
         missing = f"没有这个文件：{relative}"
-        with self._at(bot_id, parts[:-1], missing=missing) as here:
+        with self._at(self._hers(bot_id), parts[:-1], missing=missing) as here:
             info = here.stat(parts[-1])
             if info is None:
                 raise WorkspaceError(missing)
